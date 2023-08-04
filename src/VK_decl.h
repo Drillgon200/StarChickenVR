@@ -38,6 +38,7 @@ namespace VK {
 	OP(vkQueueSubmit)\
 	OP(vkDeviceWaitIdle)\
 	OP(vkCreateImageView)\
+	OP(vkDestroyImageView)\
 	OP(vkResetCommandPool)\
 	OP(vkQueueWaitIdle)\
 	OP(vkCmdBindPipeline)\
@@ -63,6 +64,7 @@ namespace VK {
 	OP(vkUnmapMemory)\
 	OP(vkFlushMappedMemoryRanges)\
 	OP(vkCmdCopyBuffer)\
+	OP(vkCmdCopyImage)\
 	OP(vkCmdCopyBufferToImage)\
 	OP(vkCmdCopyImageToBuffer)\
 	OP(vkCmdPipelineBarrier)\
@@ -72,7 +74,13 @@ namespace VK {
 	OP(vkWaitForFences)\
 	OP(vkResetFences)\
 	OP(vkCreateComputePipelines)\
-	OP(vkCmdDrawIndexed)
+	OP(vkCmdDrawIndexed)\
+	OP(vkCreateImage)\
+	OP(vkDestroyImage)\
+	OP(vkBindImageMemory)\
+	OP(vkGetBufferMemoryRequirements)\
+	OP(vkGetImageMemoryRequirements)\
+	OP(vkCmdBlitImage)
 
 #define OP(name) extern PFN_##name name;
 VK_INSTANCE_FUNCTIONS
@@ -85,7 +93,7 @@ struct SwapchainData {
 	// Set at init time when the swapchain is created
 	VkImage* swapchainImages;
 	VkImageView* swapchainImageViews;
-	VkFramebuffer* swapchainFramebuffers;
+	//VkFramebuffer* swapchainFramebuffers;
 	u32 swapchainImageCount;
 	// Set when a swapchain image is acquired
 	u32 swapchainImageIdx;
@@ -105,6 +113,33 @@ struct PushConstantMatrices {
 extern VkInstance vkInstance;
 extern VkPhysicalDevice physicalDevice;
 extern VkDevice logicalDevice;
+
+struct FramebufferAttachment {
+	VkDeviceMemory memory;
+	VkImage image;
+	VkImageView imageView;
+	b32 ownsImageView;
+};
+
+struct Framebuffer {
+	static constexpr u32 MAX_FRAMEBUFFER_ATTACHMENTS = 4;
+	VkFramebuffer framebuffer;
+	VkRenderPass renderPass;
+	u32 framebufferWidth;
+	u32 framebufferHeight;
+	FramebufferAttachment attachments[MAX_FRAMEBUFFER_ATTACHMENTS];
+	u32 attachmentCount;
+
+	Framebuffer& set_default();
+	Framebuffer& render_pass(VkRenderPass pass);
+	Framebuffer& dimensions(u32 width, u32 height);
+	Framebuffer& new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, u32 layerCount);
+	Framebuffer& existing_attachment(VkImageView view);
+	Framebuffer& build();
+	void destroy();
+};
+
+extern Framebuffer mainFramebuffer;
 
 extern u32 hostMemoryTypeIndex;
 extern u32 deviceMemoryTypeIndex;

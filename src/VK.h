@@ -55,6 +55,8 @@ VkQueue computeQueue;
 VKStaging::GPUUploadStager graphicsStager;
 VKGeometry::GeometryHandler geometryHandler;
 
+Framebuffer mainFramebuffer;
+
 VkCommandPool graphicsCommandPool;
 VkCommandBuffer graphicsCommandBuffer;
 
@@ -76,7 +78,7 @@ void vulkan_failure(const char* msg) {
 	ExitProcess(EXIT_FAILURE);
 }
 
-bool load_first_vulkan_functions() {
+b32 load_first_vulkan_functions() {
 	HMODULE vulkan = LoadLibraryA("vulkan-1.dll");
 	if (!vulkan) {
 		print("vulkan-1.dll not found! Perhaps upgrade your graphics drivers?\n");
@@ -115,10 +117,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 		print("\n");
 	}
 
+	// According to spec, I should always return VK_FALSE here, VK_TRUE is reserved for layers
 	return VK_FALSE;
 }
-
-//extern "C" int _fltused = 0;
 
 void init_vulkan() {
 	if (!load_first_vulkan_functions()) {
@@ -326,17 +327,251 @@ allNecessaryQueuesPresent:;
 	if (hostMemoryTypeIndex == U32_MAX || deviceMemoryTypeIndex == U32_MAX) {
 		abort("Did not have required vulkan memory types\n");
 	}
-
-	VkMemoryAllocateInfo memoryAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-	memoryAllocateInfo.allocationSize = 1;
-	memoryAllocateInfo.memoryTypeIndex = deviceHeapIdx;
-	VkDeviceMemory memory;
-	//vkCreateBuffer();
-	CHK_VK(vkAllocateMemory(logicalDevice, &memoryAllocateInfo, VK_NULL_HANDLE, &memory));
 	
 	graphicsStager.init(graphicsQueue, graphicsFamily);
 	geometryHandler.init(100 * ONE_MEGABYTE);
 }
+
+
+// We're going all in on builders this time. They're a really easy way to provide sensible defaults in a lightweight way
+
+Framebuffer& Framebuffer::set_default() {
+	renderPass = VK_NULL_HANDLE;
+	framebufferWidth = 0;
+	framebufferHeight = 0;
+	attachmentCount = 0;
+	return *this;
+}
+
+Framebuffer& Framebuffer::render_pass(VkRenderPass pass) {
+	renderPass = pass;
+	return *this;
+}
+
+Framebuffer& Framebuffer::dimensions(u32 width, u32 height) {
+	framebufferWidth = width;
+	framebufferHeight = height;
+	return *this;
+}
+
+Framebuffer& Framebuffer::new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, u32 layerCount) {
+	if (attachmentCount == MAX_FRAMEBUFFER_ATTACHMENTS) {
+		abort("Max framebuffer attachments exceeded");
+	}
+
+	VkImageCreateInfo imageInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imageInfo.flags = 0;
+	imageInfo.imageType = VK_IMAGE_TYPE_2D;
+	imageInfo.format = imageFormat;
+	imageInfo.extent.width = framebufferWidth;
+	imageInfo.extent.height = framebufferHeight;
+	imageInfo.extent.depth = 1;
+	imageInfo.mipLevels = 1;
+	imageInfo.arrayLayers = layerCount;
+	imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	imageInfo.usage = usage;
+	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	imageInfo.queueFamilyIndexCount = 0;
+	imageInfo.pQueueFamilyIndices = nullptr;
+	imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	VkImage image;
+	CHK_VK(vkCreateImage(logicalDevice, &imageInfo, nullptr, &image));
+	VkMemoryRequirements memoryRequirements;
+	vkGetImageMemoryRequirements(logicalDevice, image, &memoryRequirements);
+	if (!(memoryRequirements.memoryTypeBits & (1 << deviceMemoryTypeIndex))) {
+		abort("Could not create framebuffer image in device local memory");
+	}
+	VkDeviceMemory memory;
+	VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	allocInfo.allocationSize = memoryRequirements.size;
+	allocInfo.memoryTypeIndex = deviceMemoryTypeIndex;
+	VkMemoryDedicatedAllocateInfo dedicatedAllocInfo{ VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+	// TODO dedicated allocation
+	CHK_VK(vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &memory));
+	CHK_VK(vkBindImageMemory(logicalDevice, image, memory, 0));
+
+	VkImageViewCreateInfo imageViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	imageViewInfo.flags = 0;
+	imageViewInfo.image = image;
+	imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	imageViewInfo.format = imageFormat;
+	imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+	imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	imageViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+	imageViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+	imageViewInfo.subresourceRange.aspectMask = aspectMask;
+	imageViewInfo.subresourceRange.baseMipLevel = 0;
+	imageViewInfo.subresourceRange.levelCount = 1;
+	imageViewInfo.subresourceRange.baseArrayLayer = 0;
+	imageViewInfo.subresourceRange.layerCount = layerCount;
+	VkImageView view;
+	CHK_VK(vkCreateImageView(logicalDevice, &imageViewInfo, nullptr, &view));
+
+	FramebufferAttachment& attachment = attachments[attachmentCount++];
+	attachment.memory = memory;
+	attachment.image = image;
+	attachment.imageView = view;
+	attachment.ownsImageView = true;
+	return *this;
+}
+
+Framebuffer& Framebuffer::existing_attachment(VkImageView view) {
+	if (attachmentCount == MAX_FRAMEBUFFER_ATTACHMENTS) {
+		abort("Max framebuffer attachments exceeded");
+	}
+
+	FramebufferAttachment& attachment = attachments[attachmentCount++];
+	attachment.memory = VK_NULL_HANDLE;
+	attachment.image = VK_NULL_HANDLE;
+	attachment.imageView = view;
+	attachment.ownsImageView = false;
+	return *this;
+}
+
+Framebuffer& Framebuffer::build() {
+	if (renderPass == VK_NULL_HANDLE) {
+		abort("Render pass must be set to create framebuffer");
+	}
+	if (framebufferWidth == 0 || framebufferHeight == 0) {
+		abort("Framebuffer dimensions must be non-zero");
+	}
+
+	VkImageView attachmentViews[MAX_FRAMEBUFFER_ATTACHMENTS];
+	for (u32 i = 0; i < MAX_FRAMEBUFFER_ATTACHMENTS; i++) {
+		attachmentViews[i] = attachments[i].imageView;
+	}
+	VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	framebufferInfo.flags = 0;
+	framebufferInfo.renderPass = renderPass;
+	framebufferInfo.attachmentCount = attachmentCount;
+	framebufferInfo.pAttachments = attachmentViews;
+	framebufferInfo.width = framebufferWidth;
+	framebufferInfo.height = framebufferHeight;
+	framebufferInfo.layers = 1;
+	CHK_VK(vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &framebuffer));
+	return *this;;
+}
+
+void Framebuffer::destroy() {
+	vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
+	for (u32 i = 0; i < attachmentCount; i++) {
+		FramebufferAttachment& attachment = attachments[i];
+		if (attachment.ownsImageView) {
+			vkDestroyImageView(logicalDevice, attachment.imageView, nullptr);
+		}
+		if (attachment.image != VK_NULL_HANDLE) {
+			vkDestroyImage(logicalDevice, attachment.image, nullptr);
+		}
+		if (attachment.memory != VK_NULL_HANDLE) {
+			vkFreeMemory(logicalDevice, attachment.memory, nullptr);
+		}
+	}
+}
+
+struct RenderPassBuilder {
+	static constexpr u32 MAX_COLOR_ATTACHMENTS = 4;
+	static constexpr u32 MAX_DEPTH_ATTACHMENTS = 1;
+	static constexpr u32 MAX_ATTACHMENTS = MAX_COLOR_ATTACHMENTS + MAX_DEPTH_ATTACHMENTS;
+	VkAttachmentDescription attachmentDescriptions[MAX_ATTACHMENTS];
+	u32 numAttachments;
+	b32 hasDepthAttachment;
+
+	RenderPassBuilder& set_default() {
+		numAttachments = 0;
+		hasDepthAttachment = false;
+		return *this;
+	}
+
+	RenderPassBuilder& color_attachment(VkFormat format) {
+		if (hasDepthAttachment) {
+			abort("Color attachments must be defined before depth attachment");
+		}
+		if (numAttachments == MAX_COLOR_ATTACHMENTS) {
+			abort("Max attachment count exceeded");
+		}
+		VkAttachmentDescription& attachmentDesc = attachmentDescriptions[numAttachments++];
+		attachmentDesc.flags = 0;
+		attachmentDesc.format = format;
+		attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+		attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		return *this;
+	}
+
+	RenderPassBuilder& depth_attachment(VkFormat format) {
+		if (hasDepthAttachment) {
+			abort("Color attachments must be defined before depth attachment");
+		}
+		if (numAttachments == MAX_COLOR_ATTACHMENTS) {
+			abort("Max attachment count exceeded");
+		}
+		VkAttachmentDescription& attachmentDesc = attachmentDescriptions[numAttachments++];
+		attachmentDesc.flags = 0;
+		attachmentDesc.format = format;
+		attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+		attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		hasDepthAttachment = true;
+		return *this;
+	}
+
+	VkRenderPass build() {
+		VkAttachmentReference colorRefs[MAX_COLOR_ATTACHMENTS];
+		for (u32 i = 0; i < MAX_COLOR_ATTACHMENTS; i++) {
+			colorRefs[i].attachment = i;
+			colorRefs[i].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		}
+		VkAttachmentReference depthRef;
+		depthRef.attachment = numAttachments - 1;
+		depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		VkSubpassDescription subpass{};
+		subpass.flags = 0;
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.inputAttachmentCount = 0;
+		subpass.pInputAttachments = nullptr;
+		subpass.colorAttachmentCount = numAttachments - hasDepthAttachment;
+		subpass.pColorAttachments = colorRefs;
+		subpass.pResolveAttachments = nullptr;
+		if (hasDepthAttachment) {
+			subpass.pDepthStencilAttachment = &depthRef;
+		} else {
+			subpass.pDepthStencilAttachment = nullptr;
+		}
+		subpass.preserveAttachmentCount = 0;
+		subpass.pPreserveAttachments = nullptr;
+		VkRenderPassCreateInfo passInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+		passInfo.flags = 0;
+		passInfo.attachmentCount = numAttachments;
+		passInfo.pAttachments = attachmentDescriptions;
+		passInfo.subpassCount = 1;
+		passInfo.pSubpasses = &subpass;
+		passInfo.dependencyCount = 0;
+		passInfo.pDependencies = nullptr;
+		VkRenderPassMultiviewCreateInfo renderPassMultiview{ VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
+		renderPassMultiview.subpassCount = 1;
+		u32 viewMask = 0b11; // broadcast to both eyes
+		renderPassMultiview.pViewMasks = &viewMask;
+		renderPassMultiview.dependencyCount = 0;
+		renderPassMultiview.pViewOffsets = 0;
+		u32 correlationMask = 0b11; // the two eyes will be very similar
+		renderPassMultiview.correlationMaskCount = 1;
+		renderPassMultiview.pCorrelationMasks = &correlationMask;
+		passInfo.pNext = &renderPassMultiview;
+		VkRenderPass renderPass;
+		CHK_VK(vkCreateRenderPass(logicalDevice, &passInfo, nullptr, &renderPass));
+		return renderPass;
+	}
+};
 
 void create_render_targets() {
 	xrSwapchainData.swapchainImageViews = globalArena.alloc<VkImageView>(xrSwapchainData.swapchainImageCount);
@@ -346,10 +581,10 @@ void create_render_targets() {
 		imageViewInfo.image = xrSwapchainData.swapchainImages[i];
 		imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
 		imageViewInfo.format = OPENXR_SWAPCHAIN_IMAGE_FORMAT;
-		imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
-		imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
-		imageViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
-		imageViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
+		imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		imageViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		imageViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 		imageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		imageViewInfo.subresourceRange.baseMipLevel = 0;
 		imageViewInfo.subresourceRange.levelCount = 1;
@@ -358,64 +593,16 @@ void create_render_targets() {
 		CHK_VK(vkCreateImageView(logicalDevice, &imageViewInfo, VK_NULL_HANDLE, &xrSwapchainData.swapchainImageViews[i]));
 	}
 
-	VkAttachmentReference swapchainAttachmentRef{};
-	swapchainAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	swapchainAttachmentRef.attachment = 0;
-	VkSubpassDescription mainRenderPassSubpass{};
-	mainRenderPassSubpass.flags = 0;
-	mainRenderPassSubpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-	mainRenderPassSubpass.inputAttachmentCount = 0;
-	mainRenderPassSubpass.pInputAttachments = nullptr;
-	mainRenderPassSubpass.colorAttachmentCount = 1;
-	mainRenderPassSubpass.pColorAttachments = &swapchainAttachmentRef;
-	mainRenderPassSubpass.pResolveAttachments = nullptr;
-	mainRenderPassSubpass.pDepthStencilAttachment = nullptr;
-	mainRenderPassSubpass.preserveAttachmentCount = 0;
-	mainRenderPassSubpass.pPreserveAttachments = nullptr;
-
-	VkAttachmentDescription swapchainAttachment{};
-	swapchainAttachment.flags = 0;
-	swapchainAttachment.format = OPENXR_SWAPCHAIN_IMAGE_FORMAT;
-	swapchainAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-	swapchainAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	swapchainAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-	swapchainAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	swapchainAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	swapchainAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	swapchainAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-	VkRenderPassCreateInfo renderPassInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-	renderPassInfo.flags = 0;
-	renderPassInfo.attachmentCount = 1;
-	renderPassInfo.pAttachments = &swapchainAttachment;
-	renderPassInfo.subpassCount = 1;
-	renderPassInfo.pSubpasses = &mainRenderPassSubpass;
-	renderPassInfo.dependencyCount = 0;
-	renderPassInfo.pDependencies = nullptr;
-	VkRenderPassMultiviewCreateInfo renderPassMultiview{ VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
-	renderPassMultiview.subpassCount = 1;
-	u32 viewMask = 0b11; // broadcast to both eyes
-	renderPassMultiview.pViewMasks = &viewMask;
-	renderPassMultiview.dependencyCount = 0;
-	renderPassMultiview.pViewOffsets = 0;
-	u32 correlationMask = 0b11; // the two eyes will be very similar
-	renderPassMultiview.correlationMaskCount = 1;
-	renderPassMultiview.pCorrelationMasks = &correlationMask;
-	renderPassInfo.pNext = &renderPassMultiview;
-	CHK_VK(vkCreateRenderPass(logicalDevice, &renderPassInfo, VK_NULL_HANDLE, &mainRenderPass));
-
-	xrSwapchainData.swapchainFramebuffers = globalArena.alloc<VkFramebuffer>(xrSwapchainData.swapchainImageCount);
-	for (u32 i = 0; i < xrSwapchainData.swapchainImageCount; i++) {
-		VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-		framebufferInfo.flags = 0;
-		framebufferInfo.renderPass = mainRenderPass;
-		framebufferInfo.attachmentCount = 1;
-		framebufferInfo.pAttachments = &xrSwapchainData.swapchainImageViews[i];
-		framebufferInfo.width = XR::xrRenderWidth;
-		framebufferInfo.height = XR::xrRenderHeight;
-		framebufferInfo.layers = 1;
-		CHK_VK(vkCreateFramebuffer(logicalDevice, &framebufferInfo, VK_NULL_HANDLE, &xrSwapchainData.swapchainFramebuffers[i]));
-	}
+	mainRenderPass = RenderPassBuilder{}.set_default()
+		.color_attachment(VK_FORMAT_R8G8B8A8_SRGB)
+		.depth_attachment(VK_FORMAT_D32_SFLOAT)
+		.build();
+	mainFramebuffer.set_default()
+		.render_pass(mainRenderPass)
+		.dimensions(XR::xrRenderWidth, XR::xrRenderHeight)
+		.new_attachment(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 2)
+		.new_attachment(VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT, 2)
+		.build();
 }
 
 struct PipelineLayoutBuilder {
@@ -613,13 +800,13 @@ struct GraphicsPipelineBuilder {
 
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateInfo{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 		depthStencilStateInfo.flags = 0;
-		depthStencilStateInfo.depthTestEnable = VK_FALSE;
-		depthStencilStateInfo.depthWriteEnable = VK_FALSE;
+		depthStencilStateInfo.depthTestEnable = VK_TRUE;
+		depthStencilStateInfo.depthWriteEnable = VK_TRUE;
 		depthStencilStateInfo.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 		depthStencilStateInfo.depthBoundsTestEnable = VK_FALSE;
 		depthStencilStateInfo.stencilTestEnable = VK_FALSE;
-		depthStencilStateInfo.front = {};
-		depthStencilStateInfo.back = {};
+		depthStencilStateInfo.front = VkStencilOpState{};
+		depthStencilStateInfo.back = VkStencilOpState{};
 		depthStencilStateInfo.minDepthBounds = 0.0F;
 		depthStencilStateInfo.maxDepthBounds = 1.0F;
 
@@ -819,21 +1006,66 @@ void begin_frame() {
 
 	VkRenderPassBeginInfo renderPassBegin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 	renderPassBegin.renderPass = mainRenderPass;
-	renderPassBegin.framebuffer = xrSwapchainData.swapchainFramebuffers[xrSwapchainData.swapchainImageIdx];
-	renderPassBegin.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ XR::xrRenderWidth, XR::xrRenderHeight } };
-	renderPassBegin.clearValueCount = 1;
-	VkClearValue clearValue{};
-	clearValue.color.float32[0] = 0.0F;
-	clearValue.color.float32[1] = 0.0F;
-	clearValue.color.float32[2] = 0.0F;
-	clearValue.color.float32[3] = 0.0F;
-	renderPassBegin.pClearValues = &clearValue;
+	renderPassBegin.framebuffer = mainFramebuffer.framebuffer;
+	renderPassBegin.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ mainFramebuffer.framebufferWidth, mainFramebuffer.framebufferHeight } };
+	renderPassBegin.clearValueCount = 2;
+	VkClearValue clearValues[2]{};
+	clearValues[0].color.float32[0] = 0.0F;
+	clearValues[0].color.float32[1] = 0.0F;
+	clearValues[0].color.float32[2] = 0.0F;
+	clearValues[0].color.float32[3] = 0.0F;
+	clearValues[1].depthStencil.depth = 0.0F;
+	clearValues[1].depthStencil.stencil = 0;
+	renderPassBegin.pClearValues = clearValues;
 	vkCmdBeginRenderPass(graphicsCommandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
 
 }
 
 void end_frame() {
 	vkCmdEndRenderPass(graphicsCommandBuffer);
+
+	VkImageMemoryBarrier imageTransferBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+	imageTransferBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	imageTransferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	imageTransferBarrier.srcQueueFamilyIndex = graphicsFamily;
+	imageTransferBarrier.dstQueueFamilyIndex = graphicsFamily;
+	imageTransferBarrier.image = mainFramebuffer.attachments[0].image;
+	imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	imageTransferBarrier.subresourceRange.baseMipLevel = 0;
+	imageTransferBarrier.subresourceRange.levelCount = 1;
+	imageTransferBarrier.subresourceRange.baseArrayLayer = 0;
+	imageTransferBarrier.subresourceRange.layerCount = 2;
+	vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+	imageTransferBarrier.srcAccessMask = VK_ACCESS_NONE_KHR;
+	imageTransferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	imageTransferBarrier.image = VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx];
+	imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+
+	VkImageBlit finalBlit{};
+	finalBlit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	finalBlit.srcSubresource.mipLevel = 0;
+	finalBlit.srcSubresource.baseArrayLayer = 0;
+	finalBlit.srcSubresource.layerCount = 2;
+	finalBlit.srcOffsets[0] = VkOffset3D{ 0, 0, 0 };
+	finalBlit.srcOffsets[1] = VkOffset3D{ i32(VK::mainFramebuffer.framebufferWidth), i32(VK::mainFramebuffer.framebufferHeight), 1 };
+	finalBlit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	finalBlit.dstSubresource.mipLevel = 0;
+	finalBlit.dstSubresource.baseArrayLayer = 0;
+	finalBlit.dstSubresource.layerCount = 2;
+	finalBlit.dstOffsets[0] = VkOffset3D{ 0, 0, 0 };
+	finalBlit.dstOffsets[1] = VkOffset3D{ i32(XR::xrRenderWidth), i32(XR::xrRenderHeight), 1 };
+	VK::vkCmdBlitImage(graphicsCommandBuffer, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_NEAREST);
+
+	imageTransferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	imageTransferBarrier.dstAccessMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	imageTransferBarrier.image = VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx];
+	imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
 
 	CHK_VK(vkEndCommandBuffer(graphicsCommandBuffer));
 
@@ -851,11 +1083,6 @@ void end_frame() {
 }
 
 void end_vulkan() {
-	for (u32 i = 0; i < xrSwapchainData.swapchainImageCount; i++) {
-		if (xrSwapchainData.swapchainFramebuffers && xrSwapchainData.swapchainFramebuffers[i]) {
-			vkDestroyFramebuffer(logicalDevice, xrSwapchainData.swapchainFramebuffers[i], VK_NULL_HANDLE);
-		}
-	}
 	if (testPipeline) {
 		vkDestroyPipeline(logicalDevice, testPipeline, VK_NULL_HANDLE);
 	}

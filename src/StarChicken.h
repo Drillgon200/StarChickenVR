@@ -63,6 +63,8 @@ void draw_frame() {
 		ProjectiveTransformMatrix rightPerspectiveTransform;
 		rightPerspectiveTransform.generate(rightProjection, rightTransform);
 
+		VkCommandBuffer cmdBuf = VK::graphicsCommandBuffer;
+
 		VkViewport viewport{};
 		viewport.x = 0.0F;
 		viewport.y = 0.0F;
@@ -70,14 +72,14 @@ void draw_frame() {
 		viewport.height = XR::xrRenderHeight;
 		viewport.minDepth = 0.0F;
 		viewport.maxDepth = 1.0F;
-		VK::vkCmdSetViewport(VK::graphicsCommandBuffer, 0, 1, &viewport);
+		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 		VkRect2D scissor{};
 		scissor.offset.x = 0;
 		scissor.offset.y = 0;
 		scissor.extent.width = XR::xrRenderWidth;
 		scissor.extent.height = XR::xrRenderHeight;
-		VK::vkCmdSetScissor(VK::graphicsCommandBuffer, 0, 1, &scissor);
-		VK::vkCmdBindPipeline(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::testPipeline);
+		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
+		VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::testPipeline);
 
 		VK::PushConstantMatrices testMatrices{};
 		testMatrices.leftMatrixRow0 = Vector4f{ leftPerspectiveTransform.m00, leftPerspectiveTransform.m01, leftPerspectiveTransform.m02, leftPerspectiveTransform.m03 };
@@ -86,7 +88,7 @@ void draw_frame() {
 		testMatrices.rightMatrixRow0 = Vector4f{ rightPerspectiveTransform.m00, rightPerspectiveTransform.m01, rightPerspectiveTransform.m02, rightPerspectiveTransform.m03 };
 		testMatrices.rightMatrixRow1 = Vector4f{ rightPerspectiveTransform.m10, rightPerspectiveTransform.m11, rightPerspectiveTransform.m12, rightPerspectiveTransform.m13 };
 		testMatrices.rightMatrixRow3 = Vector4f{ rightPerspectiveTransform.m30, rightPerspectiveTransform.m31, rightPerspectiveTransform.m32, rightPerspectiveTransform.m33 };
-		VK::vkCmdPushConstants(VK::graphicsCommandBuffer, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::PushConstantMatrices), &testMatrices);
+		VK::vkCmdPushConstants(cmdBuf, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::PushConstantMatrices), &testMatrices);
 		
 		VKGeometry::Mesh& mesh = VK::testMesh;
 		VkBuffer buffers[4]{
@@ -101,9 +103,26 @@ void draw_frame() {
 			mesh.gpuGeometry.offset + mesh.normalsOffset,
 			mesh.gpuGeometry.offset + mesh.tangentsOffset
 		};
-		VK::vkCmdBindVertexBuffers(VK::graphicsCommandBuffer, 0, 4, buffers, offsets);
-		VK::vkCmdBindIndexBuffer(VK::graphicsCommandBuffer, mesh.gpuGeometry.buffer, mesh.gpuGeometry.offset + mesh.indicesOffset, VK_INDEX_TYPE_UINT16);
-		VK::vkCmdDrawIndexed(VK::graphicsCommandBuffer, VK::testMesh.indexCount, 1, 0, 0, 0);
+		VK::vkCmdBindVertexBuffers(cmdBuf, 0, 4, buffers, offsets);
+		VK::vkCmdBindIndexBuffer(cmdBuf, mesh.gpuGeometry.buffer, mesh.gpuGeometry.offset + mesh.indicesOffset, VK_INDEX_TYPE_UINT16);
+		VK::vkCmdDrawIndexed(cmdBuf, VK::testMesh.indexCount, 1, 0, 0, 0);
+
+		/*VkImageCopy copyRegion{};
+		copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.srcSubresource.mipLevel = 0;
+		copyRegion.srcSubresource.baseArrayLayer = 0;
+		copyRegion.srcSubresource.layerCount = 2;
+		copyRegion.srcOffset = VkOffset3D{ 0, 0, 0 };
+		copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.dstSubresource.mipLevel = 0;
+		copyRegion.dstSubresource.baseArrayLayer = 0;
+		copyRegion.dstSubresource.layerCount = 2;
+		copyRegion.dstOffset = VkOffset3D{ 0, 0, 0 };
+		copyRegion.extent.width = XR::xrRenderWidth;
+		copyRegion.extent.height = XR::xrRenderHeight;
+		copyRegion.extent.depth = 1;
+		VK::vkCmdCopyImage(cmdBuf, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, &copyRegion);
+		*/
 		
 	}
 	XrSwapchainImageWaitInfo swapchainWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };

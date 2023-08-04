@@ -32,10 +32,6 @@ struct GeometryHandler {
 	u64 offset;
 
 	void init(VkDeviceSize size) {
-		VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-		allocInfo.allocationSize = size;
-		allocInfo.memoryTypeIndex = VK::deviceMemoryTypeIndex;
-		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		memorySize = size;
 		offset = 0;
 
@@ -47,6 +43,15 @@ struct GeometryHandler {
 		bufferInfo.queueFamilyIndexCount = 1;
 		bufferInfo.pQueueFamilyIndices = &VK::graphicsFamily;
 		CHK_VK(VK::vkCreateBuffer(VK::logicalDevice, &bufferInfo, VK_NULL_HANDLE, &buffer));
+		VkMemoryRequirements memoryRequirements;
+		VK::vkGetBufferMemoryRequirements(VK::logicalDevice, buffer, &memoryRequirements);
+		if (!(memoryRequirements.memoryTypeBits & (1 << VK::deviceMemoryTypeIndex))) {
+			abort("Could not create geometry buffer in device local memory");
+		}
+		VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		allocInfo.allocationSize = memoryRequirements.size;
+		allocInfo.memoryTypeIndex = VK::deviceMemoryTypeIndex;
+		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 	}
 

@@ -26,15 +26,9 @@ struct GPUUploadStager {
 		queue = queueToUse;
 		currentBufferIdx = 0;
 
-		VkMemoryAllocateInfo memoryAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-		memoryAllocateInfo.allocationSize = 2 * UPLOAD_BUFFER_SIZE;
-		memoryAllocateInfo.memoryTypeIndex = VK::hostMemoryTypeIndex;
-		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &memoryAllocateInfo, VK_NULL_HANDLE, &memory));
-		void* memoryMapping;
-		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, UPLOAD_BUFFER_SIZE, 0, &memoryMapping));
+		VkMemoryRequirements memoryRequirements[2];
 		for (u32 i = 0; i < 2; i++) {
 			StagingBuffer& stagingBuffer = stagingBuffers[i];
-			stagingBuffer.memoryMapping = reinterpret_cast<byte*>(memoryMapping) + i * UPLOAD_BUFFER_SIZE;
 			VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 			bufferInfo.flags = 0;
 			bufferInfo.size = UPLOAD_BUFFER_SIZE;
@@ -43,7 +37,10 @@ struct GPUUploadStager {
 			bufferInfo.queueFamilyIndexCount = 1;
 			bufferInfo.pQueueFamilyIndices = &queueFamilyIdx;
 			CHK_VK(VK::vkCreateBuffer(VK::logicalDevice, &bufferInfo, VK_NULL_HANDLE, &stagingBuffer.uploadBuffer));
-			CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, stagingBuffer.uploadBuffer, memory, i * UPLOAD_BUFFER_SIZE));
+			VK::vkGetBufferMemoryRequirements(VK::logicalDevice, stagingBuffer.uploadBuffer, &memoryRequirements[i]);
+			if (!(memoryRequirements[i].memoryTypeBits & (1 << VK::hostMemoryTypeIndex))) {
+				abort("Could not create upload buffer in host visible memory");
+			}
 
 			VkCommandPoolCreateInfo cmdPoolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 			cmdPoolInfo.flags = 0;
@@ -65,6 +62,20 @@ struct GPUUploadStager {
 			CHK_VK(VK::vkCreateFence(VK::logicalDevice, &fenceInfo, VK_NULL_HANDLE, &stagingBuffer.uploadFinishedFence));
 		}
 		
+		VkMemoryAllocateInfo memoryAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		memoryAllocateInfo.allocationSize = ALIGN_HIGH(memoryRequirements[0].size, memoryRequirements[1].alignment) + memoryRequirements[1].size;
+		memoryAllocateInfo.memoryTypeIndex = VK::hostMemoryTypeIndex;
+		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &memoryAllocateInfo, VK_NULL_HANDLE, &memory));
+		void* memoryMapping;
+		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, UPLOAD_BUFFER_SIZE, 0, &memoryMapping));
+
+		u32 mappedDataOffset = 0;
+		for (u32 i = 0; i < 2; i++) {
+			mappedDataOffset = ALIGN_HIGH(mappedDataOffset, memoryRequirements[i].alignment);
+			CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, stagingBuffers[i].uploadBuffer, memory, mappedDataOffset));
+			stagingBuffers[i].memoryMapping = reinterpret_cast<byte*>(memoryMapping) + mappedDataOffset;
+			mappedDataOffset += memoryRequirements[i].size;
+		}
 	}
 
 	void destroy() {

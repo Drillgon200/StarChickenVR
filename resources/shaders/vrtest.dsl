@@ -22,7 +22,7 @@ struct ProjectiveMatrix {
 
 (output, builtin Position) vec4f& outPosition;
 (output, location 0) vec3f& passPos;
-(output, location 1) vec3f& passColor;
+(output, location 1) vec3f& passNormal;
 
 (push_constant) PushConstantMatrices& pushConstantMatrices;
 
@@ -50,7 +50,7 @@ struct ProjectiveMatrix {
 	f32 w = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row3);
 	outPosition = vec4f(x, -y, z, w);
 	passPos = pos.xyz;
-	passColor = vec3f(0.5F, 0.5F, 0.5F);
+	passNormal = inNormal;
 }
 
 //---------------------------------------------------------//
@@ -58,8 +58,9 @@ struct ProjectiveMatrix {
 
 (output, location 0) vec4f& outFragColor;
 (input, location 0) vec3f& passPosition;
-(input, location 1) vec3f& passColor;
+(input, location 1) vec3f& passNormal;
 
 (entrypoint) void frag_main(){
-	outFragColor = vec4f(passColor, 1.0F);
+	vec3f lightDir = vec3f(0.57735026919F, 0.57735026919F, 0.57735026919F);
+	outFragColor = vec4f(vec3f(dot(passNormal, lightDir) * 0.5F + 0.5F), 1.0F);
 }
