@@ -55,6 +55,11 @@ struct GPUUploadStager {
 			cmdBufInfo.commandBufferCount = 1;
 			CHK_VK(VK::vkAllocateCommandBuffers(VK::logicalDevice, &cmdBufInfo, &stagingBuffer.cmdBuffer));
 
+			VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+			beginInfo.flags = 0;
+			beginInfo.pInheritanceInfo = nullptr;
+			CHK_VK(VK::vkBeginCommandBuffer(stagingBuffer.cmdBuffer, &beginInfo));
+
 			VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 			fenceInfo.flags = 0;
 			CHK_VK(VK::vkCreateFence(VK::logicalDevice, &fenceInfo, VK_NULL_HANDLE, &stagingBuffer.uploadFinishedFence));
@@ -103,8 +108,10 @@ struct GPUUploadStager {
 			VkMappedMemoryRange memoryInvalidateRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
 			memoryInvalidateRange.memory = memory;
 			memoryInvalidateRange.offset = currentBufferIdx * UPLOAD_BUFFER_SIZE;
-			memoryInvalidateRange.size = stagingBuffer.offset;
+			memoryInvalidateRange.size = min<VkDeviceSize>(ALIGN_HIGH(stagingBuffer.offset, VK::physicalDeviceProperties.limits.nonCoherentAtomSize), UPLOAD_BUFFER_SIZE);
 			CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryInvalidateRange));
+
+			CHK_VK(VK::vkEndCommandBuffer(stagingBuffer.cmdBuffer));
 
 			VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
 			submitInfo.waitSemaphoreCount = 0;
@@ -124,9 +131,14 @@ struct GPUUploadStager {
 	void wait_for_staging_buffer(StagingBuffer& stagingBuffer) {
 		if (stagingBuffer.submitted) {
 			CHK_VK(VK::vkWaitForFences(VK::logicalDevice, 1, &stagingBuffer.uploadFinishedFence, VK_TRUE, U64_MAX));
+			CHK_VK(VK::vkResetFences(VK::logicalDevice, 1, &stagingBuffer.uploadFinishedFence));
 			CHK_VK(VK::vkResetCommandPool(VK::logicalDevice, stagingBuffer.commandPool, 0));
 			stagingBuffer.submitted = false;
 			stagingBuffer.offset = 0;
+			VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+			beginInfo.flags = 0;
+			beginInfo.pInheritanceInfo = nullptr;
+			CHK_VK(VK::vkBeginCommandBuffer(stagingBuffer.cmdBuffer, &beginInfo));
 		}
 	}
 };

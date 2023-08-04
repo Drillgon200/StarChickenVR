@@ -10,6 +10,21 @@ struct GeometryAllocation {
 	u64 size;
 };
 
+struct Mesh {
+	GeometryAllocation gpuGeometry;
+	u32 positionsOffset;
+	u32 texcoordsOffset;
+	u32 normalsOffset;
+	u32 tangentsOffset;
+	u32 indicesOffset;
+	u32 indexCount;
+};
+
+struct Model {
+	Mesh* mesh;
+	Matrix4x3f transform;
+};
+
 struct GeometryHandler {
 	VkDeviceMemory memory;
 	VkDeviceSize memorySize;
@@ -32,6 +47,7 @@ struct GeometryHandler {
 		bufferInfo.queueFamilyIndexCount = 1;
 		bufferInfo.pQueueFamilyIndices = &VK::graphicsFamily;
 		CHK_VK(VK::vkCreateBuffer(VK::logicalDevice, &bufferInfo, VK_NULL_HANDLE, &buffer));
+		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 	}
 
 	GeometryAllocation alloc(u64 size, u32 alignment) {

@@ -2,18 +2,23 @@
 #shader vertex
 #extension multiview
 
-(block) struct PushConstantMatrices {
-	vec4f leftMatrixRow0;
-	vec4f leftMatrixRow1;
-	vec4f leftMatrixRow3;
-	vec4f rightMatrixRow0;
-	vec4f rightMatrixRow1;
-	vec4f rightMatrixRow3;
+struct ProjectiveMatrix {
+	vec4f row0;
+	vec4f row1;
+	vec4f row3;
 }
 
-//(input, location 0) vec3f& inPosition;
+(block) struct PushConstantMatrices {
+	ProjectiveMatrix[2] eyeMatrices;
+}
+
 (input, builtin VertexIndex) i32& inVertexIndex;
 (input, builtin ViewIndex) i32& inViewIndex;
+
+(input, location 0) vec3f& inPosition;
+(input, location 1) vec2f& inTexcoord;
+(input, location 2) vec3f& inNormal;
+(input, location 3) vec3f& inTangent;
 
 (output, builtin Position) vec4f& outPosition;
 (output, location 0) vec3f& passPos;
@@ -23,6 +28,7 @@
 
 (entrypoint) void vert_main(){
 	//vec3f pos = vec3f(f32((inVertexIndex >>> 1) * 4 - 1), f32((inVertexIndex & 1) * 4 - 1), 0.0F);
+	/*
 	i32 vertexIdx = inVertexIndex;
 	vec4f pos;
 	if(vertexIdx == 0){
@@ -35,20 +41,16 @@
 		pos = vec4f(0.5F, 0.5F, 0.0F, 1.0F);
 		passColor = vec3f(0.0F, 0.0F, 1.0F);
 	}
-	if(inViewIndex == 0){
-		f32 x = dot(pos, pushConstantMatrices.leftMatrixRow0);
-		f32 y = dot(pos, pushConstantMatrices.leftMatrixRow1);
-		f32 z = 0.05F; // Near plane
-		f32 w = dot(pos, pushConstantMatrices.leftMatrixRow3);
-		outPosition = vec4f(x, -y, z, w);
-	} else {
-		f32 x = dot(pos, pushConstantMatrices.rightMatrixRow0);
-		f32 y = dot(pos, pushConstantMatrices.rightMatrixRow1);
-		f32 z = 0.05F; // Near plane
-		f32 w = dot(pos, pushConstantMatrices.rightMatrixRow3);
-		outPosition = vec4f(x, -y, z, w);
-	}
+	*/
+	vec4f pos = vec4f(inPosition - vec3f(0.0F, 2.0F, 0.0F), 1.0F);
+	i32 viewIdx = inViewIndex;
+	f32 x = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row0);
+	f32 y = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row1);
+	f32 z = 0.05F; // Near plane
+	f32 w = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row3);
+	outPosition = vec4f(x, -y, z, w);
 	passPos = pos.xyz;
+	passColor = vec3f(0.5F, 0.5F, 0.5F);
 }
 
 //---------------------------------------------------------//

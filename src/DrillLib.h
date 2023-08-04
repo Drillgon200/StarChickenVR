@@ -92,6 +92,102 @@ FINLINE T min(T a, T b) {
 	return a < b ? a : b;
 }
 
+FINLINE u32 bswap32(u32 val) {
+	return (val >> 24) | ((val >> 8) & 0xFF00) | ((val << 8) & 0xFF0000) | (val << 24);
+}
+
+FINLINE u16 bswap16(u16 val) {
+	return (val >> 8) | (val << 8);
+}
+
+struct String {
+	char* str;
+	u64 length;
+};
+
+struct ByteBuf {
+	byte* bytes;
+	u32 offset;
+	u32 capacity;
+	b32 failed;
+
+	void wrap(void* buffer, u32 size) {
+		bytes = reinterpret_cast<byte*>(buffer);
+		offset = 0;
+		capacity = size;
+		failed = false;
+	}
+
+	bool has_data_left(u32 size) {
+		return capacity - offset >= size;
+	}
+
+	u8 read_u8() {
+		u8 result;
+		if (capacity - offset < sizeof(u8)) {
+			result = 0;
+		} else {
+			result = bytes[offset];
+			offset += sizeof(u8);
+		}
+		return result;
+	}
+
+	u16 read_u16() {
+		u16 result;
+		if (capacity - offset < sizeof(u16)) {
+			result = 0;
+			failed = true;
+		} else {
+			result =
+				(bytes[offset + 0] << 0) |
+				(bytes[offset + 1] << 8);
+			offset += sizeof(u16);
+		}
+		return result;
+	}
+
+	u32 read_u32() {
+		u32 result;
+		if (capacity - offset < sizeof(u32)) {
+			result = 0;
+			failed = true;
+		} else {
+			result =
+				(bytes[offset + 0] << 0) |
+				(bytes[offset + 1] << 8) |
+				(bytes[offset + 2] << 16) |
+				(bytes[offset + 3] << 24);
+			offset += sizeof(u32);
+		}
+		return result;
+	}
+
+	f32 read_float() {
+		f32 result;
+		if (capacity - offset < sizeof(f32)) {
+			result = 0.0F;
+			failed = true;
+		} else {
+			memcpy(&result, bytes + offset, sizeof(f32));
+			offset += sizeof(f32);
+		}
+		return result;
+	}
+
+	String read_string() {
+		String result{};
+		result.length = read_u32();
+		if (failed || !has_data_left(result.length)) {
+			failed = true;
+		} else {
+			result.str = reinterpret_cast<char*>(bytes + offset);
+			offset += result.length;
+		}
+		return result;
+	}
+};
+
 struct MemoryArena {
 	u8* stackBase;
 	u64 stackMaxSize;
@@ -133,6 +229,17 @@ struct MemoryArena {
 	template<typename T>
 	T* alloc(u32 count) {
 		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
+		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
+		stackPtr += count * sizeof(T);
+		return result;
+	}
+
+	template<typename T>
+	T* alloc_and_commit(u32 count) {
+		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
+		for (u32 i = 0; i < count; i += PAGE_SIZE) {
+			*(stackBase + stackPtr + i) = 0;
+		}
 		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
 		stackPtr += count * sizeof(T);
 		return result;
@@ -348,10 +455,13 @@ T* read_full_file_to_arena(u32* count, MemoryArena& arena, const char* fileName)
 	HANDLE file = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (file != INVALID_HANDLE_VALUE) {
 		u32 size = GetFileSize(file, NULL);
-		result = arena.alloc<T>(size);
+		result = arena.alloc_and_commit<T>(size);
 		DWORD numBytesRead{};
 		if (!ReadFile(file, result, size, &numBytesRead, NULL)) {
 			result = nullptr;
+			DWORD fileReadError = GetLastError();
+			print("Failed to read file, code: ");
+			println_integer(fileReadError);
 		}
 		CloseHandle(file);
 		*count = numBytesRead / sizeof(T);

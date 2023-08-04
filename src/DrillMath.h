@@ -79,6 +79,12 @@ FINLINE f32 truncf(f32 f) {
 }
 
 #pragma pack(push, 1)
+struct Vector2f {
+	float x, y;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 struct Vector3f {
 	f32 x, y, z;
 
@@ -230,7 +236,7 @@ struct Matrix4x3f {
 		m10, m11, m12, y,
 		m20, m21, m22, z;
 
-	FINLINE void setzero() {
+	FINLINE Matrix4x3f& set_zero() {
 		m00 = 0.0F;
 		m01 = 0.0F;
 		m02 = 0.0F;
@@ -243,9 +249,10 @@ struct Matrix4x3f {
 		x = 0.0F;
 		y = 0.0F;
 		z = 0.0F;
+		return *this;
 	}
 
-	FINLINE void set_identity() {
+	FINLINE Matrix4x3f& set_identity() {
 		m00 = 1.0F;
 		m01 = 0.0F;
 		m02 = 0.0F;
@@ -258,6 +265,7 @@ struct Matrix4x3f {
 		x = 0.0F;
 		y = 0.0F;
 		z = 0.0F;
+		return *this;
 	}
 
 	FINLINE Matrix4x3f transpose_rotation() {
@@ -270,7 +278,7 @@ struct Matrix4x3f {
 
 	// This is a simplification of Quaternionf.rotate(), substituting in (1, 0, 0), (0, 1, 0), and (0, 0, 1) as the vectors to rotate
 	// Pretty much we just rotate the basis vectors of the identity matrix
-	FINLINE void set_rotation_from_quat(Quaternionf q) {
+	FINLINE Matrix4x3f& set_rotation_from_quat(Quaternionf q) {
 		f32 yy2 = 2.0F * q.y * q.y;
 		f32 zz2 = 2.0F * q.z * q.z;
 		f32 zw2 = 2.0F * q.z * q.w;
@@ -289,18 +297,21 @@ struct Matrix4x3f {
 		m02 = yw2 + xz2;
 		m12 = yz2 - xw2;
 		m22 = 1.0F - xx2 - yy2;
+		return *this;
 	}
 
-	FINLINE void set_offset(Vector3f offset) {
+	FINLINE Matrix4x3f& set_offset(Vector3f offset) {
 		x = offset.x;
 		y = offset.y;
 		z = offset.z;
+		return *this;
 	}
 
-	FINLINE void translate(Vector3f offset) {
+	FINLINE Matrix4x3f& translate(Vector3f offset) {
 		x += m00 * offset.x + m01 * offset.y + m02 * offset.z;
 		y += m10 * offset.x + m11 * offset.y + m12 * offset.z;
 		z += m20 * offset.x + m21 * offset.y + m22 * offset.z;
+		return *this;
 	}
 
 	FINLINE Matrix4x3f& rotate(Quaternionf q) {
@@ -373,7 +384,7 @@ struct Matrix4x3f {
 		}
 	}
 
-	FINLINE void set_row(u32 idx, Vector3f row) {
+	FINLINE Matrix4x3f& set_row(u32 idx, Vector3f row) {
 		if (idx == 0) {
 			m00 = row.x;
 			m01 = row.y;
@@ -387,8 +398,26 @@ struct Matrix4x3f {
 			m21 = row.y;
 			m22 = row.z;
 		}
+		return *this;
 	}
 };
+
+Matrix4x3f operator*(const Matrix4x3f& a, const Matrix4x3f& b) {
+	Matrix4x3f dst;
+	dst.m00 = a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20;
+	dst.m01 = a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21;
+	dst.m02 = a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22;
+	dst.x   = a.m00 * b.x   + a.m01 * b.y   + a.m02 * b.z   + a.x;
+	dst.m10 = a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20;
+	dst.m11 = a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21;
+	dst.m12 = a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22;
+	dst.y   = a.m10 * b.x   + a.m11 * b.y   + a.m12 * b.z   + a.y;
+	dst.m20 = a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20;
+	dst.m21 = a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21;
+	dst.m22 = a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22;
+	dst.z   = a.m20 * b.x   + a.m21 * b.y   + a.m22 * b.z   + a.z;
+	return dst;
+}
 
 struct PerspectiveProjection {
 	f32 xScale;

@@ -35,6 +35,8 @@ VkDebugUtilsMessengerEXT messenger;
 VkPhysicalDevice physicalDevice;
 VkDevice logicalDevice;
 
+VkPhysicalDeviceProperties physicalDeviceProperties;
+
 u32 graphicsFamily;
 u32 transferFamily;
 u32 computeFamily;
@@ -60,6 +62,8 @@ VkRenderPass mainRenderPass;
 
 VkPipelineLayout testPipelineLayout;
 VkPipeline testPipeline;
+
+VKGeometry::Mesh testMesh;
 
 SwapchainData xrSwapchainData;
 
@@ -224,6 +228,8 @@ void init_vulkan() {
 	ExitProcess(EXIT_FAILURE);
 allNecessaryQueuesPresent:;
 
+	vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
+
 	float queuePriority = 1.0F;
 	VkDeviceQueueCreateInfo queueCreateInfos[3]{};
 	u32 queueCreateInfoCount = 1;
@@ -301,8 +307,8 @@ allNecessaryQueuesPresent:;
 
 	hostMemoryTypeIndex = U32_MAX;
 	deviceMemoryTypeIndex = U32_MAX;
-	u32 hostHeapIdx;
-	u32 deviceHeapIdx;
+	u32 hostHeapIdx{};
+	u32 deviceHeapIdx{};
 	VkPhysicalDeviceMemoryProperties memoryProperties;
 	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
 	for (u32 i = 0; i < memoryProperties.memoryTypeCount; i++) {
@@ -311,7 +317,7 @@ allNecessaryQueuesPresent:;
 			hostHeapIdx = type.heapIndex;
 			hostMemoryTypeIndex = i;
 		}
-		if (type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT && (deviceHeapIdx == U32_MAX || memoryProperties.memoryHeaps[type.heapIndex].size > memoryProperties.memoryHeaps[deviceHeapIdx].size)) {
+		if (type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT && (deviceMemoryTypeIndex == U32_MAX || memoryProperties.memoryHeaps[type.heapIndex].size > memoryProperties.memoryHeaps[deviceHeapIdx].size)) {
 			deviceHeapIdx = type.heapIndex;
 			deviceMemoryTypeIndex = i;
 		}
@@ -460,18 +466,20 @@ struct DescriptorSetLayoutBuilder {
 
 struct GraphicsPipelineBuilder {
 	static constexpr u32 MAX_ATTRIBUTE_DESCRIPTIONS = 8;
+	static constexpr u32 MAX_BINDING_DESCRIPTIONS = 8;
 
 	const char* shaderFileName;
 	VkPipelineLayout pipelineLayout;
 	VkVertexInputAttributeDescription attributeDescriptions[MAX_ATTRIBUTE_DESCRIPTIONS];
+	VkVertexInputBindingDescription bindingDescriptions[MAX_BINDING_DESCRIPTIONS];
 	u32 attributeDescriptionCount;
-	u32 currentVertexFormatOffset;
+	u32 bindingDescriptionCount;
 
 	GraphicsPipelineBuilder& set_default() {
 		shaderFileName = nullptr;
 		pipelineLayout = VK_NULL_HANDLE;
 		attributeDescriptionCount = 0;
-		currentVertexFormatOffset = 0;
+		bindingDescriptionCount= 0;
 		return *this;
 	}
 
@@ -485,16 +493,30 @@ struct GraphicsPipelineBuilder {
 		return *this;
 	}
 
-	GraphicsPipelineBuilder& vertex_attribute(u32 location, VkFormat format, u32 size) {
+	GraphicsPipelineBuilder& vertex_attribute(u32 binding, u32 location, VkFormat format, u32 size) {
 		if (attributeDescriptionCount == MAX_ATTRIBUTE_DESCRIPTIONS) {
 			abort("Maximum attribute descriptions exceeded");
 		}
-		VkVertexInputAttributeDescription& desc = attributeDescriptions[attributeDescriptionCount++];
-		desc.location = location;
-		desc.binding = 0;
-		desc.format = format;
-		desc.offset = currentVertexFormatOffset;
-		currentVertexFormatOffset += size;
+		if (binding != bindingDescriptionCount && binding != bindingDescriptionCount - 1) {
+			abort("Binding must be either the same as current or the next binding");
+		}
+		if (binding == MAX_BINDING_DESCRIPTIONS) {
+			abort("Maximum binding descriptions exceeded");
+		}
+		VkVertexInputAttributeDescription& attr = attributeDescriptions[attributeDescriptionCount++];
+		VkVertexInputBindingDescription& bind = bindingDescriptions[binding];
+		if (binding == bindingDescriptionCount) {
+			bind.binding = binding;
+			bind.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+			bind.stride = 0;
+			bindingDescriptionCount++;
+		}
+		attr.location = location;
+		attr.binding = binding;
+		attr.format = format;
+		attr.offset = bind.stride;
+		bind.stride += size;
+		return *this;
 	}
 
 	VkPipeline build() {
@@ -535,14 +557,10 @@ struct GraphicsPipelineBuilder {
 		fragmentStageInfo.pName = "frag_main";
 		fragmentStageInfo.pSpecializationInfo = nullptr;
 
-		VkVertexInputBindingDescription bindingDescription;
-		bindingDescription.binding = 0;
-		bindingDescription.stride = currentVertexFormatOffset;
-		bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 		VkPipelineVertexInputStateCreateInfo vertexInputStateInfo{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 		vertexInputStateInfo.flags = 0;
-		vertexInputStateInfo.vertexBindingDescriptionCount = 1;
-		vertexInputStateInfo.pVertexBindingDescriptions = &bindingDescription;
+		vertexInputStateInfo.vertexBindingDescriptionCount = bindingDescriptionCount;
+		vertexInputStateInfo.pVertexBindingDescriptions = bindingDescriptions;
 		vertexInputStateInfo.vertexAttributeDescriptionCount = attributeDescriptionCount;
 		vertexInputStateInfo.pVertexAttributeDescriptions = attributeDescriptions;
 
@@ -722,9 +740,73 @@ struct ComputePipelineBuilder {
 	}
 };
 
+VKGeometry::Mesh load_mesh(const char* modelFileName) {
+	stackArena.push_frame();
+	u32 modelFileSize;
+	byte* modelData;
+	if (!(modelData = read_full_file_to_arena<byte>(&modelFileSize, stackArena, modelFileName))) {
+		print("Failed to read model file: ");
+		println(modelFileName);
+		abort("Failed to read model file");
+	}
+	ByteBuf modelFile{};
+	modelFile.wrap(modelData, modelFileSize);
+	if (modelFile.read_u32() != bswap32('DUCK')) {
+		abort("Model file header did not match DUCK");
+	}
+	if (modelFile.read_u32() < DRILL_LIB_MAKE_VERSION(3, 0, 0)) {
+		abort("Model file out of date");
+	}
+	String name = modelFile.read_string();
+	u32 numVerts = modelFile.read_u16();
+	u32 numIndices = modelFile.read_u16();
+	u32 vertexDataSize = numVerts * VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
+	u32 indexDataSize = numIndices * sizeof(u16);
+	if (modelFile.failed) {
+		print("Model failed read position: ");
+		println_integer(modelFile.offset);
+		abort("Model format incorrect");
+	}
+	if (!modelFile.has_data_left(vertexDataSize + indexDataSize)) {
+		abort("Model file does not have enough data for all vertices and indices");
+	}
+	VKGeometry::GeometryAllocation gpuModelData = geometryHandler.alloc(indexDataSize + vertexDataSize, 64);
+	graphicsStager.upload_to_buffer(gpuModelData.buffer, gpuModelData.offset, modelFile.bytes + modelFile.offset, vertexDataSize + indexDataSize);
+	Vector3f* vertices = reinterpret_cast<Vector3f*>(modelFile.bytes + modelFile.offset);
+	u16* indices = reinterpret_cast<u16*>(modelFile.bytes + modelFile.offset + vertexDataSize);
+	stackArena.pop_frame();
+
+	VKGeometry::Mesh mesh;
+	mesh.gpuGeometry = gpuModelData;
+	mesh.positionsOffset = 0;
+	mesh.texcoordsOffset = testMesh.positionsOffset + numVerts * sizeof(Vector3f);
+	mesh.normalsOffset = testMesh.texcoordsOffset + numVerts * sizeof(Vector2f);
+	mesh.tangentsOffset = testMesh.normalsOffset + numVerts * sizeof(Vector3f);
+	mesh.indicesOffset = vertexDataSize;
+	mesh.indexCount = numIndices;
+	return mesh;
+}
+
 void load_resources() {
-	testPipelineLayout = PipelineLayoutBuilder{}.set_default().push_constant(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantMatrices)).build();
-	testPipeline = GraphicsPipelineBuilder{}.set_default().layout(testPipelineLayout).shader_name("./resources/shaders/vrtest.spv").build();
+	
+	// Pipelines
+	testPipelineLayout = PipelineLayoutBuilder{}.set_default()
+		.push_constant(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantMatrices))
+		.build();
+	testPipeline = GraphicsPipelineBuilder{}.set_default()
+		.layout(testPipelineLayout)
+		.shader_name("./resources/shaders/vrtest.spv")
+		.vertex_attribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(Vector3f)) // pos
+		.vertex_attribute(1, 1, VK_FORMAT_R32G32_SFLOAT, sizeof(Vector2f)) // tex
+		.vertex_attribute(2, 2, VK_FORMAT_R32G32B32_SFLOAT, sizeof(Vector3f)) // norm
+		.vertex_attribute(3, 3, VK_FORMAT_R32G32B32_SFLOAT, sizeof(Vector3f)) // tan
+		.build();
+
+	// Models
+	testMesh = load_mesh("./resources/models/test_level.dmf");
+
+	graphicsStager.flush();
+	CHK_VK(vkDeviceWaitIdle(logicalDevice));
 }
 
 void begin_frame() {

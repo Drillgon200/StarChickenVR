@@ -78,6 +78,7 @@ void draw_frame() {
 		scissor.extent.height = XR::xrRenderHeight;
 		VK::vkCmdSetScissor(VK::graphicsCommandBuffer, 0, 1, &scissor);
 		VK::vkCmdBindPipeline(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::testPipeline);
+
 		VK::PushConstantMatrices testMatrices{};
 		testMatrices.leftMatrixRow0 = Vector4f{ leftPerspectiveTransform.m00, leftPerspectiveTransform.m01, leftPerspectiveTransform.m02, leftPerspectiveTransform.m03 };
 		testMatrices.leftMatrixRow1 = Vector4f{ leftPerspectiveTransform.m10, leftPerspectiveTransform.m11, leftPerspectiveTransform.m12, leftPerspectiveTransform.m13 };
@@ -86,7 +87,24 @@ void draw_frame() {
 		testMatrices.rightMatrixRow1 = Vector4f{ rightPerspectiveTransform.m10, rightPerspectiveTransform.m11, rightPerspectiveTransform.m12, rightPerspectiveTransform.m13 };
 		testMatrices.rightMatrixRow3 = Vector4f{ rightPerspectiveTransform.m30, rightPerspectiveTransform.m31, rightPerspectiveTransform.m32, rightPerspectiveTransform.m33 };
 		VK::vkCmdPushConstants(VK::graphicsCommandBuffer, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::PushConstantMatrices), &testMatrices);
-		VK::vkCmdDraw(VK::graphicsCommandBuffer, 3, 1, 0, 0);
+		
+		VKGeometry::Mesh& mesh = VK::testMesh;
+		VkBuffer buffers[4]{
+			mesh.gpuGeometry.buffer,
+			mesh.gpuGeometry.buffer,
+			mesh.gpuGeometry.buffer,
+			mesh.gpuGeometry.buffer
+		};
+		VkDeviceSize offsets[4]{
+			mesh.gpuGeometry.offset + mesh.positionsOffset,
+			mesh.gpuGeometry.offset + mesh.texcoordsOffset,
+			mesh.gpuGeometry.offset + mesh.normalsOffset,
+			mesh.gpuGeometry.offset + mesh.tangentsOffset
+		};
+		VK::vkCmdBindVertexBuffers(VK::graphicsCommandBuffer, 0, 4, buffers, offsets);
+		VK::vkCmdBindIndexBuffer(VK::graphicsCommandBuffer, mesh.gpuGeometry.buffer, mesh.gpuGeometry.offset + mesh.indicesOffset, VK_INDEX_TYPE_UINT16);
+		VK::vkCmdDrawIndexed(VK::graphicsCommandBuffer, VK::testMesh.indexCount, 1, 0, 0, 0);
+		
 	}
 	XrSwapchainImageWaitInfo swapchainWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
 	swapchainWaitInfo.timeout = XR_INFINITE_DURATION;

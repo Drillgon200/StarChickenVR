@@ -22,7 +22,8 @@ namespace VK {
 	OP(vkGetPhysicalDeviceSurfaceSupportKHR)\
 	OP(vkDestroyInstance)\
 	OP(vkDestroyDevice)\
-	OP(vkGetPhysicalDeviceMemoryProperties)
+	OP(vkGetPhysicalDeviceMemoryProperties)\
+	OP(vkGetPhysicalDeviceProperties)
 
 #define VK_DEVICE_FUNCTIONS OP(vkCmdBeginRenderPass)\
 	OP(vkCmdEndRenderPass)\
@@ -69,12 +70,16 @@ namespace VK {
 	OP(vkDestroyCommandPool)\
 	OP(vkCreateFence)\
 	OP(vkWaitForFences)\
-	OP(vkCreateComputePipelines)
+	OP(vkResetFences)\
+	OP(vkCreateComputePipelines)\
+	OP(vkCmdDrawIndexed)
 
 #define OP(name) extern PFN_##name name;
 VK_INSTANCE_FUNCTIONS
 VK_DEVICE_FUNCTIONS
 #undef OP
+
+static constexpr u32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector2f) + sizeof(Vector3f) + sizeof(Vector3f);
 
 struct SwapchainData {
 	// Set at init time when the swapchain is created
@@ -103,6 +108,8 @@ extern VkDevice logicalDevice;
 
 extern u32 hostMemoryTypeIndex;
 extern u32 deviceMemoryTypeIndex;
+
+extern VkPhysicalDeviceProperties physicalDeviceProperties;
 
 extern u32 graphicsFamily;
 extern u32 transferFamily;

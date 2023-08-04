@@ -23,6 +23,8 @@
 #define TURN_TO_RAD(x) ((x)*(2.0F*MATH_PI))
 #define RAD_TO_TURN(x) ((x)*(1.0F/(2.0F*MATH_PI)))
 
+#define DRILL_LIB_MAKE_VERSION(major, minor, patch) ((((major) & 0b1111111111) << 20) | (((minor) & 0b1111111111) << 10) | ((patch) & 0b1111111111))
+
 typedef signed __int8 i8;
 typedef unsigned __int8 u8;
 typedef signed __int16 i16;
