@@ -198,7 +198,8 @@
     <ClInclude Include="src\XR_decl.h" />
   </ItemGroup>
   <ItemGroup>
-    <Natvis Include="src\ArenaArrayList.natvis" />
+    <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />
+    <Natvis Include="src\VKGeometryVisualizeSkeleton.natvis" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?> 
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="VKGeometry::Skeleton">
+    <DisplayString Condition="boneCount == 0">empty</DisplayString>
+    <DisplayString>{&amp;bones[0], [boneCount]}</DisplayString>
+    <Expand>
+      <Item Name="boneCount">boneCount,d</Item>
+      <ArrayItems>
+        <Size>boneCount</Size>
+        <ValuePointer>&amp;bones[0]</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+</AutoVisualizer>

@@ -10,12 +10,34 @@ struct GeometryAllocation {
 	u64 size;
 };
 
+enum MeshType : u32 {
+	MESH_TYPE_NONE = 0,
+	MESH_TYPE_STATIC_GEOMETRY = 1,
+	MESH_TYPE_SKELTON_ANIMATED_GEOMETRY = 2
+};
+
+constexpr u32 BONE_PARENT_INVALID_IDX = U32_MAX;
+
+struct Bone {
+	Matrix4x3f bindTransform;
+	u32 parentIdx;
+};
+
+struct Skeleton {
+	u32 boneCount;
+	// Technically only valid in C, not C++, but MSVC supports it, and other compilers have extensions for flexible array members if I ever decide to switch
+	Bone bones[];
+};
+
 struct Mesh {
 	GeometryAllocation gpuGeometry;
+	Skeleton* skeletonData;
+	MeshType type;
 	u32 positionsOffset;
 	u32 texcoordsOffset;
 	u32 normalsOffset;
 	u32 tangentsOffset;
+	u32 boneIndicesAndWeightsOffset;
 	u32 indicesOffset;
 	u32 indexCount;
 };

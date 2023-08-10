@@ -88,6 +88,7 @@ VK_DEVICE_FUNCTIONS
 #undef OP
 
 static constexpr u32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector2f) + sizeof(Vector3f) + sizeof(Vector3f);
+static constexpr u32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(u8) * 4 + sizeof(u8) * 4;
 
 struct SwapchainData {
 	// Set at init time when the swapchain is created

@@ -42,7 +42,7 @@ struct ProjectiveMatrix {
 		passColor = vec3f(0.0F, 0.0F, 1.0F);
 	}
 	*/
-	vec4f pos = vec4f(inPosition - vec3f(0.0F, 2.0F, 0.0F), 1.0F);
+	vec4f pos = vec4f(inPosition - vec3f(0.0F, 8.5F, 12.35F), 1.0F);
 	i32 viewIdx = inViewIndex;
 	f32 x = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row0);
 	f32 y = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row1);

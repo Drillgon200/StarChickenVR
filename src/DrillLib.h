@@ -111,18 +111,18 @@ struct ByteBuf {
 	u32 capacity;
 	b32 failed;
 
-	void wrap(void* buffer, u32 size) {
+	FINLINE void wrap(void* buffer, u32 size) {
 		bytes = reinterpret_cast<byte*>(buffer);
 		offset = 0;
 		capacity = size;
 		failed = false;
 	}
 
-	bool has_data_left(u32 size) {
+	FINLINE bool has_data_left(u32 size) {
 		return capacity - offset >= size;
 	}
 
-	u8 read_u8() {
+	FINLINE u8 read_u8() {
 		u8 result;
 		if (capacity - offset < sizeof(u8)) {
 			result = 0;
@@ -133,7 +133,7 @@ struct ByteBuf {
 		return result;
 	}
 
-	u16 read_u16() {
+	FINLINE u16 read_u16() {
 		u16 result;
 		if (capacity - offset < sizeof(u16)) {
 			result = 0;
@@ -147,7 +147,7 @@ struct ByteBuf {
 		return result;
 	}
 
-	u32 read_u32() {
+	FINLINE u32 read_u32() {
 		u32 result;
 		if (capacity - offset < sizeof(u32)) {
 			result = 0;
@@ -163,7 +163,7 @@ struct ByteBuf {
 		return result;
 	}
 
-	f32 read_float() {
+	FINLINE f32 read_float() {
 		f32 result;
 		if (capacity - offset < sizeof(f32)) {
 			result = 0.0F;
@@ -175,7 +175,24 @@ struct ByteBuf {
 		return result;
 	}
 
-	String read_string() {
+	FINLINE Matrix4x3f read_matrix4x3f() {
+		Matrix4x3f m;
+		m.m00 = read_float();
+		m.m01 = read_float();
+		m.m02 = read_float();
+		m.x = read_float();
+		m.m10 = read_float();
+		m.m11 = read_float();
+		m.m12 = read_float();
+		m.y = read_float();
+		m.m20 = read_float();
+		m.m21 = read_float();
+		m.m22 = read_float();
+		m.z = read_float();
+		return m;
+	}
+
+	FINLINE String read_string() {
 		String result{};
 		result.length = read_u32();
 		if (failed || !has_data_left(result.length)) {
@@ -231,6 +248,14 @@ struct MemoryArena {
 		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
 		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
 		stackPtr += count * sizeof(T);
+		return result;
+	}
+
+	template<typename T>
+	T* alloc_bytes(u32 numBytes) {
+		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
+		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
+		stackPtr += numBytes;
 		return result;
 	}
 

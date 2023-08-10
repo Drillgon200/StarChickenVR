@@ -16,6 +16,8 @@
 #define ARRAY_COUNT(arr) (sizeof(arr)/sizeof(arr[0]))
 #define ALIGN_LOW(num, alignment) ((num) & ~((alignment) - 1))
 #define ALIGN_HIGH(num, alignment) (((num) + ((alignment) - 1)) & ~((alignment) - 1))
+// Undefined behavior for sure, but reimplementing many parts of the standard library pretty much requires that
+#define OFFSET_OF(type, member) __builtin_offsetof(type, member) //(reinterpret_cast<uptr>(&reinterpret_cast<type*>(uptr(0))->member))
 
 #define MATH_PI 3.1415926535F
 #define DEG_TO_RAD(x) ((x)*(MATH_PI/180.0F))

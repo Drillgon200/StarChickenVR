@@ -66,6 +66,7 @@ VkPipelineLayout testPipelineLayout;
 VkPipeline testPipeline;
 
 VKGeometry::Mesh testMesh;
+VKGeometry::Mesh testAnimMesh;
 
 SwapchainData xrSwapchainData;
 
@@ -927,7 +928,45 @@ struct ComputePipelineBuilder {
 	}
 };
 
-VKGeometry::Mesh load_mesh(const char* modelFileName) {
+enum DMFObjectID : u32 {
+	DMF_OBJECT_ID_NONE = 0,
+	DMF_OBJECT_ID_MESH = 1,
+	DMF_OBJECT_ID_ANIMATED_MESH = 2
+};
+
+void read_dmf_mesh(VKGeometry::Mesh* mesh, ByteBuf& modelFile, bool hasAnimationData) {
+	u32 numVerts = modelFile.read_u32();
+	u32 numIndices = modelFile.read_u32();
+	u32 vertexDataSize = numVerts * VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
+	if (hasAnimationData) {
+		vertexDataSize += numVerts * VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE;
+	}
+	u32 indexDataSize = numIndices * sizeof(u16);
+	if (modelFile.failed) {
+		print("Model failed read position: ");
+		println_integer(modelFile.offset);
+		abort("Model format incorrect");
+	}
+	if (!modelFile.has_data_left(vertexDataSize + indexDataSize)) {
+		abort("Model file does not have enough data for all vertices and indices");
+	}
+	VKGeometry::GeometryAllocation gpuModelData = geometryHandler.alloc(indexDataSize + vertexDataSize, 64);
+	graphicsStager.upload_to_buffer(gpuModelData.buffer, gpuModelData.offset, modelFile.bytes + modelFile.offset, vertexDataSize + indexDataSize);
+	Vector3f* vertices = reinterpret_cast<Vector3f*>(modelFile.bytes + modelFile.offset);
+	u16* indices = reinterpret_cast<u16*>(modelFile.bytes + modelFile.offset + vertexDataSize);
+	stackArena.pop_frame();
+
+	mesh->gpuGeometry = gpuModelData;
+	mesh->positionsOffset = 0;
+	mesh->texcoordsOffset = mesh->positionsOffset + numVerts * sizeof(Vector3f);
+	mesh->normalsOffset = mesh->texcoordsOffset + numVerts * sizeof(Vector2f);
+	mesh->tangentsOffset = mesh->normalsOffset + numVerts * sizeof(Vector3f);
+	mesh->boneIndicesAndWeightsOffset = mesh->tangentsOffset + numVerts * sizeof(Vector3f);
+	mesh->indicesOffset = vertexDataSize;
+	mesh->indexCount = numIndices;
+}
+
+VKGeometry::Mesh load_dmf(const char* modelFileName) {
 	stackArena.push_frame();
 	u32 modelFileSize;
 	byte* modelData;
@@ -944,33 +983,42 @@ VKGeometry::Mesh load_mesh(const char* modelFileName) {
 	if (modelFile.read_u32() < DRILL_LIB_MAKE_VERSION(3, 0, 0)) {
 		abort("Model file out of date");
 	}
-	String name = modelFile.read_string();
-	u32 numVerts = modelFile.read_u16();
-	u32 numIndices = modelFile.read_u16();
-	u32 vertexDataSize = numVerts * VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
-	u32 indexDataSize = numIndices * sizeof(u16);
+	u32 numObjects = modelFile.read_u32();
+	if (numObjects == 0) {
+		abort("No objects in file");
+	}
+
+	VKGeometry::Mesh mesh{};
+	DMFObjectID objectType = static_cast<DMFObjectID>(modelFile.read_u32());
+	if (objectType == DMF_OBJECT_ID_MESH) {
+		mesh.type = VKGeometry::MESH_TYPE_STATIC_GEOMETRY;
+		String meshName = modelFile.read_string();
+		read_dmf_mesh(&mesh, modelFile, false);
+	} else if (objectType == DMF_OBJECT_ID_ANIMATED_MESH) {
+		String name = modelFile.read_string();
+		u32 numBones = modelFile.read_u32();
+		u32 skeletonSize = OFFSET_OF(VKGeometry::Skeleton, bones[numBones]);
+		VKGeometry::Skeleton* skeleton = globalArena.alloc_bytes<VKGeometry::Skeleton>(skeletonSize);
+		skeleton->boneCount = numBones;
+		for (u32 boneIdx = 0; boneIdx < numBones; boneIdx++) {
+			String boneName = modelFile.read_string();
+			skeleton->bones[boneIdx].parentIdx = modelFile.read_u32();
+			skeleton->bones[boneIdx].bindTransform = modelFile.read_matrix4x3f();
+		}
+		mesh.type = VKGeometry::MESH_TYPE_SKELTON_ANIMATED_GEOMETRY;
+		u32 numSubMeshes = modelFile.read_u32();
+		read_dmf_mesh(&mesh, modelFile, true);
+		mesh.skeletonData = skeleton;
+	} else {
+		print("Unknown object id in DMF parsing\n");
+	}
+
 	if (modelFile.failed) {
-		print("Model failed read position: ");
-		println_integer(modelFile.offset);
-		abort("Model format incorrect");
+		abort("Reading model file failed");
 	}
-	if (!modelFile.has_data_left(vertexDataSize + indexDataSize)) {
-		abort("Model file does not have enough data for all vertices and indices");
-	}
-	VKGeometry::GeometryAllocation gpuModelData = geometryHandler.alloc(indexDataSize + vertexDataSize, 64);
-	graphicsStager.upload_to_buffer(gpuModelData.buffer, gpuModelData.offset, modelFile.bytes + modelFile.offset, vertexDataSize + indexDataSize);
-	Vector3f* vertices = reinterpret_cast<Vector3f*>(modelFile.bytes + modelFile.offset);
-	u16* indices = reinterpret_cast<u16*>(modelFile.bytes + modelFile.offset + vertexDataSize);
+	
 	stackArena.pop_frame();
 
-	VKGeometry::Mesh mesh;
-	mesh.gpuGeometry = gpuModelData;
-	mesh.positionsOffset = 0;
-	mesh.texcoordsOffset = testMesh.positionsOffset + numVerts * sizeof(Vector3f);
-	mesh.normalsOffset = testMesh.texcoordsOffset + numVerts * sizeof(Vector2f);
-	mesh.tangentsOffset = testMesh.normalsOffset + numVerts * sizeof(Vector3f);
-	mesh.indicesOffset = vertexDataSize;
-	mesh.indexCount = numIndices;
 	return mesh;
 }
 
@@ -990,7 +1038,8 @@ void load_resources() {
 		.build();
 
 	// Models
-	testMesh = load_mesh("./resources/models/test_level.dmf");
+	testMesh = load_dmf("./resources/models/test_level.dmf");
+	testAnimMesh = load_dmf("./resources/models/test_anim.dmf");
 
 	graphicsStager.flush();
 	CHK_VK(vkDeviceWaitIdle(logicalDevice));
