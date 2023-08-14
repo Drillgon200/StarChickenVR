@@ -194,12 +194,13 @@ struct ByteBuf {
 
 	FINLINE String read_string() {
 		String result{};
-		result.length = read_u32();
-		if (failed || !has_data_left(result.length)) {
+		u32 length = read_u32();
+		if (failed || !has_data_left(length)) {
 			failed = true;
 		} else {
+			result.length = length;
 			result.str = reinterpret_cast<char*>(bytes + offset);
-			offset += result.length;
+			offset += length;
 		}
 		return result;
 	}
@@ -262,8 +263,10 @@ struct MemoryArena {
 	template<typename T>
 	T* alloc_and_commit(u32 count) {
 		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
-		for (u32 i = 0; i < count; i += PAGE_SIZE) {
-			*(stackBase + stackPtr + i) = 0;
+		// Volatile, just in case the compiler somehow optimizes it out otherwise (though I don't think it reasonably could)
+		volatile u8* commitBase = stackBase + stackPtr;
+		for (u32 i = 0; i < count * sizeof(T); i += PAGE_SIZE) {
+			*(commitBase + i) = 0;
 		}
 		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
 		stackPtr += count * sizeof(T);
@@ -399,11 +402,11 @@ LONG WINAPI page_fault_handler(PEXCEPTION_POINTERS exceptionPointers) {
 	return result;
 }
 
-HFILE consoleOutput;
+HANDLE consoleOutput;
 
 void print(const char* str) {
 	DWORD bytesWritten;
-	WriteFile(reinterpret_cast<HANDLE>(consoleOutput), str, strlen(str), &bytesWritten, nullptr);
+	WriteFile(consoleOutput, str, DWORD(strlen(str)), &bytesWritten, nullptr);
 }
 
 void println() {
@@ -467,7 +470,7 @@ void println_float(f32 f) {
 	print("\n");
 }
 
-void abort(const char* message) {
+[[noreturn]] void abort(const char* message) {
 	print(message);
 	__debugbreak();
 	ExitProcess(EXIT_FAILURE);
@@ -495,8 +498,7 @@ T* read_full_file_to_arena(u32* count, MemoryArena& arena, const char* fileName)
 }
 
 bool drill_lib_init() {
-	OFSTRUCT fstr{};
-	consoleOutput = OpenFile("CON", &fstr, OF_WRITE);
+	consoleOutput = CreateFileA("CON", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
 	AddVectoredExceptionHandler(1, page_fault_handler);
 	bool returnSuccess = false;
 	if (!stackArena.init(ONE_GIGABYTE)) {

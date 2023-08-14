@@ -330,8 +330,6 @@ NODISCARD OpenXRFrameInfo begin_frame() {
 	XrFrameBeginInfo frameBeginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
 	CHK_XR(xrBeginFrame(session, &frameBeginInfo));
 
-	OpenXRFrameInfo frameInfo;
-
 	XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
 	viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 	viewLocateInfo.displayTime = frameState.predictedDisplayTime;

@@ -15,7 +15,7 @@
 
 #define ARRAY_COUNT(arr) (sizeof(arr)/sizeof(arr[0]))
 #define ALIGN_LOW(num, alignment) ((num) & ~((alignment) - 1))
-#define ALIGN_HIGH(num, alignment) (((num) + ((alignment) - 1)) & ~((alignment) - 1))
+#define ALIGN_HIGH(num, alignment) (((num) + (static_cast<decltype(num)>(alignment) - 1)) & ~(static_cast<decltype(num)>(alignment) - 1))
 // Undefined behavior for sure, but reimplementing many parts of the standard library pretty much requires that
 #define OFFSET_OF(type, member) __builtin_offsetof(type, member) //(reinterpret_cast<uptr>(&reinterpret_cast<type*>(uptr(0))->member))
 
@@ -65,4 +65,4 @@ void print_integer(u64 num);
 void print_float(f32 f);
 void println_integer(u64 num);
 void println_float(f32 f);
-void abort(const char* message);
+[[noreturn]] void abort(const char* message);

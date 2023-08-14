@@ -74,7 +74,7 @@ struct GPUUploadStager {
 			mappedDataOffset = ALIGN_HIGH(mappedDataOffset, memoryRequirements[i].alignment);
 			CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, stagingBuffers[i].uploadBuffer, memory, mappedDataOffset));
 			stagingBuffers[i].memoryMapping = reinterpret_cast<byte*>(memoryMapping) + mappedDataOffset;
-			mappedDataOffset += memoryRequirements[i].size;
+			mappedDataOffset += u32(memoryRequirements[i].size);
 		}
 	}
 
@@ -96,7 +96,7 @@ struct GPUUploadStager {
 		while (size) {
 			StagingBuffer& stagingBuffer = stagingBuffers[currentBufferIdx];
 			wait_for_staging_buffer(stagingBuffer);
-			u32 amountToCopy = min<u64>(size, UPLOAD_BUFFER_SIZE - stagingBuffer.offset);
+			u32 amountToCopy = u32(min<u64>(size, UPLOAD_BUFFER_SIZE - stagingBuffer.offset));
 			memcpy(reinterpret_cast<byte*>(stagingBuffer.memoryMapping) + stagingBuffer.offset, src, amountToCopy);
 			VkBufferCopy region{};
 			region.srcOffset = stagingBuffer.offset;
@@ -118,7 +118,7 @@ struct GPUUploadStager {
 		if (!stagingBuffer.submitted && stagingBuffer.offset != 0) {
 			VkMappedMemoryRange memoryInvalidateRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
 			memoryInvalidateRange.memory = memory;
-			memoryInvalidateRange.offset = currentBufferIdx * UPLOAD_BUFFER_SIZE;
+			memoryInvalidateRange.offset = VkDeviceSize(currentBufferIdx) * UPLOAD_BUFFER_SIZE;
 			memoryInvalidateRange.size = min<VkDeviceSize>(ALIGN_HIGH(stagingBuffer.offset, VK::physicalDeviceProperties.limits.nonCoherentAtomSize), UPLOAD_BUFFER_SIZE);
 			CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryInvalidateRange));
 

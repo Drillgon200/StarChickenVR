@@ -761,8 +761,8 @@ struct GraphicsPipelineBuilder {
 		VkViewport viewport{};
 		viewport.x = 0.0F;
 		viewport.y = 0.0F;
-		viewport.width = XR::xrRenderWidth;
-		viewport.height = XR::xrRenderHeight;
+		viewport.width = f32(XR::xrRenderWidth);
+		viewport.height = f32(XR::xrRenderHeight);
 		viewport.minDepth = 0.0F;
 		viewport.maxDepth = 1.0F;
 		VkRect2D scissor{};
@@ -950,8 +950,8 @@ void read_dmf_mesh(VKGeometry::Mesh* mesh, ByteBuf& modelFile, bool hasAnimation
 	if (!modelFile.has_data_left(vertexDataSize + indexDataSize)) {
 		abort("Model file does not have enough data for all vertices and indices");
 	}
-	VKGeometry::GeometryAllocation gpuModelData = geometryHandler.alloc(indexDataSize + vertexDataSize, 64);
-	graphicsStager.upload_to_buffer(gpuModelData.buffer, gpuModelData.offset, modelFile.bytes + modelFile.offset, vertexDataSize + indexDataSize);
+	VKGeometry::GeometryAllocation gpuModelData = geometryHandler.alloc(u64(indexDataSize) + vertexDataSize, 64);
+	graphicsStager.upload_to_buffer(gpuModelData.buffer, gpuModelData.offset, modelFile.bytes + modelFile.offset, u64(vertexDataSize) + indexDataSize);
 	Vector3f* vertices = reinterpret_cast<Vector3f*>(modelFile.bytes + modelFile.offset);
 	u16* indices = reinterpret_cast<u16*>(modelFile.bytes + modelFile.offset + vertexDataSize);
 	stackArena.pop_frame();

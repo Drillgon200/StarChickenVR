@@ -68,8 +68,8 @@ void draw_frame() {
 		VkViewport viewport{};
 		viewport.x = 0.0F;
 		viewport.y = 0.0F;
-		viewport.width = XR::xrRenderWidth;
-		viewport.height = XR::xrRenderHeight;
+		viewport.width = f32(XR::xrRenderWidth);
+		viewport.height = f32(XR::xrRenderHeight);
 		viewport.minDepth = 0.0F;
 		viewport.maxDepth = 1.0F;
 		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);

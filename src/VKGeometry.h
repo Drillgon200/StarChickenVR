@@ -16,14 +16,15 @@ enum MeshType : u32 {
 	MESH_TYPE_SKELTON_ANIMATED_GEOMETRY = 2
 };
 
-constexpr u32 BONE_PARENT_INVALID_IDX = U32_MAX;
-
 struct Bone {
+	static constexpr u32 PARENT_INVALID_IDX = U32_MAX;
+
 	Matrix4x3f bindTransform;
 	u32 parentIdx;
 };
 
 struct Skeleton {
+
 	u32 boneCount;
 	// Technically only valid in C, not C++, but MSVC supports it, and other compilers have extensions for flexible array members if I ever decide to switch
 	Bone bones[];
