@@ -22,16 +22,25 @@ u64 timerFrequency;
 f64 deltaTime;
 f64 totalTime;
 
+VKGeometry::StaticModel worldModel;
+VKGeometry::SkeletalModel handModel;
+
+void setup_scene() {
+	VKGeometry::make_static_model(&worldModel, VK::testMesh);
+	worldModel.transform.translate(-Vector3f{ 0.0F, 8.5F, 12.35F });
+	VKGeometry::make_skeletal_model(&handModel, VK::testAnimMesh);
+	handModel.transform.translate(-Vector3f{ -3.0F, 5.0F, 12.35F });
+}
+
 void draw_frame() {
 	LARGE_INTEGER perfCounter;
 	if (!QueryPerformanceCounter(&perfCounter)) {
 		abort("Could not get performance counter");
 	}
 	prevFrameTime = frameTime;
-	frameTime = perfCounter.QuadPart;
+	frameTime = u64(perfCounter.QuadPart);
 	deltaTime = f64(frameTime - prevFrameTime) / f64(timerFrequency);
 	totalTime += deltaTime;
-	//println_float(totalTime);
 
 	stackArena.push_frame();
 	XR::OpenXRFrameInfo openxrFrameBeginInfo = XR::begin_frame();
@@ -58,12 +67,54 @@ void draw_frame() {
 		rightTransform.set_rotation_from_quat(XR::xr_quat_to_drillmath_quat(openxrFrameBeginInfo.rightEyePose.orientation).conjugate());
 		rightTransform.translate(-XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.rightEyePose.position));
 
-		ProjectiveTransformMatrix leftPerspectiveTransform;
-		leftPerspectiveTransform.generate(leftProjection, leftTransform);
-		ProjectiveTransformMatrix rightPerspectiveTransform;
-		rightPerspectiveTransform.generate(rightProjection, rightTransform);
+		u32 boneCount = handModel.mesh->skeletonData->boneCount;
+		Matrix4x3f* matrices = stackArena.alloc<Matrix4x3f>(boneCount);
+		for (u32 i = 0; i < boneCount; i++) {
+			matrices[i].set_identity();
+		}
+		matrices[1].translate(Vector3f{ sinf(totalTime * 0.75F + 0.5F), sinf(totalTime * 0.25F) * 0.75F, sinf(totalTime * 0.75F + 0.25F) });
+		handModel.skeletonMatrixOffset = VK::skinningHandler.alloc_and_set(boneCount, matrices);
+		VK::skinningHandler.flush_memory();
+		handModel.skinnedVerticesOffset = VK::geometryHandler.alloc_skinned_result(handModel.mesh->geometry.verticesCount);
+
 
 		VkCommandBuffer cmdBuf = VK::graphicsCommandBuffer;
+
+		VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipeline);
+		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipelineLayout, 0, 1, &VK::skinningDescriptorSet, 0, nullptr);
+		VKGeometry::GPUSkinnedModel skinnedHand;
+		skinnedHand.matricesOffset = handModel.skeletonMatrixOffset;
+		skinnedHand.vertexOffset = handModel.mesh->geometry.verticesOffset;
+		skinnedHand.skinningVertexOffset = handModel.skinnedVerticesOffset;
+		skinnedHand.vertexCount = handModel.mesh->geometry.verticesCount;
+		VK::vkCmdPushConstants(cmdBuf, VK::skinningPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel), &skinnedHand);
+		VK::vkCmdDispatch(cmdBuf, (VK::testMesh.verticesCount + 255) / 256, 1, 1);
+
+		VkBufferMemoryBarrier bufferBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+		bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		bufferBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+		bufferBarrier.srcQueueFamilyIndex = VK::graphicsFamily;
+		bufferBarrier.dstQueueFamilyIndex = VK::graphicsFamily;
+		bufferBarrier.buffer = VK::geometryHandler.buffer;
+		bufferBarrier.offset = VK::geometryHandler.skinnedPositionsOffset;
+		bufferBarrier.size = VK_WHOLE_SIZE;
+		VK::vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+
+
+		VkRenderPassBeginInfo renderPassBegin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		renderPassBegin.renderPass = VK::mainRenderPass;
+		renderPassBegin.framebuffer = VK::mainFramebuffer.framebuffer;
+		renderPassBegin.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ VK::mainFramebuffer.framebufferWidth, VK::mainFramebuffer.framebufferHeight } };
+		renderPassBegin.clearValueCount = 2;
+		VkClearValue clearValues[2]{};
+		clearValues[0].color.float32[0] = 0.0F;
+		clearValues[0].color.float32[1] = 0.0F;
+		clearValues[0].color.float32[2] = 0.0F;
+		clearValues[0].color.float32[3] = 0.0F;
+		clearValues[1].depthStencil.depth = 0.0F;
+		clearValues[1].depthStencil.stencil = 0;
+		renderPassBegin.pClearValues = clearValues;
+		VK::vkCmdBeginRenderPass(cmdBuf, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
 
 		VkViewport viewport{};
 		viewport.x = 0.0F;
@@ -82,58 +133,54 @@ void draw_frame() {
 		VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::testPipeline);
 
 		VK::PushConstantMatrices testMatrices{};
-		testMatrices.leftMatrixRow0 = Vector4f{ leftPerspectiveTransform.m00, leftPerspectiveTransform.m01, leftPerspectiveTransform.m02, leftPerspectiveTransform.m03 };
-		testMatrices.leftMatrixRow1 = Vector4f{ leftPerspectiveTransform.m10, leftPerspectiveTransform.m11, leftPerspectiveTransform.m12, leftPerspectiveTransform.m13 };
-		testMatrices.leftMatrixRow3 = Vector4f{ leftPerspectiveTransform.m30, leftPerspectiveTransform.m31, leftPerspectiveTransform.m32, leftPerspectiveTransform.m33 };
-		testMatrices.rightMatrixRow0 = Vector4f{ rightPerspectiveTransform.m00, rightPerspectiveTransform.m01, rightPerspectiveTransform.m02, rightPerspectiveTransform.m03 };
-		testMatrices.rightMatrixRow1 = Vector4f{ rightPerspectiveTransform.m10, rightPerspectiveTransform.m11, rightPerspectiveTransform.m12, rightPerspectiveTransform.m13 };
-		testMatrices.rightMatrixRow3 = Vector4f{ rightPerspectiveTransform.m30, rightPerspectiveTransform.m31, rightPerspectiveTransform.m32, rightPerspectiveTransform.m33 };
-		VK::vkCmdPushConstants(cmdBuf, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::PushConstantMatrices), &testMatrices);
+		ProjectiveTransformMatrix leftPerspectiveTransform;
+		ProjectiveTransformMatrix rightPerspectiveTransform;
 		
-		VKGeometry::Mesh& mesh = VK::testMesh;
+		VkBuffer geoBuffer = VK::geometryHandler.buffer;
 		VkBuffer buffers[4]{
-			mesh.gpuGeometry.buffer,
-			mesh.gpuGeometry.buffer,
-			mesh.gpuGeometry.buffer,
-			mesh.gpuGeometry.buffer
+			geoBuffer,
+			geoBuffer,
+			geoBuffer,
+			geoBuffer
 		};
 		VkDeviceSize offsets[4]{
-			mesh.gpuGeometry.offset + mesh.positionsOffset,
-			mesh.gpuGeometry.offset + mesh.texcoordsOffset,
-			mesh.gpuGeometry.offset + mesh.normalsOffset,
-			mesh.gpuGeometry.offset + mesh.tangentsOffset
+			VK::geometryHandler.positionsOffset,
+			VK::geometryHandler.texcoordsOffset,
+			VK::geometryHandler.normalsOffset,
+			VK::geometryHandler.tangentsOffset
 		};
 		VK::vkCmdBindVertexBuffers(cmdBuf, 0, 4, buffers, offsets);
-		VK::vkCmdBindIndexBuffer(cmdBuf, mesh.gpuGeometry.buffer, mesh.gpuGeometry.offset + mesh.indicesOffset, VK_INDEX_TYPE_UINT16);
-		VK::vkCmdDrawIndexed(cmdBuf, VK::testMesh.indexCount, 1, 0, 0, 0);
+		VK::vkCmdBindIndexBuffer(cmdBuf, geoBuffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
 
-		/*VkImageCopy copyRegion{};
-		copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		copyRegion.srcSubresource.mipLevel = 0;
-		copyRegion.srcSubresource.baseArrayLayer = 0;
-		copyRegion.srcSubresource.layerCount = 2;
-		copyRegion.srcOffset = VkOffset3D{ 0, 0, 0 };
-		copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		copyRegion.dstSubresource.mipLevel = 0;
-		copyRegion.dstSubresource.baseArrayLayer = 0;
-		copyRegion.dstSubresource.layerCount = 2;
-		copyRegion.dstOffset = VkOffset3D{ 0, 0, 0 };
-		copyRegion.extent.width = XR::xrRenderWidth;
-		copyRegion.extent.height = XR::xrRenderHeight;
-		copyRegion.extent.depth = 1;
-		VK::vkCmdCopyImage(cmdBuf, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, &copyRegion);
-		*/
-		
+		leftPerspectiveTransform.generate(leftProjection, leftTransform * worldModel.transform);
+		rightPerspectiveTransform.generate(rightProjection, rightTransform * worldModel.transform);
+		testMatrices.set_eye_transforms(leftPerspectiveTransform, rightPerspectiveTransform);
+		VK::vkCmdPushConstants(cmdBuf, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::PushConstantMatrices), &testMatrices);
+		VK::vkCmdDrawIndexed(cmdBuf, worldModel.mesh->indicesCount, 1, worldModel.mesh->indicesOffset, i32(worldModel.mesh->verticesOffset), 0);
+
+		offsets[0] = VK::geometryHandler.skinnedPositionsOffset;
+		offsets[2] = VK::geometryHandler.skinnedNormalsOffset;
+		offsets[3] = VK::geometryHandler.skinnedTangentsOffset;
+		VK::vkCmdBindVertexBuffers(cmdBuf, 0, 4, buffers, offsets);
+
+		Matrix4x3f handTransform = handModel.transform;
+		leftPerspectiveTransform.generate(leftProjection, leftTransform * handTransform);
+		rightPerspectiveTransform.generate(rightProjection, rightTransform * handTransform);
+		testMatrices.set_eye_transforms(leftPerspectiveTransform, rightPerspectiveTransform);
+		VK::vkCmdPushConstants(cmdBuf, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::PushConstantMatrices), &testMatrices);
+		VK::vkCmdDrawIndexed(cmdBuf, handModel.mesh->geometry.indicesCount, 1, handModel.mesh->geometry.indicesOffset, i32(handModel.skinnedVerticesOffset), 0);
+
+		VK::vkCmdEndRenderPass(cmdBuf);
 	}
 	XrSwapchainImageWaitInfo swapchainWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
 	swapchainWaitInfo.timeout = XR_INFINITE_DURATION;
 	CHK_XR(XR::xrWaitSwapchainImage(XR::xrSwapchain, &swapchainWaitInfo));
-	VK::end_frame();
+	VK::end_frame(openxrFrameBeginInfo.shouldRender);
 	XR::end_frame(openxrFrameBeginInfo);
 	stackArena.pop_frame();
 }
 
-int run_star_chicken() {
+u32 run_star_chicken() {
 	//HMODULE user32 = LoadLibraryA("user32.dll");
 	//MessageBoxA2 = reinterpret_cast<MessageBoxA2_t>(GetProcAddress(user32, "MessageBoxA"));
 	//MessageBoxA2(0, "Test bpx", "Test box caption", MB_OK | MB_ICONINFORMATION);
@@ -142,12 +189,12 @@ int run_star_chicken() {
 	if (!QueryPerformanceCounter(&perfCounter)) {
 		abort("Could not get performanceCounter");
 	}
-	frameTime = prevFrameTime = perfCounter.QuadPart;
+	frameTime = prevFrameTime = u64(perfCounter.QuadPart);
 	LARGE_INTEGER perfFreq;
 	if (!QueryPerformanceFrequency(&perfFreq)) {
 		abort("Could not get performance counter frequency");
 	}
-	timerFrequency = perfFreq.QuadPart;
+	timerFrequency = u64(perfFreq.QuadPart);
 
 	stackArena.push_frame();
 	XR::init_openxr();
@@ -155,6 +202,7 @@ int run_star_chicken() {
 	XR::create_session_and_vk_swapchain();
 	VK::create_render_targets();
 	VK::load_resources();
+	setup_scene();
 	stackArena.pop_frame();
 
 	while (!shouldShutDown) {

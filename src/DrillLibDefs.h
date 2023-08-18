@@ -42,8 +42,12 @@ typedef double f64;
 typedef u32 b32;
 typedef u32 flags32;
 
+#define U8_MAX 0xFF
+#define U16_MAX 0xFFFF
 #define U32_MAX 0xFFFFFFFF
 #define U64_MAX 0xFFFFFFFFFFFFFFFFULL
+#define I8_MAX 0x7F
+#define I16_MAX 0x7FFF
 #define I32_MAX 0x7FFFFFFF
 #define I64_MAX 0x7FFFFFFFFFFFFFFFULL
 

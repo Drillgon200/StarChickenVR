@@ -112,7 +112,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>EnableAllWarnings</WarningLevel>
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
@@ -127,7 +127,8 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514</DisableSpecificWarnings>
+      <CallingConvention>VectorCall</CallingConvention>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -157,8 +158,9 @@
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514</DisableSpecificWarnings>
       <CreateHotpatchableImage>false</CreateHotpatchableImage>
+      <CallingConvention>VectorCall</CallingConvention>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

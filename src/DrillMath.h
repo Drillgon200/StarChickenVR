@@ -231,6 +231,7 @@ struct AxisAnglef {
 
 // I don't think this counts as a 4x3 matrix, it's really a 4x4 matrix with the 4th row assumed to be 0, 0, 0, 1
 // I should come up with a better name for this
+#pragma pack(push, 1)
 struct Matrix4x3f {
 	f32 m00, m01, m02, x,
 		m10, m11, m12, y,
@@ -401,6 +402,7 @@ struct Matrix4x3f {
 		return *this;
 	}
 };
+#pragma pack(pop)
 
 Matrix4x3f operator*(const Matrix4x3f& a, const Matrix4x3f& b) {
 	Matrix4x3f dst;

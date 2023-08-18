@@ -6,8 +6,10 @@
 #define XR_NO_PROTOTYPES
 #define XR_NO_STDINT_H
 #define XR_NO_STDDEF_H
+#pragma warning(push, 0)
 #include "..\external\openxr\openxr.h"
 #include "..\external\openxr\openxr_platform.h"
+#pragma warning(pop)
 
 #define CHK_XR(cmd) { XrResult chkXr_Result = (cmd); if(XR_FAILED(chkXr_Result)){ ::XR::openxr_failure(chkXr_Result); } if(chkXr_Result == XR_SESSION_LOSS_PENDING){ abort("XR Session Loss Pending"); } } 
 #define XR_DEBUG 1
@@ -47,7 +49,7 @@ namespace XR {
 XR_FUNCTIONS
 #undef OP
 
-constexpr XrPosef IDENTITY_POSE{ XrQuaternionf{ 0.0F, 0.0F, 0.0F, 1.0F }, XrVector3f{ 0.0F, 0.0F, 0.0F } };
+static constexpr XrPosef IDENTITY_POSE{ XrQuaternionf{ 0.0F, 0.0F, 0.0F, 1.0F }, XrVector3f{ 0.0F, 0.0F, 0.0F } };
 
 struct OpenXRFrameInfo {
 	XrPosef leftEyePose;

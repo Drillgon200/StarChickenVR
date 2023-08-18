@@ -5,7 +5,9 @@
 #define VK_NO_PROTOTYPES
 #define VK_NO_STDINT_H
 #define VK_NO_STDDEF_H
+#pragma warning(push, 0)
 #include "../external/vulkan/vulkan.h"
+#pragma warning(pop)
 #include "VKGeometry_decl.h"
 #include "VKStaging_decl.h"
 
@@ -80,7 +82,13 @@ namespace VK {
 	OP(vkBindImageMemory)\
 	OP(vkGetBufferMemoryRequirements)\
 	OP(vkGetImageMemoryRequirements)\
-	OP(vkCmdBlitImage)
+	OP(vkCmdBlitImage)\
+	OP(vkAllocateDescriptorSets)\
+	OP(vkDestroyDescriptorSetLayout)\
+	OP(vkDestroyDescriptorPool)\
+	OP(vkCmdBindDescriptorSets)\
+	OP(vkCmdDispatch)\
+	OP(vkUpdateDescriptorSets)
 
 #define OP(name) extern PFN_##name name;
 VK_INSTANCE_FUNCTIONS
@@ -89,6 +97,7 @@ VK_DEVICE_FUNCTIONS
 
 static constexpr u32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector2f) + sizeof(Vector3f) + sizeof(Vector3f);
 static constexpr u32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(u8) * 4 + sizeof(u8) * 4;
+static constexpr u32 VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector3f) + sizeof(Vector3f);
 
 struct SwapchainData {
 	// Set at init time when the swapchain is created
@@ -108,6 +117,15 @@ struct PushConstantMatrices {
 	Vector4f rightMatrixRow0;
 	Vector4f rightMatrixRow1;
 	Vector4f rightMatrixRow3;
+
+	void set_eye_transforms(ProjectiveTransformMatrix& left, ProjectiveTransformMatrix& right) {
+		leftMatrixRow0 = Vector4f{ left.m00, left.m01, left.m02, left.m03 };
+		leftMatrixRow1 = Vector4f{ left.m10, left.m11, left.m12, left.m13 };
+		leftMatrixRow3 = Vector4f{ left.m30, left.m31, left.m32, left.m33 };
+		rightMatrixRow0 = Vector4f{ right.m00, right.m01, right.m02, right.m03 };
+		rightMatrixRow1 = Vector4f{ right.m10, right.m11, right.m12, right.m13 };
+		rightMatrixRow3 = Vector4f{ right.m30, right.m31, right.m32, right.m33 };
+	}
 };
 #pragma pack(pop)
 
@@ -157,6 +175,7 @@ extern VkQueue computeQueue;
 
 extern VKStaging::GPUUploadStager graphicsStager;
 extern VKGeometry::GeometryHandler geometryHandler;
+extern VKGeometry::SkinningHandler skinningHandler;
 
 extern SwapchainData xrSwapchainData;
 

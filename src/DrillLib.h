@@ -2,7 +2,9 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#pragma warning(push, 0)
 #include <Windows.h>
+#pragma warning(pop)
 #include "DrillLibDefs.h"
 #include "DrillMath.h"
 
@@ -97,7 +99,7 @@ FINLINE u32 bswap32(u32 val) {
 }
 
 FINLINE u16 bswap16(u16 val) {
-	return (val >> 8) | (val << 8);
+	return u16((val >> 8) | (val << 8));
 }
 
 struct String {
@@ -140,8 +142,8 @@ struct ByteBuf {
 			failed = true;
 		} else {
 			result =
-				(bytes[offset + 0] << 0) |
-				(bytes[offset + 1] << 8);
+				(u32(bytes[offset + 0]) << 0) |
+				(u32(bytes[offset + 1]) << 8);
 			offset += sizeof(u16);
 		}
 		return result;
@@ -154,10 +156,10 @@ struct ByteBuf {
 			failed = true;
 		} else {
 			result =
-				(bytes[offset + 0] << 0) |
-				(bytes[offset + 1] << 8) |
-				(bytes[offset + 2] << 16) |
-				(bytes[offset + 3] << 24);
+				(u32(bytes[offset + 0]) << 0) |
+				(u32(bytes[offset + 1]) << 8) |
+				(u32(bytes[offset + 2]) << 16) |
+				(u32(bytes[offset + 3]) << 24);
 			offset += sizeof(u32);
 		}
 		return result;
@@ -290,11 +292,11 @@ struct MemoryArena {
 
 // Things allocated here get pushed and popped with the call stack, 
 // importantly, not necessarily at the same time as scopes, allowing objects to be passed out of their C++ scope
-MemoryArena stackArena{};
+static MemoryArena stackArena{};
 // Things allocated here exist for one frame. It is reset at the beginning of each frame
-MemoryArena frameArena{};
+static MemoryArena frameArena{};
 // Things allocated here exist for the duration of the program, it is never reset
-MemoryArena globalArena{};
+static MemoryArena globalArena{};
 
 template<typename T, MemoryArena* allocator = &stackArena>
 struct ArenaArrayList {
@@ -376,6 +378,18 @@ struct ArenaArrayList {
 		end:;
 		return returnVal;
 	}
+
+	FINLINE T& last() {
+		return data[size - 1];
+	}
+
+	FINLINE void clear() {
+		size = 0;
+	}
+
+	FINLINE bool empty() {
+		return size == 0;
+	}
 };
 
 void (*previousPageFaultHandler)(int);
@@ -426,7 +440,7 @@ void print_integer(u64 num) {
 		buffer[31] = '\0';
 		char* str = buffer + 31;
 		while (num) {
-			*--str = (num % 10) + '0';
+			*--str = char(num % 10) + '0';
 			num /= 10;
 		}
 		print(str);
@@ -438,7 +452,7 @@ void print_integer_pad(u64 num, u32 pad) {
 	buffer[31] = '\0';
 	char* str = buffer + 31;
 	while (num) {
-		*--str = (num % 10) + '0';
+		*--str = char(num % 10) + '0';
 		num /= 10;
 		pad--;
 	}

@@ -64,7 +64,7 @@ bool load_first_openxr_functions() {
 		return false;
 	}
 
-	xrGetInstanceProcAddr = reinterpret_cast<PFN_xrGetInstanceProcAddr>(GetProcAddress(openxr, "xrGetInstanceProcAddr"));
+	xrGetInstanceProcAddr = reinterpret_cast<PFN_xrGetInstanceProcAddr>(reinterpret_cast<void*>(GetProcAddress(openxr, "xrGetInstanceProcAddr")));
 	xrInstance = XR_NULL_HANDLE;
 	CHK_XR(xrGetInstanceProcAddr(xrInstance, "xrEnumerateApiLayerProperties", reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateApiLayerProperties)));
 	CHK_XR(xrGetInstanceProcAddr(xrInstance, "xrEnumerateInstanceExtensionProperties", reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateInstanceExtensionProperties)));
@@ -310,9 +310,11 @@ void poll() {
 						print("Session exiting\n");
 						StarChicken::shouldShutDown = true;
 					} break;
+					default: break;
 				}
 				currentSessionState = sessionStateChange.state;
 			} break;
+			default: break;
 		}
 	}
 }
@@ -323,7 +325,7 @@ NODISCARD OpenXRFrameInfo begin_frame() {
 	CHK_XR(xrWaitFrame(session, &frameWaitInfo, &frameState));
 
 	XrSwapchainImageAcquireInfo swapchainAcquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-	u32 swapchainImageIdx = -1;
+	u32 swapchainImageIdx = U32_MAX;
 	CHK_XR(xrAcquireSwapchainImage(xrSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
 	VK::xrSwapchainData.swapchainImageIdx = swapchainImageIdx;
 

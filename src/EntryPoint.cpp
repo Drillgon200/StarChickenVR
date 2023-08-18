@@ -1,7 +1,9 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#pragma warning(push, 0)
 #include <Windows.h>
+#pragma warning(pop)
 #include "StarChicken.h"
 
 // It is actually possible to initialize with no import libraries (see link)
@@ -10,6 +12,6 @@
 // https://hero.handmade.network/forums/code-discussion/t/129-howto_-_building_without_import_libraries
 extern "C" void mainCRTStartup() {
 	drill_lib_init();
-	int result = StarChicken::run_star_chicken();
+	u32 result = StarChicken::run_star_chicken();
 	ExitProcess(result);
 }
