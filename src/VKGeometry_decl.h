@@ -7,7 +7,7 @@ struct StaticModel;
 struct SkeletalModel;
 struct GPUSkinnedModel;
 struct GeometryHandler;
-struct SkinningHandler;
+struct UniformMatricesHandler;
 
 void make_static_model(StaticModel* model, StaticMesh& mesh);
 void make_skeletal_model(SkeletalModel* model, SkeletalMesh& mesh);

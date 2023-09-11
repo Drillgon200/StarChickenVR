@@ -7,12 +7,25 @@
 #define VK_NO_STDDEF_H
 #pragma warning(push, 0)
 #include "../external/vulkan/vulkan.h"
+// From vulkan_win32.h. I didn't want to include that file directly because it includes windows.h and I may want to remove that include eventually.
+#define VK_KHR_WIN32_SURFACE_EXTENSION_NAME "VK_KHR_win32_surface"
+typedef VkFlags VkWin32SurfaceCreateFlagsKHR;
+typedef struct VkWin32SurfaceCreateInfoKHR {
+	VkStructureType                 sType;
+	const void* pNext;
+	VkWin32SurfaceCreateFlagsKHR    flags;
+	HINSTANCE                       hinstance;
+	HWND                            hwnd;
+} VkWin32SurfaceCreateInfoKHR;
+
+typedef VkResult(VKAPI_PTR* PFN_vkCreateWin32SurfaceKHR)(VkInstance instance, const VkWin32SurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
+typedef VkBool32(VKAPI_PTR* PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR)(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex);
 #pragma warning(pop)
 #include "VKGeometry_decl.h"
 #include "VKStaging_decl.h"
 
-#define CHK_VK(cmd) if((cmd) != VK_SUCCESS){ ::VK::vulkan_failure(""); }
-#define CHK_VK_NOT_NULL(cmd, msg) if((cmd) == nullptr){ ::VK::vulkan_failure(msg); }
+#define CHK_VK(cmd) { VkResult chkVK_Result = cmd; if(chkVK_Result != VK_SUCCESS){ ::VK::vulkan_failure(chkVK_Result, ""); } }
+#define CHK_VK_NOT_NULL(cmd, msg) if((cmd) == nullptr){ ::VK::vulkan_failure(VK_SUCCESS, msg); }
 #define VK_DEBUG 1
 namespace VK {
 // Preprocessor hack to make defining and loading functions easier (just add them to the end of this macro when needed)
@@ -25,7 +38,13 @@ namespace VK {
 	OP(vkDestroyInstance)\
 	OP(vkDestroyDevice)\
 	OP(vkGetPhysicalDeviceMemoryProperties)\
-	OP(vkGetPhysicalDeviceProperties)
+	OP(vkGetPhysicalDeviceProperties)\
+	OP(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)\
+	OP(vkGetPhysicalDeviceWin32PresentationSupportKHR)\
+	OP(vkGetPhysicalDeviceSurfacePresentModesKHR)\
+	OP(vkGetPhysicalDeviceSurfaceFormatsKHR)\
+	OP(vkCreateWin32SurfaceKHR)\
+	OP(vkDestroySurfaceKHR)
 
 #define VK_DEVICE_FUNCTIONS OP(vkCmdBeginRenderPass)\
 	OP(vkCmdEndRenderPass)\
@@ -72,6 +91,7 @@ namespace VK {
 	OP(vkCmdPipelineBarrier)\
 	OP(vkBindBufferMemory)\
 	OP(vkDestroyCommandPool)\
+	OP(vkCreateSemaphore)\
 	OP(vkCreateFence)\
 	OP(vkWaitForFences)\
 	OP(vkResetFences)\
@@ -88,7 +108,16 @@ namespace VK {
 	OP(vkDestroyDescriptorPool)\
 	OP(vkCmdBindDescriptorSets)\
 	OP(vkCmdDispatch)\
-	OP(vkUpdateDescriptorSets)
+	OP(vkUpdateDescriptorSets)\
+	OP(vkQueuePresentKHR)\
+	OP(vkGetFenceStatus)\
+	OP(vkAcquireNextImageKHR)\
+	OP(vkCreateSwapchainKHR)\
+	OP(vkDestroySwapchainKHR)\
+	OP(vkGetSwapchainImagesKHR)\
+	OP(vkDestroyFence)\
+	OP(vkDestroySemaphore)
+
 
 #define OP(name) extern PFN_##name name;
 VK_INSTANCE_FUNCTIONS
@@ -99,10 +128,9 @@ static constexpr u32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(Vector
 static constexpr u32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(u8) * 4 + sizeof(u8) * 4;
 static constexpr u32 VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector3f) + sizeof(Vector3f);
 
-struct SwapchainData {
+struct XrSwapchainData {
 	// Set at init time when the swapchain is created
 	VkImage* swapchainImages;
-	VkImageView* swapchainImageViews;
 	//VkFramebuffer* swapchainFramebuffers;
 	u32 swapchainImageCount;
 	// Set when a swapchain image is acquired
@@ -110,22 +138,8 @@ struct SwapchainData {
 };
 
 #pragma pack(push, 1)
-struct PushConstantMatrices {
-	Vector4f leftMatrixRow0;
-	Vector4f leftMatrixRow1;
-	Vector4f leftMatrixRow3;
-	Vector4f rightMatrixRow0;
-	Vector4f rightMatrixRow1;
-	Vector4f rightMatrixRow3;
-
-	void set_eye_transforms(ProjectiveTransformMatrix& left, ProjectiveTransformMatrix& right) {
-		leftMatrixRow0 = Vector4f{ left.m00, left.m01, left.m02, left.m03 };
-		leftMatrixRow1 = Vector4f{ left.m10, left.m11, left.m12, left.m13 };
-		leftMatrixRow3 = Vector4f{ left.m30, left.m31, left.m32, left.m33 };
-		rightMatrixRow0 = Vector4f{ right.m00, right.m01, right.m02, right.m03 };
-		rightMatrixRow1 = Vector4f{ right.m10, right.m11, right.m12, right.m13 };
-		rightMatrixRow3 = Vector4f{ right.m30, right.m31, right.m32, right.m33 };
-	}
+struct GPUModelInfo {
+	u32 transformIdx;
 };
 #pragma pack(pop)
 
@@ -175,9 +189,10 @@ extern VkQueue computeQueue;
 
 extern VKStaging::GPUUploadStager graphicsStager;
 extern VKGeometry::GeometryHandler geometryHandler;
-extern VKGeometry::SkinningHandler skinningHandler;
+extern VKGeometry::UniformMatricesHandler uniformMatricesHandler;
 
-extern SwapchainData xrSwapchainData;
+extern XrSwapchainData xrSwapchainData;
 
-void vulkan_failure(const char* msg);
+void vulkan_failure(VkResult result, const char* msg);
+
 }

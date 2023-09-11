@@ -43,13 +43,30 @@ namespace XR {
 	OP(xrEnumerateViewConfigurationViews)\
 	OP(xrEnumerateReferenceSpaces)\
 	OP(xrCreateReferenceSpace)\
-	OP(xrLocateViews)
+	OP(xrLocateViews)\
+	OP(xrSyncActions)\
+	OP(xrLocateSpace)\
+	OP(xrCreateActionSpace)\
+	OP(xrDestroySpace)\
+	OP(xrAttachSessionActionSets)\
+	OP(xrCreateActionSet)\
+	OP(xrDestroyActionSet)\
+	OP(xrCreateAction)\
+	OP(xrDestroyAction)\
+	OP(xrSuggestInteractionProfileBindings)\
+	OP(xrStringToPath)\
+	OP(xrGetActionStateBoolean)\
+	OP(xrGetActionStateFloat)\
+	OP(xrGetActionStatePose)\
+	OP(xrGetActionStateVector2f)\
+	OP(xrApplyHapticFeedback)
+	
 
 #define OP(func) extern PFN_##func func;
 XR_FUNCTIONS
 #undef OP
 
-static constexpr XrPosef IDENTITY_POSE{ XrQuaternionf{ 0.0F, 0.0F, 0.0F, 1.0F }, XrVector3f{ 0.0F, 0.0F, 0.0F } };
+static constexpr XrPosef OPENXR_IDENTITY_POSE{ XrQuaternionf{ 0.0F, 0.0F, 0.0F, 1.0F }, XrVector3f{ 0.0F, 0.0F, 0.0F } };
 
 struct OpenXRFrameInfo {
 	XrPosef leftEyePose;
@@ -60,10 +77,23 @@ struct OpenXRFrameInfo {
 	b32 shouldRender;
 };
 
+struct VRUserHandInput {
+	Matrix4x3f pose;
+	Vector2f thumbstrickDirection;
+	f32 trigger;
+	f32 grip;
+};
+
+struct VRUserInput {
+	VRUserHandInput leftHand;
+	VRUserHandInput rightHand;
+};
+
 extern XrInstance xrInstance;
 extern XrSystemId systemID;
 extern XrSession session;
 extern XrSessionState currentSessionState;
+extern VRUserInput userInput;
 
 extern u32 xrRenderWidth;
 extern u32 xrRenderHeight;
@@ -72,5 +102,8 @@ void openxr_failure(XrResult result);
 void end_openxr();
 Quaternionf xr_quat_to_drillmath_quat(XrQuaternionf q);
 Vector3f xr_vec3_to_drillmath_vec3(XrVector3f v);
+Matrix4x3f xr_pose_to_drillmath_mat4x3(XrPosef p);
+
+void update_eye_poses(OpenXRFrameInfo* frameInfo);
 
 }

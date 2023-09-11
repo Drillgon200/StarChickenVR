@@ -85,13 +85,11 @@ int __cdecl memcmp(const void* m1, const void* m2, size_t n) {
 #endif
 
 template<typename T>
-FINLINE T max(T a, T b) {
-	return a > b ? a : b;
-}
-
-template<typename T>
-FINLINE T min(T a, T b) {
-	return a < b ? a : b;
+FINLINE void swap(T* a, T* b) {
+	// All my structs are POD, no need to mess around with move semantics or anything
+	T tmp = *b;
+	*b = *a;
+	*a = tmp;
 }
 
 FINLINE u32 bswap32(u32 val) {
@@ -165,7 +163,7 @@ struct ByteBuf {
 		return result;
 	}
 
-	FINLINE f32 read_float() {
+	FINLINE f32 read_f32() {
 		f32 result;
 		if (capacity - offset < sizeof(f32)) {
 			result = 0.0F;
@@ -179,18 +177,18 @@ struct ByteBuf {
 
 	FINLINE Matrix4x3f read_matrix4x3f() {
 		Matrix4x3f m;
-		m.m00 = read_float();
-		m.m01 = read_float();
-		m.m02 = read_float();
-		m.x = read_float();
-		m.m10 = read_float();
-		m.m11 = read_float();
-		m.m12 = read_float();
-		m.y = read_float();
-		m.m20 = read_float();
-		m.m21 = read_float();
-		m.m22 = read_float();
-		m.z = read_float();
+		m.m00 = read_f32();
+		m.m01 = read_f32();
+		m.m02 = read_f32();
+		m.x = read_f32();
+		m.m10 = read_f32();
+		m.m11 = read_f32();
+		m.m12 = read_f32();
+		m.y = read_f32();
+		m.m20 = read_f32();
+		m.m21 = read_f32();
+		m.m22 = read_f32();
+		m.z = read_f32();
 		return m;
 	}
 
@@ -211,8 +209,7 @@ struct ByteBuf {
 struct MemoryArena {
 	u8* stackBase;
 	u64 stackMaxSize;
-	u32 stackPtr;
-	u32 frameBase;
+	u64 stackPtr;
 
 	bool init(u64 capacity) {
 		stackBase = reinterpret_cast<u8*>(VirtualAlloc(nullptr, (capacity + 4095) & ~0xFFF, MEM_RESERVE, PAGE_READWRITE));
@@ -220,11 +217,16 @@ struct MemoryArena {
 			return false;
 		}
 		stackMaxSize = capacity;
+		stackPtr = 0;
 		return true;
 	}
 
 	void destroy() {
 		VirtualFree(stackBase, 0, MEM_RELEASE);
+	}
+
+	void reset() {
+		stackPtr = 0;
 	}
 
 	template<typename T>
@@ -273,20 +275,6 @@ struct MemoryArena {
 		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
 		stackPtr += count * sizeof(T);
 		return result;
-	}
-
-	void push_frame() {
-		u32 oldFrameBase = frameBase;
-		frameBase = stackPtr;
-		stackPtr = ALIGN_HIGH(stackPtr, alignof(u32));
-		*reinterpret_cast<u32*>(stackBase + stackPtr) = oldFrameBase;
-		stackPtr += sizeof(frameBase);
-	}
-
-	void pop_frame() {
-		stackPtr = frameBase;
-		u32 oldFrameBaseOffset = ALIGN_HIGH(stackPtr, alignof(u32));
-		frameBase = *reinterpret_cast<u32*>(stackBase + oldFrameBaseOffset);
 	}
 };
 
@@ -367,7 +355,7 @@ struct ArenaArrayList {
 		}
 		T* begin = data + rangeStart;
 		T* end = begin + rangeEnd;
-		
+
 		while (begin != end) {
 			if (*begin == value) {
 				returnVal = true;
@@ -375,7 +363,7 @@ struct ArenaArrayList {
 			}
 			begin++;
 		}
-		end:;
+	end:;
 		return returnVal;
 	}
 
@@ -383,8 +371,21 @@ struct ArenaArrayList {
 		return data[size - 1];
 	}
 
+	FINLINE T* begin() {
+		return &data[0];
+	}
+
+	FINLINE T* end() {
+		return &data[size];
+	}
+
 	FINLINE void clear() {
 		size = 0;
+	}
+
+	FINLINE void reset() {
+		size = 0;
+		capacity = 0;
 	}
 
 	FINLINE bool empty() {
@@ -420,7 +421,7 @@ HANDLE consoleOutput;
 
 void print(const char* str) {
 	DWORD bytesWritten;
-	WriteFile(consoleOutput, str, DWORD(strlen(str)), &bytesWritten, nullptr);
+	WriteFile(consoleOutput, str, DWORD(strlen(str)), &bytesWritten, NULL);
 }
 
 void println() {
@@ -507,6 +508,9 @@ T* read_full_file_to_arena(u32* count, MemoryArena& arena, const char* fileName)
 		}
 		CloseHandle(file);
 		*count = numBytesRead / sizeof(T);
+	} else {
+		print("Failed to create file, code: ");
+		println_integer(GetLastError());
 	}
 	return result;
 }

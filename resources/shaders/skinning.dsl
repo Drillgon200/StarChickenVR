@@ -4,7 +4,8 @@
 struct SkinnedModel {
 	u32 matricesOffset;
 	u32 vertexOffset;
-	u32 skinningVertexOffset;
+	u32 skinnedVerticesOffset;
+	u32 skinningDataOffset;
 	u32 vertexCount;
 }
 
@@ -60,7 +61,7 @@ struct BoneMatrix {
 		return;
 	}
 	u32 vec3Index = (model.vertexOffset + vertexIndex) * 3u;
-	u32 skinningIndex = model.skinningVertexOffset + vertexIndex * 2u;
+	u32 skinningIndex = (model.skinningDataOffset + vertexIndex) * 2u;
 	u32 indices = boneIndicesAndWeights.data[skinningIndex];
 	vec4f weights = unpack_unorm4x8(boneIndicesAndWeights.data[skinningIndex + 1u]);
 	vec4f inPos  = vec4f(inputPositions.data[vec3Index], inputPositions.data[vec3Index + 1u], inputPositions.data[vec3Index + 2u], 1.0F);
@@ -87,7 +88,7 @@ struct BoneMatrix {
 	outNorm = outNorm + weights.w * vec3f(dot(inNorm, matrix.row0.xyz), dot(inNorm, matrix.row1.xyz), dot(inNorm, matrix.row2.xyz));
 	outTan  = outTan  + weights.w * vec3f(dot(inTan,  matrix.row0.xyz), dot(inTan,  matrix.row1.xyz), dot(inTan,  matrix.row2.xyz));
 	
-	u32 outputIndex = (model.skinningVertexOffset + vertexIndex) * 3u;
+	u32 outputIndex = (model.skinnedVerticesOffset + vertexIndex) * 3u;
 	outputPositions.data[outputIndex     ] = outPos.x;
 	outputPositions.data[outputIndex + 1u] = outPos.y;
 	outputPositions.data[outputIndex + 2u] = outPos.z;

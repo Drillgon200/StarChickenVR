@@ -11,7 +11,10 @@
 // and I don't want my program to break on some future version of windows just because I didn't want to link to windows at compile time
 // https://hero.handmade.network/forums/code-discussion/t/129-howto_-_building_without_import_libraries
 extern "C" void mainCRTStartup() {
-	drill_lib_init();
-	u32 result = StarChicken::run_star_chicken();
+	const u32 failToInitializeDrillLib = 2;
+	u32 result = failToInitializeDrillLib;
+	if (drill_lib_init()) {
+		result = StarChicken::run_star_chicken();
+	}
 	ExitProcess(result);
 }

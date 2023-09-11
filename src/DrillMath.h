@@ -65,7 +65,7 @@ FINLINE f32 sqrtf(f32 x) {
 }
 
 FINLINE f32 sincosf(f32* sinOut, f32 x) {
-	float cosine = cosf(x);
+	f32 cosine = cosf(x);
 	*sinOut = sinf(x); // Could probably optimize this using the pythagorean identity and the result of cosf, I'll figure it out later
 	return cosine;
 }
@@ -78,9 +78,29 @@ FINLINE f32 truncf(f32 f) {
 	return _mm_cvtss_f32(_mm_round_ps(_mm_set_ss(f), _MM_ROUND_MODE_TOWARD_ZERO));
 }
 
+template<typename T>
+FINLINE T max(T a, T b) {
+	return a > b ? a : b;
+}
+
+template<typename T>
+FINLINE T min(T a, T b) {
+	return a < b ? a : b;
+}
+
+template<typename T>
+FINLINE T clamp(T val, T low, T high) {
+	return min(high, max(low, val));
+}
+
+template<typename T>
+FINLINE T clamp01(T val) {
+	return clamp(val, static_cast<T>(0.0), static_cast<T>(1.0));
+}
+
 #pragma pack(push, 1)
 struct Vector2f {
-	float x, y;
+	f32 x, y;
 };
 #pragma pack(pop)
 
@@ -95,8 +115,23 @@ struct Vector3f {
 	FINLINE f32 length() {
 		return sqrtf(x * x + y * y + z * z);
 	}
+
+	FINLINE Vector3f& normalize() {
+		f32 invLen = 1.0F / length();
+		x *= invLen;
+		y *= invLen;
+		z *= invLen;
+		return *this;
+	}
 };
 #pragma pack(pop)
+
+static constexpr Vector3f VECTOR3F_UP{ 0.0F, 1.0F, 0.0F };
+static constexpr Vector3f VECTOR3F_DOWN{ 0.0F, -1.0F, 0.0F };
+static constexpr Vector3f VECTOR3F_NORTH{ 0.0F, 0.0F, -1.0F };
+static constexpr Vector3f VECTOR3F_SOUTH{ 0.0F, 0.0F, 1.0F };
+static constexpr Vector3f VECTOR3F_EAST{ 1.0F, 0.0F, 0.0F };
+static constexpr Vector3f VECTOR3F_WEST{ -1.0F, 0.0F, 0.0F };
 
 FINLINE Vector3f operator+(Vector3f v, f32 f) {
 	return Vector3f{ v.x + f, v.y + f, v.z + f };
@@ -161,8 +196,27 @@ struct Vector4f {
 };
 #pragma pack(pop)
 
+struct Quaternionf;
+
+struct AxisAnglef {
+	Vector3f axis;
+	f32 angle;
+
+	FINLINE Quaternionf to_quaternion();
+};
+
 struct Quaternionf {
 	f32 x, y, z, w;
+
+	FINLINE Quaternionf& from_axis_angle(AxisAnglef axisAngle) {
+		f32 sinHalfAngle;
+		f32 cosHalfAngle = sincosf(&sinHalfAngle, axisAngle.angle * 0.5F);
+		x = axisAngle.axis.x * sinHalfAngle;
+		y = axisAngle.axis.y * sinHalfAngle;
+		z = axisAngle.axis.z * sinHalfAngle;
+		w = cosHalfAngle;
+		return *this;
+	}
 
 	// https://www.3dgep.com/understanding-quaternions/
 	// https://fgiesen.wordpress.com/2019/02/09/rotating-a-single-vector-using-a-quaternion/
@@ -216,18 +270,13 @@ FINLINE Quaternionf operator*(Quaternionf a, Quaternionf b) {
 	};
 }
 
-struct AxisAnglef {
-	Vector3f axis;
-	f32 angle;
+FINLINE Quaternionf AxisAnglef::to_quaternion() {
+	// A quaternion is { v * sin(theta/2), cos(theta/2) }, where v is the axis and theta is the angle
+	f32 sinHalfAngle;
+	f32 cosHalfAngle = sincosf(&sinHalfAngle, angle * 0.5F);
+	return Quaternionf{ axis.x * sinHalfAngle, axis.y * sinHalfAngle, axis.z * sinHalfAngle, cosHalfAngle };
 
-	FINLINE Quaternionf to_quaternion() {
-		// A quaternion is { v * sin(theta/2), cos(theta/2) }, where v is the axis and theta is the angle
-		f32 cosAngleOver2 = cosf(angle * 0.5F);
-		f32 sinAngleOver2 = sinf(angle * 0.5F);
-		return Quaternionf{ axis.x * sinAngleOver2, axis.x * sinAngleOver2, axis.x * sinAngleOver2, cosAngleOver2 };
-
-	}
-};
+}
 
 // I don't think this counts as a 4x3 matrix, it's really a 4x4 matrix with the 4th row assumed to be 0, 0, 0, 1
 // I should come up with a better name for this
@@ -236,6 +285,10 @@ struct Matrix4x3f {
 	f32 m00, m01, m02, x,
 		m10, m11, m12, y,
 		m20, m21, m22, z;
+
+	FINLINE Matrix4x3f copy() {
+		return *this;
+	}
 
 	FINLINE Matrix4x3f& set_zero() {
 		m00 = 0.0F;
@@ -269,17 +322,22 @@ struct Matrix4x3f {
 		return *this;
 	}
 
-	FINLINE Matrix4x3f transpose_rotation() {
-		return Matrix4x3f{
-			m00, m10, m20, x,
-			m01, m11, m21, y,
-			m02, m12, m22, z
-		};
+	FINLINE Matrix4x3f& transpose_rotation() {
+		f32 tmp0 = m01;
+		f32 tmp1 = m02;
+		f32 tmp2 = m12;
+		m01 = m10;
+		m02 = m20;
+		m12 = m21;
+		m10 = tmp0;
+		m20 = tmp1;
+		m21 = tmp2;
+		return *this;
 	}
 
 	// This is a simplification of Quaternionf.rotate(), substituting in (1, 0, 0), (0, 1, 0), and (0, 0, 1) as the vectors to rotate
 	// Pretty much we just rotate the basis vectors of the identity matrix
-	FINLINE Matrix4x3f& set_rotation_from_quat(Quaternionf q) {
+	FINLINE Matrix4x3f& set_orientation_from_quat(Quaternionf q) {
 		f32 yy2 = 2.0F * q.y * q.y;
 		f32 zz2 = 2.0F * q.z * q.z;
 		f32 zw2 = 2.0F * q.z * q.w;
@@ -315,27 +373,14 @@ struct Matrix4x3f {
 		return *this;
 	}
 
-	FINLINE Matrix4x3f& rotate(Quaternionf q) {
-		Vector3f row0 = q.transform(Vector3f{ m00, m01, m02 });
-		Vector3f row1 = q.transform(Vector3f{ m10, m11, m12 });
-		Vector3f row2 = q.transform(Vector3f{ m20, m21, m22 });
-		Vector3f offset = q.transform(Vector3f{ x, y, z });
-		m00 = row0.x;
-		m01 = row0.y;
-		m02 = row0.z;
-		x = offset.x;
-		m10 = row1.x;
-		m11 = row1.y;
-		m12 = row1.z;
-		y = offset.y;
-		m20 = row2.x;
-		m21 = row2.y;
-		m22 = row2.z;
-		z = offset.z;
+	FINLINE Matrix4x3f& add_offset(Vector3f offset) {
+		x += offset.x;
+		y += offset.y;
+		z += offset.z;
 		return *this;
 	}
 
-	FINLINE Matrix4x3f& rotate_local(Quaternionf q) {
+	FINLINE Matrix4x3f& rotate_quat(Quaternionf q) {
 		Vector3f row0 = q.transform(Vector3f{ m00, m01, m02 });
 		Vector3f row1 = q.transform(Vector3f{ m10, m11, m12 });
 		Vector3f row2 = q.transform(Vector3f{ m20, m21, m22 });
@@ -351,19 +396,120 @@ struct Matrix4x3f {
 		return *this;
 	}
 
-	FINLINE Matrix4x3f& scale(Vector3f scale) {
-		m00 *= scale.x;
-		m01 *= scale.x;
-		m02 *= scale.x;
-		x *= scale.x;
-		m10 *= scale.y;
-		m11 *= scale.y;
-		m12 *= scale.y;
-		y *= scale.y;
-		m20 *= scale.z;
-		m21 *= scale.z;
-		m22 *= scale.z;
-		z *= scale.z;
+	FINLINE Matrix4x3f& scale(Vector3f scaling) {
+		m00 *= scaling.x;
+		m01 *= scaling.x;
+		m02 *= scaling.x;
+		x *= scaling.x;
+		m10 *= scaling.y;
+		m11 *= scaling.y;
+		m12 *= scaling.y;
+		y *= scaling.y;
+		m20 *= scaling.z;
+		m21 *= scaling.z;
+		m22 *= scaling.z;
+		z *= scaling.z;
+		return *this;
+	}
+
+	FINLINE Matrix4x3f& scale_local(Vector3f scaling) {
+		m00 *= scaling.x;
+		m01 *= scaling.x;
+		m02 *= scaling.x;
+		m10 *= scaling.y;
+		m11 *= scaling.y;
+		m12 *= scaling.y;
+		m20 *= scaling.z;
+		m21 *= scaling.z;
+		m22 *= scaling.z;
+		return *this;
+	}
+
+	FINLINE f32 determinant_upper_left_3x3_corner() {
+		return m00 * (m11 * m22 - m12 * m21) - m01 * (m10 * m22 - m12 * m20) + m02 * (m10 * m21 - m11 * m20);
+	}
+
+	FINLINE Matrix4x3f& invert() {
+		// 22 mul, 17 fma, 3 add, 1 div
+		// Calculate the minor for each element in the 3x3 upper left corner, multiplied by the cofactor
+		f32 t00 = m11 * m22 - m12 * m21;
+		f32 t01 = m12 * m20 - m10 * m22;
+		f32 t02 = m10 * m21 - m11 * m20;
+		f32 t10 = m02 * m21 - m01 * m22;
+		f32 t11 = m00 * m22 - m02 * m20;
+		f32 t12 = m01 * m20 - m00 * m21;
+		f32 t20 = m01 * m12 - m02 * m11;
+		f32 t21 = m02 * m10 - m00 * m12;
+		f32 t22 = m00 * m11 - m01 * m10;
+
+		f32 inverseDet = 1.0F / (m00 * t00 + m01 * t01 + m02 * t02);
+
+		// Transpose and multiply by inverse determinant
+		m00 = inverseDet * t00;
+		m01 = inverseDet * t10;
+		m02 = inverseDet * t20;
+		m10 = inverseDet * t01;
+		m11 = inverseDet * t11;
+		m12 = inverseDet * t21;
+		m20 = inverseDet * t02;
+		m21 = inverseDet * t12;
+		m22 = inverseDet * t22;
+
+		f32 tx = x;
+		f32 ty = y;
+		f32 tz = z;
+		// Inverse translation part
+		x = -m00 * tx - m01 * ty - m02 * tz;
+		y = -m10 * tx - m11 * ty - m12 * tz;
+		z = -m20 * tx - m21 * ty - m22 * tz;
+
+		return *this;
+	}
+
+	// This function is untested, and I'm not actually sure if I did the math right
+	FINLINE Matrix4x3f& invert_orthogonal() {
+		// 12 mul, 6 fma, 3 add, 3 rsqrt
+		f32 invXScale = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(m00 * m00 + m01 * m01 + m02 * m02)));
+		f32 invYScale = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(m10 * m10 + m11 * m11 + m12 * m12)));
+		f32 invZScale = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(m20 * m20 + m21 * m21 + m22 * m22)));
+		invXScale *= invXScale;
+		invYScale *= invYScale;
+		invZScale *= invZScale;
+
+		f32 t01 = m01;
+		f32 t02 = m02;
+		f32 t12 = m12;
+
+		// Multiply by inverse scale squared and transpose
+		m00 = m00 * invXScale;
+		m01 = m10 * invYScale;
+		m02 = m20 * invZScale;
+		m10 = t01 * invXScale;
+		m11 = m11 * invYScale;
+		m12 = m21 * invZScale;
+		m20 = t02 * invXScale;
+		m21 = t12 * invYScale;
+		m22 = m22 * invZScale;
+
+		f32 tx = x;
+		f32 ty = y;
+		f32 tz = z;
+		// Inverse translation part
+		x = -m00 * tx - m01 * ty - m02 * tz;
+		y = -m10 * tx - m11 * ty - m12 * tz;
+		z = -m20 * tx - m21 * ty - m22 * tz;
+		return *this;
+	}
+
+	FINLINE Matrix4x3f& invert_orthonormal() {
+		transpose_rotation();
+		f32 tx = x;
+		f32 ty = y;
+		f32 tz = z;
+		// Inverse translation part
+		x = -m00 * tx - m01 * ty - m02 * tz;
+		y = -m10 * tx - m11 * ty - m12 * tz;
+		z = -m20 * tx - m21 * ty - m22 * tz;
 		return *this;
 	}
 
@@ -421,6 +567,36 @@ Matrix4x3f operator*(const Matrix4x3f& a, const Matrix4x3f& b) {
 	return dst;
 }
 
+void println_mat4x3f(Matrix4x3f m) {
+	print("[");
+	print_float(m.m00);
+	print(", ");
+	print_float(m.m01);
+	print(", ");
+	print_float(m.m02);
+	print(", ");
+	print_float(m.x);
+	print("]\n");
+	print("[");
+	print_float(m.m10);
+	print(", ");
+	print_float(m.m11);
+	print(", ");
+	print_float(m.m12);
+	print(", ");
+	print_float(m.y);
+	print("]\n");
+	print("[");
+	print_float(m.m20);
+	print(", ");
+	print_float(m.m21);
+	print(", ");
+	print_float(m.m22);
+	print(", ");
+	print_float(m.z);
+	print("]\n\n");
+}
+
 struct PerspectiveProjection {
 	f32 xScale;
 	f32 xZBias;
@@ -470,7 +646,7 @@ struct PerspectiveProjection {
 	// yScale = 1 / ((u - d) * 0.5)
 	// yZBias = (u + d) / (u - d)
 	// nearPlane = nearPlane
-	FINLINE void project_perspective(float nearZ, float fovRight, float fovLeft, float fovUp, float fovDown) {
+	FINLINE void project_perspective(f32 nearZ, f32 fovRight, f32 fovLeft, f32 fovUp, f32 fovDown) {
 		f32 sinRight;
 		f32 cosRight = sincosf(&sinRight, fovRight);
 		f32 rightX = sinRight / cosRight;
@@ -507,6 +683,7 @@ struct ProjectiveTransformMatrix {
 		m30, m31, m32, m33;
 
 	FINLINE void generate(PerspectiveProjection projection, Matrix4x3f transform) {
+		// projectiveTransformMatrix = projectionMatrix * transformMatrix
 		m00 = transform.m00 * projection.xScale + transform.m20 * projection.xZBias;
 		m01 = transform.m01 * projection.xScale + transform.m21 * projection.xZBias;
 		m02 = transform.m02 * projection.xScale + transform.m22 * projection.xZBias;

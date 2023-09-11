@@ -8,6 +8,7 @@ struct Bone {
 	static constexpr u32 PARENT_INVALID_IDX = U32_MAX;
 
 	Matrix4x3f bindTransform;
+	Matrix4x3f invBindTransform;
 	u32 parentIdx;
 };
 
@@ -33,14 +34,27 @@ struct SkeletalMesh {
 	u32 skinningDataOffset;
 };
 
+struct SkeletalAnimation {
+	u32 keyframeCount;
+	u32 boneCount;
+	f32 framerate;
+	u32 lengthMilliseconds;
+	// Array of pose arrays
+	// Array contains one pose array for each keyframe, and each pose array contains one matrix for each bone
+	Matrix4x3f* matrices;
+};
+
 struct StaticModel {
 	StaticMesh* mesh;
 	Matrix4x3f transform;
+	u32 gpuMatrixIndex;
 };
 
 struct SkeletalModel {
 	SkeletalMesh* mesh;
+	Matrix4x3f* poseMatrices;
 	Matrix4x3f transform;
+	u32 gpuMatrixIndex;
 	u32 skinnedVerticesOffset;
 	u32 skeletonMatrixOffset;
 };
@@ -49,7 +63,8 @@ struct SkeletalModel {
 struct GPUSkinnedModel {
 	u32 matricesOffset;
 	u32 vertexOffset;
-	u32 skinningVertexOffset;
+	u32 skinnedVerticesOffset;
+	u32 skinningDataOffset;
 	u32 vertexCount;
 };
 #pragma pack(pop)
@@ -202,19 +217,20 @@ struct GeometryHandler {
 	}
 };
 
-struct SkinningHandler {
+struct UniformMatricesHandler {
 	VkDeviceMemory memory;
 	VkBuffer buffer;
 	Matrix4x3f* memoryMapping;
 	u32 maxMatrices;
+	// Matrix is always at least 3. The first matrix is the identity matrix and the next two are eye matrices
 	u32 matrixOffset;
 
 	void init(u32 size) {
 		if (size < 4096) {
-			abort("Needs 4k of skinning matrix data");
+			abort("Needs 4k of matrix data");
 		}
 		maxMatrices = size / sizeof(Matrix4x3f);
-		matrixOffset = 0;
+		matrixOffset = 3;
 
 		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 		bufferInfo.flags = 0;
@@ -235,6 +251,8 @@ struct SkinningHandler {
 		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, size, 0, reinterpret_cast<void**>(&memoryMapping)));
+
+		memoryMapping[0] = Matrix4x3f{}.set_identity();
 	}
 
 	void destroy() {
@@ -246,12 +264,38 @@ struct SkinningHandler {
 		u32 offset = matrixOffset;
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
-			abort("Ran out of space for skinning matrices. Figure out a way to deal with this.");
-		}
-		for (u32 i = 0; i < numMatrices; i++) {
-			memoryMapping[offset + i] = matrices[i];
+			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
+			offset = 0;
+		} else {
+			for (u32 i = 0; i < numMatrices; i++) {
+				memoryMapping[offset + i] = matrices[i];
+			}
 		}
 		return offset;
+	}
+
+	u32 alloc(u32 numMatrices) {
+		u32 offset = matrixOffset;
+		matrixOffset += numMatrices;
+		if (matrixOffset > maxMatrices) {
+			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
+			offset = 0;
+		}
+		return offset;
+	}
+
+	void set_eye_matrices(ProjectiveTransformMatrix left, ProjectiveTransformMatrix right) {
+		// These two aren't really Matrix4x3fs, since the third row is omitted instead of the fourth, but they will fit in a Matrix4x3f
+		memoryMapping[1] = Matrix4x3f{
+			left.m00, left.m01, left.m02, left.m03,
+			left.m10, left.m11, left.m12, left.m13,
+			left.m30, left.m31, left.m32, left.m33
+		};
+		memoryMapping[2] = Matrix4x3f{
+			right.m00, right.m01, right.m02, right.m03,
+			right.m10, right.m11, right.m12, right.m13,
+			right.m30, right.m31, right.m32, right.m33
+		};
 	}
 
 	void flush_memory() {
@@ -263,7 +307,8 @@ struct SkinningHandler {
 	}
 
 	void reset() {
-		matrixOffset = 0;
+		// First 3 are identity and two eye matrices
+		matrixOffset = 3;
 	}
 };
 

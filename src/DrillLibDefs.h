@@ -19,11 +19,19 @@
 // Undefined behavior for sure, but reimplementing many parts of the standard library pretty much requires that
 #define OFFSET_OF(type, member) __builtin_offsetof(type, member) //(reinterpret_cast<uptr>(&reinterpret_cast<type*>(uptr(0))->member))
 
+#define ASSERT(cond, msg) if(!(cond)) { abort(msg); }
+#ifndef NDEBUG
+#define DEBUG_ASSERT(cond, msg) if(!(cond)) { __debugbreak(); abort(msg); }
+#else
+#define DEBUG_ASSERT
+#endif
+
 #define MATH_PI 3.1415926535F
 #define DEG_TO_RAD(x) ((x)*(MATH_PI/180.0F))
 #define RAD_TO_DEG(x) ((x)*(180.0F/MATH_PI))
 #define TURN_TO_RAD(x) ((x)*(2.0F*MATH_PI))
 #define RAD_TO_TURN(x) ((x)*(1.0F/(2.0F*MATH_PI)))
+#define MILLISECOND_TO_NANOSECOND(milliseconds) ((milliseconds) * 1000000)
 
 #define DRILL_LIB_MAKE_VERSION(major, minor, patch) ((((major) & 0b1111111111) << 20) | (((minor) & 0b1111111111) << 10) | ((patch) & 0b1111111111))
 

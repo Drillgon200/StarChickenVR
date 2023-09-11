@@ -31,6 +31,19 @@ XrSpace stageSpace;
 XrSpace localSpace;
 XrSpace viewSpace;
 
+XrActionSet gameplayActionSet;
+struct HandActions {
+	XrAction thumbstick;
+	XrAction trigger;
+	XrAction grip;
+	XrAction gripPose;
+	XrSpace gripSpace;
+	XrAction hapticOutput;
+};
+HandActions leftHandActions;
+HandActions rightHandActions;
+VRUserInput userInput;
+
 u32 xrRenderWidth;
 u32 xrRenderHeight;
 XrPosef lastValidLeftEyePose;
@@ -38,12 +51,25 @@ XrFovf lastValidLeftFov;
 XrPosef lastValidRightEyePose;
 XrFovf lastValidRightFov;
 
-Quaternionf xr_quat_to_drillmath_quat(XrQuaternionf q) {
+FINLINE Quaternionf xr_quat_to_drillmath_quat(XrQuaternionf q) {
 	return Quaternionf{ q.x, q.y, q.z, q.w };
 }
 
-Vector3f xr_vec3_to_drillmath_vec3(XrVector3f v) {
+FINLINE Vector3f xr_vec3_to_drillmath_vec3(XrVector3f v) {
 	return Vector3f{ v.x, v.y, v.z };
+}
+
+FINLINE Matrix4x3f xr_pose_to_drillmath_mat4x3(XrPosef p) {
+	Matrix4x3f result;
+	result.set_orientation_from_quat(xr_quat_to_drillmath_quat(p.orientation));
+	result.set_offset(xr_vec3_to_drillmath_vec3(p.position));
+	return result;
+}
+
+XrPath xr_get_path(const char* pathString) {
+	XrPath path;
+	CHK_XR(xrStringToPath(xrInstance, pathString, &path));
+	return path;
 }
 
 void openxr_failure(XrResult failureResult) {
@@ -185,8 +211,8 @@ vulkanSupported:;
 	}
 	xrRenderWidth = views[0].recommendedImageRectWidth;
 	xrRenderHeight = views[0].recommendedImageRectHeight;
-	lastValidRightEyePose = IDENTITY_POSE;
-	lastValidLeftEyePose = IDENTITY_POSE;
+	lastValidRightEyePose = OPENXR_IDENTITY_POSE;
+	lastValidLeftEyePose = OPENXR_IDENTITY_POSE;
 	lastValidLeftFov.angleLeft = TURN_TO_RAD(-0.125F);
 	lastValidLeftFov.angleRight = TURN_TO_RAD(0.125F);
 	lastValidLeftFov.angleUp = TURN_TO_RAD(0.125F);
@@ -194,7 +220,7 @@ vulkanSupported:;
 	lastValidRightFov = lastValidLeftFov;
 }
 
-void create_session_and_vk_swapchain() {
+void create_gameplay_session() {
 	XrGraphicsBindingVulkan2KHR vulkanBinding{ XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR };
 	vulkanBinding.instance = VK::vkInstance;
 	vulkanBinding.physicalDevice = VK::physicalDevice;
@@ -216,7 +242,7 @@ void create_session_and_vk_swapchain() {
 		XrReferenceSpaceType type = referenceSpaceTypes[i];
 		XrReferenceSpaceCreateInfo referenceSpaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
 		referenceSpaceInfo.referenceSpaceType = type;
-		referenceSpaceInfo.poseInReferenceSpace = IDENTITY_POSE;
+		referenceSpaceInfo.poseInReferenceSpace = OPENXR_IDENTITY_POSE;
 		if (type == XR_REFERENCE_SPACE_TYPE_STAGE) {
 			CHK_XR(xrCreateReferenceSpace(session, &referenceSpaceInfo, &stageSpace));
 		} else if (type == XR_REFERENCE_SPACE_TYPE_LOCAL) {
@@ -266,6 +292,84 @@ swapchainFormatSupported:;
 		VK::xrSwapchainData.swapchainImages[i] = swapchainImages[i].image;
 	}
 	VK::xrSwapchainData.swapchainImageCount = numSwapchainImages;
+
+	XrActionSetCreateInfo actionSetInfo{ XR_TYPE_ACTION_SET_CREATE_INFO };
+	strcpy(actionSetInfo.actionSetName, "gameplay");
+	strcpy(actionSetInfo.localizedActionSetName, "Gameplay");
+	actionSetInfo.priority = 0;
+	CHK_XR(xrCreateActionSet(xrInstance, &actionSetInfo, &gameplayActionSet));
+
+	XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO };
+	actionInfo.countSubactionPaths = 0;
+	actionInfo.subactionPaths = nullptr;
+	actionInfo.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT;
+	strcpy(actionInfo.actionName, "right_thumbstick");
+	strcpy(actionInfo.localizedActionName, "Right Thumbstick");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &rightHandActions.thumbstick));
+	strcpy(actionInfo.actionName, "left_thumbstick");
+	strcpy(actionInfo.localizedActionName, "Left Thumbstick");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &leftHandActions.thumbstick));
+	actionInfo.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
+	strcpy(actionInfo.actionName, "right_trigger");
+	strcpy(actionInfo.localizedActionName, "Right Trigger");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &rightHandActions.trigger));
+	strcpy(actionInfo.actionName, "left_trigger");
+	strcpy(actionInfo.localizedActionName, "Left Trigger");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &leftHandActions.trigger));
+	strcpy(actionInfo.actionName, "right_grip");
+	strcpy(actionInfo.localizedActionName, "Right Grip");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &rightHandActions.grip));
+	strcpy(actionInfo.actionName, "left_grip");
+	strcpy(actionInfo.localizedActionName, "Left Grip");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &leftHandActions.grip));
+	actionInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+	strcpy(actionInfo.actionName, "right_grip_pose");
+	strcpy(actionInfo.localizedActionName, "Right Grip Pose");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &rightHandActions.gripPose));
+	strcpy(actionInfo.actionName, "left_grip_pose");
+	strcpy(actionInfo.localizedActionName, "Left Grip Pose");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &leftHandActions.gripPose));
+	actionInfo.actionType = XR_ACTION_TYPE_VIBRATION_OUTPUT;
+	strcpy(actionInfo.actionName, "right_haptic");
+	strcpy(actionInfo.localizedActionName, "Right Haptic");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &rightHandActions.hapticOutput));
+	strcpy(actionInfo.actionName, "left_haptic");
+	strcpy(actionInfo.localizedActionName, "Left Haptic");
+	CHK_XR(xrCreateAction(gameplayActionSet, &actionInfo, &leftHandActions.hapticOutput));
+
+	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO };
+	actionSpaceInfo.action = rightHandActions.gripPose;
+	actionSpaceInfo.subactionPath = XR_NULL_PATH;
+	actionSpaceInfo.poseInActionSpace = OPENXR_IDENTITY_POSE;
+	CHK_XR(xrCreateActionSpace(session, &actionSpaceInfo, &rightHandActions.gripSpace));
+	actionSpaceInfo.action = leftHandActions.gripPose;
+	CHK_XR(xrCreateActionSpace(session, &actionSpaceInfo, &leftHandActions.gripSpace));
+
+	XrActionSuggestedBinding suggestedBindings[]{
+		XrActionSuggestedBinding{ rightHandActions.thumbstick,   xr_get_path("/user/hand/right/input/thumbstick") },
+		XrActionSuggestedBinding{ rightHandActions.trigger,      xr_get_path("/user/hand/right/input/trigger/value") },
+		XrActionSuggestedBinding{ rightHandActions.grip,         xr_get_path("/user/hand/right/input/squeeze/value") },
+		XrActionSuggestedBinding{ rightHandActions.gripPose,     xr_get_path("/user/hand/right/input/grip/pose") },
+		XrActionSuggestedBinding{ rightHandActions.hapticOutput, xr_get_path("/user/hand/right/output/haptic") },
+		XrActionSuggestedBinding{ leftHandActions.thumbstick,    xr_get_path("/user/hand/left/input/thumbstick") },
+		XrActionSuggestedBinding{ leftHandActions.trigger,       xr_get_path("/user/hand/left/input/trigger/value") },
+		XrActionSuggestedBinding{ leftHandActions.grip,          xr_get_path("/user/hand/left/input/squeeze/value") },
+		XrActionSuggestedBinding{ leftHandActions.gripPose,      xr_get_path("/user/hand/left/input/grip/pose") },
+		XrActionSuggestedBinding{ leftHandActions.hapticOutput,  xr_get_path("/user/hand/left/output/haptic") }
+	};
+	XrInteractionProfileSuggestedBinding suggestedBinding{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+	suggestedBinding.interactionProfile = xr_get_path("/interaction_profiles/oculus/touch_controller");
+	suggestedBinding.countSuggestedBindings = ARRAY_COUNT(suggestedBindings);
+	suggestedBinding.suggestedBindings = suggestedBindings;
+	CHK_XR(xrSuggestInteractionProfileBindings(xrInstance, &suggestedBinding));
+
+	XrSessionActionSetsAttachInfo sessionActionSetAttachInfo{ XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
+	sessionActionSetAttachInfo.countActionSets = 1;
+	sessionActionSetAttachInfo.actionSets = &gameplayActionSet;
+	CHK_XR(xrAttachSessionActionSets(session, &sessionActionSetAttachInfo));
+
+	userInput.leftHand.pose.set_identity();
+	userInput.rightHand.pose.set_identity();
 }
 
 void poll() {
@@ -319,22 +423,62 @@ void poll() {
 	}
 }
 
-NODISCARD OpenXRFrameInfo begin_frame() {
-	XrFrameWaitInfo frameWaitInfo{ XR_TYPE_FRAME_WAIT_INFO };
-	XrFrameState frameState{ XR_TYPE_FRAME_STATE };
-	CHK_XR(xrWaitFrame(session, &frameWaitInfo, &frameState));
+void collect_input(XrTime predictedDisplayTime) {
+	XrActionsSyncInfo actionsSyncInfo{ XR_TYPE_ACTIONS_SYNC_INFO };
+	actionsSyncInfo.countActiveActionSets = 1;
+	XrActiveActionSet activeActionSet{};
+	activeActionSet.actionSet = gameplayActionSet;
+	activeActionSet.subactionPath = XR_NULL_PATH;
+	actionsSyncInfo.activeActionSets = &activeActionSet;
+	CHK_XR(xrSyncActions(session, &actionsSyncInfo));
 
-	XrSwapchainImageAcquireInfo swapchainAcquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-	u32 swapchainImageIdx = U32_MAX;
-	CHK_XR(xrAcquireSwapchainImage(xrSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
-	VK::xrSwapchainData.swapchainImageIdx = swapchainImageIdx;
+	XrActionStateFloat floatOutput{ XR_TYPE_ACTION_STATE_FLOAT };
+	XrActionStateVector2f vec2fOutput{ XR_TYPE_ACTION_STATE_VECTOR2F };
+	XrActionStatePose poseOutput{ XR_TYPE_ACTION_STATE_POSE };
+	XrSpaceLocation spaceOutput{ XR_TYPE_SPACE_LOCATION };
 
-	XrFrameBeginInfo frameBeginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
-	CHK_XR(xrBeginFrame(session, &frameBeginInfo));
+	XrActionStateGetInfo actionStateInfo{ XR_TYPE_ACTION_STATE_GET_INFO };
+	actionStateInfo.subactionPath = XR_NULL_PATH;
 
+	HandActions* handActions[]{ &leftHandActions, &rightHandActions };
+	VRUserHandInput* userInputHands[]{ &userInput.leftHand, &userInput.rightHand };
+	for (u32 i = 0; i < ARRAY_COUNT(handActions); i++) {
+		HandActions& handAction = *handActions[i];
+		VRUserHandInput& handInput = *userInputHands[i];
+
+		actionStateInfo.action = handAction.thumbstick;
+		CHK_XR(xrGetActionStateVector2f(session, &actionStateInfo, &vec2fOutput));
+		if (vec2fOutput.isActive) {
+			handInput.thumbstrickDirection = Vector2f{ vec2fOutput.currentState.x, vec2fOutput.currentState.y };
+		}
+		actionStateInfo.action = handAction.trigger;
+		CHK_XR(xrGetActionStateFloat(session, &actionStateInfo, &floatOutput));
+		if (floatOutput.isActive) {
+			handInput.trigger = floatOutput.currentState;
+		}
+		actionStateInfo.action = handAction.grip;
+		CHK_XR(xrGetActionStateFloat(session, &actionStateInfo, &floatOutput));
+		if (floatOutput.isActive) {
+			handInput.grip = floatOutput.currentState;
+		}
+		actionStateInfo.action = handAction.gripPose;
+		CHK_XR(xrGetActionStatePose(session, &actionStateInfo, &poseOutput));
+		if (poseOutput.isActive) {
+			CHK_XR(xrLocateSpace(handAction.gripSpace, stageSpace, predictedDisplayTime, &spaceOutput));
+			if (spaceOutput.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) {
+				handInput.pose.set_offset(xr_vec3_to_drillmath_vec3(spaceOutput.pose.position));
+			}
+			if (spaceOutput.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) {
+				handInput.pose.set_orientation_from_quat(xr_quat_to_drillmath_quat(spaceOutput.pose.orientation));
+			}
+		}
+	}
+}
+
+void update_eye_poses(OpenXRFrameInfo* frameInfo) {
 	XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
 	viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-	viewLocateInfo.displayTime = frameState.predictedDisplayTime;
+	viewLocateInfo.displayTime = frameInfo->predictedDisplayTime;
 	viewLocateInfo.space = stageSpace;
 	XrViewState viewState{ XR_TYPE_VIEW_STATE };
 	XrView views[2]{ { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
@@ -349,13 +493,26 @@ NODISCARD OpenXRFrameInfo begin_frame() {
 			lastValidLeftEyePose.orientation = views[0].pose.orientation;
 			lastValidRightEyePose.orientation = views[1].pose.orientation;
 		}
-		// Don't support each eye with their own FOV
 		lastValidLeftFov = views[0].fov;
 		lastValidRightFov = views[1].fov;
 	}
+	frameInfo->leftEyePose = lastValidLeftEyePose;
+	frameInfo->rightEyePose = lastValidRightEyePose;
+}
 
+NODISCARD OpenXRFrameInfo begin_frame() {
+	XrFrameWaitInfo frameWaitInfo{ XR_TYPE_FRAME_WAIT_INFO };
+	XrFrameState frameState{ XR_TYPE_FRAME_STATE };
+	CHK_XR(xrWaitFrame(session, &frameWaitInfo, &frameState));
 
-	return OpenXRFrameInfo{ lastValidLeftEyePose, lastValidLeftFov, lastValidRightEyePose, lastValidRightFov, frameState.predictedDisplayTime, frameState.shouldRender };
+	XrSwapchainImageAcquireInfo swapchainAcquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	u32 swapchainImageIdx = U32_MAX;
+	CHK_XR(xrAcquireSwapchainImage(xrSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
+	VK::xrSwapchainData.swapchainImageIdx = swapchainImageIdx;
+
+	OpenXRFrameInfo frameInfo{ OPENXR_IDENTITY_POSE, lastValidLeftFov, OPENXR_IDENTITY_POSE, lastValidRightFov, frameState.predictedDisplayTime, frameState.shouldRender };
+	update_eye_poses(&frameInfo);
+	return frameInfo;
 }
 
 void end_frame(OpenXRFrameInfo& frameInfo) {
@@ -389,11 +546,12 @@ void end_frame(OpenXRFrameInfo& frameInfo) {
 }
 
 void end_openxr() {
+	xrDestroyActionSet(gameplayActionSet);
 	if (xrSwapchain) {
 		xrDestroySwapchain(xrSwapchain);
 	}
 #if XR_DEBUG != 0
-	CHK_XR(xrDestroyDebugUtilsMessengerEXT(messenger));
+	xrDestroyDebugUtilsMessengerEXT(messenger);
 #endif
 	xrDestroyInstance(xrInstance);
 }

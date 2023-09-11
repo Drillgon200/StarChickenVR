@@ -187,6 +187,7 @@
     <ClInclude Include="src\DrillLib.h" />
     <ClInclude Include="src\DrillLibDefs.h" />
     <ClInclude Include="src\DrillMath.h" />
+    <ClInclude Include="src\Resources.h" />
     <ClInclude Include="src\StarChicken.h" />
     <ClInclude Include="src\StarChicken_decl.h" />
     <ClInclude Include="src\VK.h" />

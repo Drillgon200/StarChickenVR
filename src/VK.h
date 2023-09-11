@@ -5,20 +5,19 @@
 #include "XR_decl.h"
 #include "VKStaging.h"
 #include "VKGeometry.h"
+#include "Win32.h"
 namespace VK {
 
 #define VK_ENABLE_VALIDATION_LAYERS 1
 
 const char* ENABLED_VALIDATION_LAYERS[]{ "VK_LAYER_KHRONOS_validation", "VK_LAYER_KHRONOS_synchronization2" };
 
-const char* INSTANCE_EXTENSIONS[
-#if VK_DEBUG == 0
-0
-#endif
-]{
+const char* INSTANCE_EXTENSIONS[]{
 #if VK_DEBUG != 0	
-VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #endif
+VK_KHR_SURFACE_EXTENSION_NAME,
+VK_KHR_WIN32_SURFACE_EXTENSION_NAME
 };
 
 const char* DEVICE_EXTENSIONS[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
@@ -54,30 +53,165 @@ VkQueue computeQueue;
 
 VKStaging::GPUUploadStager graphicsStager;
 VKGeometry::GeometryHandler geometryHandler;
-VKGeometry::SkinningHandler skinningHandler;
+VKGeometry::UniformMatricesHandler uniformMatricesHandler;
 
 Framebuffer mainFramebuffer;
 
-VkCommandPool graphicsCommandPool;
+VkCommandPool graphicsCommandPools[2];
+// These two get swapped each frame so we don't overwrite one while it's in use
 VkCommandBuffer graphicsCommandBuffer;
+VkCommandBuffer inFlightGraphicsCommandBuffer;
+
+VkFence geometryCullAndDrawFence;
+VkSemaphore renderFinishedSemaphore;
 
 VkRenderPass mainRenderPass;
 
 VkDescriptorSetLayout skinningDescriptorSetLayout;
 VkDescriptorSet skinningDescriptorSet;
+VkDescriptorSetLayout drawDataDescriptorSetLayout;
+VkDescriptorSet drawDataDescriptorSet;
 
 VkPipelineLayout testPipelineLayout;
 VkPipeline testPipeline;
 VkPipelineLayout skinningPipelineLayout;
 VkPipeline skinningPipeline;
 
-VKGeometry::StaticMesh testMesh;
-VKGeometry::SkeletalMesh testAnimMesh;
+XrSwapchainData xrSwapchainData;
+struct DesktopSwapchainData {
+	VkSurfaceKHR surface;
+	VkSwapchainKHR swapchain;
+	VkImage* swapchainImages;
+	VkFence swapchainAcquireFence;
+	VkSemaphore renderFinishedSemaphore;
+	b32 shouldTryPresentToDesktopThisFrame;
+	b32 desktopSwapchainReadyForPresent;
+	u32 swapchainImageCount;
+	u32 swapchainImageIdx;
+	u32 width;
+	u32 height;
 
-SwapchainData xrSwapchainData;
+	void create(i32 newWidth, i32 newHeight) {
+		print_integer(newWidth);
+		print(" ");
+		println_integer(newHeight);
+		u64 stackArenaFrame0 = stackArena.stackPtr;
+		if (newWidth <= 0 || newHeight <= 0 || !StarChicken::shouldUseDesktopWindow || vkGetPhysicalDeviceWin32PresentationSupportKHR(physicalDevice, graphicsFamily) == VK_FALSE) {
+			swapchain = VK_NULL_HANDLE;
+			width = 0;
+			height = 0;
+		} else {
+			if (surface == VK_NULL_HANDLE) {
+				VkWin32SurfaceCreateInfoKHR surfaceInfo{ VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };
+				surfaceInfo.flags = 0;
+				surfaceInfo.hinstance = Win32::instance;
+				surfaceInfo.hwnd = Win32::window;
+				CHK_VK(vkCreateWin32SurfaceKHR(vkInstance, &surfaceInfo, nullptr, &surface));
+			}
 
-void vulkan_failure(const char* msg) {
-	print("VK function failed!\n");
+			VkSurfaceCapabilitiesKHR surfaceCaps;
+			CHK_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps));
+			if (surfaceCaps.currentExtent.width != U32_MAX) {
+				width = surfaceCaps.currentExtent.width;
+				height = surfaceCaps.currentExtent.height;
+			} else {
+				width = clamp(u32(newWidth), surfaceCaps.minImageExtent.width, surfaceCaps.maxImageExtent.height);
+				height = clamp(u32(newHeight), surfaceCaps.minImageExtent.height, surfaceCaps.maxImageExtent.height);
+			}
+
+			if (width == 0 || height == 0) {
+				swapchain = VK_NULL_HANDLE;
+			} else {
+				u32 surfaceFormatCount;
+				CHK_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, nullptr));
+				VkSurfaceFormatKHR* surfaceFormatsSupported = stackArena.alloc<VkSurfaceFormatKHR>(surfaceFormatCount);
+				CHK_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, surfaceFormatsSupported));
+				VkSurfaceFormatKHR surfaceFormat = surfaceFormatsSupported[0];
+				for (u32 i = 0; i < surfaceFormatCount; i++) {
+					if (surfaceFormatsSupported[i].format == VK_FORMAT_B8G8R8A8_SRGB && surfaceFormatsSupported[i].colorSpace == VK_COLORSPACE_SRGB_NONLINEAR_KHR) {
+						surfaceFormat = surfaceFormatsSupported[i];
+						break;
+					}
+				}
+
+				VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+				u32 presentModeCount;
+				CHK_VK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr));
+				VkPresentModeKHR* presentModesSupported = stackArena.alloc<VkPresentModeKHR>(presentModeCount);
+				CHK_VK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModesSupported));
+				for (u32 i = 0; i < presentModeCount; i++) {
+					if (presentModesSupported[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+						presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+						break;
+					}
+				}
+
+				VkSwapchainCreateInfoKHR swapchainCreateInfo{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+				swapchainCreateInfo.flags = 0;
+				swapchainCreateInfo.surface = surface;
+				swapchainCreateInfo.minImageCount = max(2u, surfaceCaps.minImageCount);
+				swapchainCreateInfo.imageFormat = surfaceFormat.format;
+				swapchainCreateInfo.imageColorSpace = surfaceFormat.colorSpace;
+				swapchainCreateInfo.imageExtent.width = width;
+				swapchainCreateInfo.imageExtent.height = height;
+				swapchainCreateInfo.imageArrayLayers = 1;
+				swapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+				swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+				swapchainCreateInfo.queueFamilyIndexCount = 0;
+				swapchainCreateInfo.pQueueFamilyIndices = nullptr;
+				swapchainCreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+				swapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+				swapchainCreateInfo.presentMode = presentMode;
+				swapchainCreateInfo.clipped = VK_TRUE;
+				swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
+				CHK_VK(vkCreateSwapchainKHR(logicalDevice, &swapchainCreateInfo, VK_NULL_HANDLE, &swapchain));
+
+				u32 newSwapchainImageCount;
+				CHK_VK(vkGetSwapchainImagesKHR(logicalDevice, swapchain, &newSwapchainImageCount, nullptr));
+				if (newSwapchainImageCount > swapchainImageCount) {
+					swapchainImages = globalArena.alloc_and_commit<VkImage>(newSwapchainImageCount);
+				}
+				swapchainImageCount = newSwapchainImageCount;
+				CHK_VK(vkGetSwapchainImagesKHR(logicalDevice, swapchain, &swapchainImageCount, swapchainImages));
+
+				shouldTryPresentToDesktopThisFrame = false;
+				desktopSwapchainReadyForPresent = false;
+
+				VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+				fenceInfo.flags = 0;
+				CHK_VK(vkCreateFence(logicalDevice, &fenceInfo, nullptr, &swapchainAcquireFence));
+				VkSemaphoreCreateInfo semaphoreInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+				semaphoreInfo.flags = 0;
+				CHK_VK(vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &this->renderFinishedSemaphore));
+			}
+		}
+		stackArena.stackPtr = stackArenaFrame0;
+	}
+
+	void resize(i32 newWidth, i32 newHeight) {
+		// Heavy sync, but this is only expected to run when the user resizes the desktop window anyway
+		CHK_VK(vkDeviceWaitIdle(logicalDevice));
+		if (swapchain != VK_NULL_HANDLE) {
+			vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+			// We don't have to destroy these, but it makes the code a little simpler, and like I said, it doesn't matter if we're a little inefficient here
+			vkDestroyFence(logicalDevice, swapchainAcquireFence, nullptr);
+			vkDestroySemaphore(logicalDevice, this->renderFinishedSemaphore, nullptr);
+			swapchain = VK_NULL_HANDLE;
+		}
+		this->create(newWidth, newHeight);
+	}
+
+	void destroy() {
+		vkDestroyFence(logicalDevice, swapchainAcquireFence, nullptr);
+		vkDestroySemaphore(logicalDevice, this->renderFinishedSemaphore, nullptr);
+		vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+		vkDestroySurfaceKHR(vkInstance, surface, nullptr);
+	}
+} desktopSwapchainData;
+
+void vulkan_failure(VkResult result, const char* msg) {
+	print("VK function failed! Error code: ");
+	println_integer(result);
 	print(msg);
 	println();
 
@@ -232,7 +366,7 @@ allNecessaryQueuesPresent:;
 
 	vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
 
-	float queuePriority = 1.0F;
+	f32 queuePriority = 1.0F;
 	VkDeviceQueueCreateInfo queueCreateInfos[3]{};
 	u32 queueCreateInfoCount = 1;
 	queueCreateInfos[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -300,12 +434,15 @@ allNecessaryQueuesPresent:;
 	VkCommandPoolCreateInfo poolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 	poolCreateInfo.flags = 0;
 	poolCreateInfo.queueFamilyIndex = graphicsFamily;
-	CHK_VK(vkCreateCommandPool(logicalDevice, &poolCreateInfo, VK_NULL_HANDLE, &graphicsCommandPool));
+	CHK_VK(vkCreateCommandPool(logicalDevice, &poolCreateInfo, VK_NULL_HANDLE, &graphicsCommandPools[0]));
+	CHK_VK(vkCreateCommandPool(logicalDevice, &poolCreateInfo, VK_NULL_HANDLE, &graphicsCommandPools[1]));
 	VkCommandBufferAllocateInfo cmdBufInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-	cmdBufInfo.commandPool = graphicsCommandPool;
+	cmdBufInfo.commandPool = graphicsCommandPools[0];
 	cmdBufInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	cmdBufInfo.commandBufferCount = 1;
 	CHK_VK(vkAllocateCommandBuffers(logicalDevice, &cmdBufInfo, &graphicsCommandBuffer));
+	cmdBufInfo.commandPool = graphicsCommandPools[1];
+	CHK_VK(vkAllocateCommandBuffers(logicalDevice, &cmdBufInfo, &inFlightGraphicsCommandBuffer));
 
 	hostMemoryTypeIndex = U32_MAX;
 	deviceMemoryTypeIndex = U32_MAX;
@@ -331,7 +468,16 @@ allNecessaryQueuesPresent:;
 	
 	graphicsStager.init(graphicsQueue, graphicsFamily);
 	geometryHandler.init(128 * ONE_MEGABYTE);
-	skinningHandler.init(2 * ONE_MEGABYTE);
+	uniformMatricesHandler.init(2 * ONE_MEGABYTE);
+
+	VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+	vkCreateFence(logicalDevice, &fenceInfo, nullptr, &geometryCullAndDrawFence);
+	VkSemaphoreCreateInfo semaphoreInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+	semaphoreInfo.flags = 0;
+	vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore);
+
+	desktopSwapchainData.create(Win32::framebufferWidth, Win32::framebufferHeight);
 }
 
 
@@ -396,7 +542,7 @@ Framebuffer& Framebuffer::new_attachment(VkFormat imageFormat, VkImageUsageFlags
 	VkImageViewCreateInfo imageViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 	imageViewInfo.flags = 0;
 	imageViewInfo.image = image;
-	imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	imageViewInfo.viewType = layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
 	imageViewInfo.format = imageFormat;
 	imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -576,25 +722,6 @@ struct RenderPassBuilder {
 };
 
 void create_render_targets() {
-	xrSwapchainData.swapchainImageViews = globalArena.alloc<VkImageView>(xrSwapchainData.swapchainImageCount);
-	for (u32 i = 0; i < xrSwapchainData.swapchainImageCount; i++) {
-		VkImageViewCreateInfo imageViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-		imageViewInfo.flags = 0;
-		imageViewInfo.image = xrSwapchainData.swapchainImages[i];
-		imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imageViewInfo.format = OPENXR_SWAPCHAIN_IMAGE_FORMAT;
-		imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		imageViewInfo.subresourceRange.baseMipLevel = 0;
-		imageViewInfo.subresourceRange.levelCount = 1;
-		imageViewInfo.subresourceRange.baseArrayLayer = 0;
-		imageViewInfo.subresourceRange.layerCount = 2; // 2 eyes
-		CHK_VK(vkCreateImageView(logicalDevice, &imageViewInfo, VK_NULL_HANDLE, &xrSwapchainData.swapchainImageViews[i]));
-	}
-
 	mainRenderPass = RenderPassBuilder{}.set_default()
 		.color_attachment(VK_FORMAT_R8G8B8A8_SRGB)
 		.depth_attachment(VK_FORMAT_D32_SFLOAT)
@@ -706,17 +833,37 @@ struct DescriptorSetBuilder {
 		return *this;
 	}
 
-	VkDescriptorSet build(VkDescriptorSetLayout* outSetLayout) {
-		VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-		layoutInfo.flags = 0;
-		layoutInfo.bindingCount = bindingCount;
-		layoutInfo.pBindings = bindings;
-		VkDescriptorSetLayoutBindingFlagsCreateInfo layoutInfoFlags{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
-		layoutInfoFlags.bindingCount = bindingCount;
-		layoutInfoFlags.pBindingFlags = bindingFlags;
-		layoutInfo.pNext = &layoutInfoFlags;
+	DescriptorSetBuilder& uniform_buffer(u32 bindingIndex, VkShaderStageFlags stageFlags) {
+		if (bindingCount == MAX_LAYOUT_BINDINGS) {
+			abort("Ran out of layout bindings");
+		}
+		u32 bindingIdx = bindingCount++;
+		VkDescriptorSetLayoutBinding& binding = bindings[bindingIdx];
+		binding.binding = bindingIndex;
+		binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		binding.descriptorCount = 1;
+		binding.stageFlags = stageFlags;
+		binding.pImmutableSamplers = nullptr;
+		bindingFlags[bindingIdx] = 0;
+		return *this;
+	}
+
+	VkDescriptorSet build(VkDescriptorSetLayout* currentSetLayout) {
 		VkDescriptorSetLayout setLayout;
-		CHK_VK(vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, VK_NULL_HANDLE, &setLayout));
+		if (*currentSetLayout == VK_NULL_HANDLE) {
+			VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+			layoutInfo.flags = 0;
+			layoutInfo.bindingCount = bindingCount;
+			layoutInfo.pBindings = bindings;
+			VkDescriptorSetLayoutBindingFlagsCreateInfo layoutInfoFlags{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+			layoutInfoFlags.bindingCount = bindingCount;
+			layoutInfoFlags.pBindingFlags = bindingFlags;
+			layoutInfo.pNext = &layoutInfoFlags;
+			CHK_VK(vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, VK_NULL_HANDLE, &setLayout));
+			*currentSetLayout = setLayout;
+		} else {
+			setLayout = *currentSetLayout;
+		}
 
 		if (descriptorPools.empty()) {
 			alloc_new_descriptor_pool();
@@ -733,8 +880,6 @@ struct DescriptorSetBuilder {
 			setAllocResult = vkAllocateDescriptorSets(logicalDevice, &setAllocInfo, &descriptorSet);
 		}
 		CHK_VK(setAllocResult);
-		// I'm creating both of these in one place at the moment because I'm not yet sure in what cases I would reuse a layout
-		*outSetLayout = setLayout;
 		return descriptorSet;
 	}
 };
@@ -803,7 +948,7 @@ struct GraphicsPipelineBuilder {
 			abort("Must set shader file name to build VkPipeline");
 		}
 
-		stackArena.push_frame();
+		u64 stackArenaFrame0 = stackArena.stackPtr;
 		u32 spirvDwordCount;
 		u32* spirv = read_full_file_to_arena<u32>(&spirvDwordCount, stackArena, shaderFileName);
 		if (spirv == nullptr) {
@@ -817,7 +962,7 @@ struct GraphicsPipelineBuilder {
 		moduleInfo.pCode = spirv;
 		VkShaderModule shaderModule;
 		CHK_VK(vkCreateShaderModule(logicalDevice, &moduleInfo, VK_NULL_HANDLE, &shaderModule));
-		stackArena.pop_frame();
+		stackArena.stackPtr = stackArenaFrame0;
 
 		VkPipelineShaderStageCreateInfo stageInfos[]{ { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
 		VkPipelineShaderStageCreateInfo& vertexStageInfo = stageInfos[0];
@@ -938,7 +1083,7 @@ struct GraphicsPipelineBuilder {
 		pipelineInfo.pDepthStencilState = &depthStencilStateInfo;
 		pipelineInfo.pColorBlendState = &colorBlendStateInfo;
 		pipelineInfo.pDynamicState = &dynamicStateInfo;
-		pipelineInfo.layout = testPipelineLayout;
+		pipelineInfo.layout = pipelineLayout;
 		pipelineInfo.renderPass = mainRenderPass;
 		pipelineInfo.subpass = 0;
 		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
@@ -980,7 +1125,7 @@ struct ComputePipelineBuilder {
 			abort("Must set shader file name to build VkPipeline");
 		}
 
-		stackArena.push_frame();
+		u64 stackArenaFrame0 = stackArena.stackPtr;
 		u32 spirvDwordCount;
 		u32* spirv = read_full_file_to_arena<u32>(&spirvDwordCount, stackArena, shaderFileName);
 		if (spirv == nullptr) {
@@ -994,7 +1139,7 @@ struct ComputePipelineBuilder {
 		moduleInfo.pCode = spirv;
 		VkShaderModule shaderModule;
 		CHK_VK(vkCreateShaderModule(logicalDevice, &moduleInfo, nullptr, &shaderModule));
-		stackArena.pop_frame();
+		stackArena.stackPtr = stackArenaFrame0;
 
 		VkComputePipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
 		pipelineInfo.flags = 0;
@@ -1016,144 +1161,7 @@ struct ComputePipelineBuilder {
 	}
 };
 
-enum DMFObjectID : u32 {
-	DMF_OBJECT_ID_NONE = 0,
-	DMF_OBJECT_ID_MESH = 1,
-	DMF_OBJECT_ID_ANIMATED_MESH = 2
-};
-
-static constexpr u32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
-
-void read_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, u32* skinningDataOffsetOut) {
-	u32 numVertices = modelFile.read_u32();
-	u32 numIndices = modelFile.read_u32();
-	u32 vertexDataSize = numVertices * VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
-	if (skinningDataOffsetOut != nullptr) {
-		vertexDataSize += numVertices * VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE;
-	}
-	u32 indexDataSize = numIndices * sizeof(u16);
-	if (modelFile.failed) {
-		print("Model failed read position: ");
-		println_integer(modelFile.offset);
-		abort("Model format incorrect");
-	}
-	if (!modelFile.has_data_left(vertexDataSize + indexDataSize)) {
-		abort("Model file does not have enough data for all vertices and indices");
-	}
-	mesh->indicesCount = numIndices;
-	mesh->verticesCount = numVertices;
-	if (skinningDataOffsetOut) {
-		geometryHandler.alloc_skeletal(&mesh->indicesOffset, &mesh->verticesOffset, skinningDataOffsetOut, numIndices, numVertices);
-	} else {
-		geometryHandler.alloc_static(&mesh->indicesOffset, &mesh->verticesOffset, numIndices, numVertices);
-	}
-	graphicsStager.upload_to_buffer(geometryHandler.buffer, geometryHandler.positionsOffset + mesh->verticesOffset * sizeof(Vector3f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector3f));
-	modelFile.offset += numVertices * sizeof(Vector3f);
-	graphicsStager.upload_to_buffer(geometryHandler.buffer, geometryHandler.texcoordsOffset + mesh->verticesOffset * sizeof(Vector2f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector2f));
-	modelFile.offset += numVertices * sizeof(Vector2f);
-	graphicsStager.upload_to_buffer(geometryHandler.buffer, geometryHandler.normalsOffset + mesh->verticesOffset * sizeof(Vector3f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector3f));
-	modelFile.offset += numVertices * sizeof(Vector3f);
-	graphicsStager.upload_to_buffer(geometryHandler.buffer, geometryHandler.tangentsOffset + mesh->verticesOffset * sizeof(Vector3f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector3f));
-	modelFile.offset += numVertices * sizeof(Vector3f);
-	if (skinningDataOffsetOut) {
-		graphicsStager.upload_to_buffer(geometryHandler.buffer, geometryHandler.skinDataOffset + *skinningDataOffsetOut * u64(VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE), modelFile.bytes + modelFile.offset, numVertices * u64(VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE));
-		modelFile.offset += numVertices * VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE;
-	}
-	graphicsStager.upload_to_buffer(geometryHandler.buffer, geometryHandler.indicesOffset + mesh->indicesOffset * sizeof(u16), modelFile.bytes + modelFile.offset, numIndices * sizeof(u16));
-	modelFile.offset += indexDataSize;
-
-	stackArena.pop_frame();
-}
-
-VKGeometry::StaticMesh load_dmf_static_mesh(const char* modelFileName) {
-	stackArena.push_frame();
-	u32 modelFileSize;
-	byte* modelData = read_full_file_to_arena<byte>(&modelFileSize, stackArena, modelFileName);
-	if (modelData == nullptr) {
-		print("Failed to read model file: ");
-		println(modelFileName);
-		abort("Failed to read model file");
-	}
-	ByteBuf modelFile{};
-	modelFile.wrap(modelData, modelFileSize);
-	if (modelFile.read_u32() != bswap32('DUCK')) {
-		abort("Model file header did not match DUCK");
-	}
-	if (modelFile.read_u32() < LAST_KNOWN_DMF_VERSION) {
-		abort("Model file out of date");
-	}
-	u32 numObjects = modelFile.read_u32();
-	if (numObjects == 0) {
-		abort("No objects in file");
-	}
-
-	VKGeometry::StaticMesh mesh{};
-	DMFObjectID objectType = static_cast<DMFObjectID>(modelFile.read_u32());
-	if (objectType != DMF_OBJECT_ID_MESH) {
-		abort("Tried to load non static mesh from file to static mesh");
-	}
-	String meshName = modelFile.read_string();
-	read_dmf_mesh(&mesh, modelFile, nullptr);
-
-	if (modelFile.failed) {
-		abort("Reading model file failed");
-	}
-	stackArena.pop_frame();
-	return mesh;
-}
-
-VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(const char* modelFileName) {
-	stackArena.push_frame();
-	u32 modelFileSize;
-	byte* modelData = read_full_file_to_arena<byte>(&modelFileSize, stackArena, modelFileName);
-	if (modelData == nullptr) {
-		print("Failed to read model file: ");
-		println(modelFileName);
-		abort("Failed to read model file");
-	}
-	ByteBuf modelFile{};
-	modelFile.wrap(modelData, modelFileSize);
-	if (modelFile.read_u32() != bswap32('DUCK')) {
-		abort("Model file header did not match DUCK");
-	}
-	if (modelFile.read_u32() < LAST_KNOWN_DMF_VERSION) {
-		abort("Model file out of date");
-	}
-	u32 numObjects = modelFile.read_u32();
-	if (numObjects == 0) {
-		abort("No objects in file");
-	}
-
-	VKGeometry::SkeletalMesh mesh{};
-	DMFObjectID objectType = static_cast<DMFObjectID>(modelFile.read_u32());
-	if (objectType != DMF_OBJECT_ID_ANIMATED_MESH) {
-		abort("Tried to load non animated mesh from file to skeletal mesh");
-	}
-	String name = modelFile.read_string();
-	u32 numBones = modelFile.read_u32();
-	u32 skeletonSize = OFFSET_OF(VKGeometry::Skeleton, bones[numBones]);
-	VKGeometry::Skeleton* skeleton = globalArena.alloc_bytes<VKGeometry::Skeleton>(skeletonSize);
-	skeleton->boneCount = numBones;
-	for (u32 boneIdx = 0; boneIdx < numBones; boneIdx++) {
-		String boneName = modelFile.read_string();
-		skeleton->bones[boneIdx].parentIdx = modelFile.read_u32();
-		skeleton->bones[boneIdx].bindTransform = modelFile.read_matrix4x3f();
-	}
-	u32 numSubMeshes = modelFile.read_u32();
-	if (numSubMeshes < 1) {
-		abort("Animated skeleton had no meshes to animate");
-	}
-	read_dmf_mesh(&mesh.geometry, modelFile, &mesh.skinningDataOffset);
-	mesh.skeletonData = skeleton;
-
-	if (modelFile.failed) {
-		abort("Reading model file failed");
-	}
-	stackArena.pop_frame();
-	return mesh;
-}
-
-void load_resources() {
+void load_pipelines_and_descriptors() {
 	// Descriptor sets
 	skinningDescriptorSet = DescriptorSetBuilder{}.set_default()
 		.storage_buffer(0, VK_SHADER_STAGE_COMPUTE_BIT) // bones
@@ -1166,10 +1174,10 @@ void load_resources() {
 		.storage_buffer(7, VK_SHADER_STAGE_COMPUTE_BIT) // outputTangents
 		.build(&skinningDescriptorSetLayout);
 	
-	VkDescriptorBufferInfo bufferInfos[8];
-	VkWriteDescriptorSet descriptorWrites[8];
+	VkDescriptorBufferInfo skinningBufferInfos[8];
+	VkWriteDescriptorSet skinningDescriptorWrites[8];
 	for (u32 i = 0; i < 8; i++) {
-		VkWriteDescriptorSet& descriptorWrite = descriptorWrites[i];
+		VkWriteDescriptorSet& descriptorWrite = skinningDescriptorWrites[i];
 		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrite.pNext = nullptr;
 		descriptorWrite.dstSet = skinningDescriptorSet;
@@ -1177,22 +1185,38 @@ void load_resources() {
 		descriptorWrite.dstArrayElement = 0;
 		descriptorWrite.descriptorCount = 1;
 		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorWrite.pBufferInfo = &bufferInfos[i];
+		descriptorWrite.pBufferInfo = &skinningBufferInfos[i];
 	}
-	bufferInfos[0] = VkDescriptorBufferInfo{ skinningHandler.buffer, 0, skinningHandler.maxMatrices * sizeof(Matrix4x3f) };
-	bufferInfos[1] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.positionsOffset, geometryHandler.texcoordsOffset - geometryHandler.positionsOffset };
-	bufferInfos[2] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.normalsOffset, geometryHandler.tangentsOffset - geometryHandler.normalsOffset };
-	bufferInfos[3] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.tangentsOffset, geometryHandler.skinDataOffset - geometryHandler.tangentsOffset };
-	bufferInfos[4] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinDataOffset, geometryHandler.skinnedPositionsOffset - geometryHandler.skinDataOffset };
-	bufferInfos[5] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinnedPositionsOffset, geometryHandler.skinnedNormalsOffset - geometryHandler.skinnedPositionsOffset };
-	bufferInfos[6] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinnedNormalsOffset, geometryHandler.skinnedTangentsOffset - geometryHandler.skinnedNormalsOffset };
-	bufferInfos[7] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinnedTangentsOffset, geometryHandler.memorySize - geometryHandler.skinnedTangentsOffset };
+	skinningBufferInfos[0] = VkDescriptorBufferInfo{ uniformMatricesHandler.buffer, 0, uniformMatricesHandler.maxMatrices * sizeof(Matrix4x3f) };
+	skinningBufferInfos[1] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.positionsOffset, geometryHandler.texcoordsOffset - geometryHandler.positionsOffset };
+	skinningBufferInfos[2] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.normalsOffset, geometryHandler.tangentsOffset - geometryHandler.normalsOffset };
+	skinningBufferInfos[3] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.tangentsOffset, geometryHandler.skinDataOffset - geometryHandler.tangentsOffset };
+	skinningBufferInfos[4] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinDataOffset, geometryHandler.skinnedPositionsOffset - geometryHandler.skinDataOffset };
+	skinningBufferInfos[5] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinnedPositionsOffset, geometryHandler.skinnedNormalsOffset - geometryHandler.skinnedPositionsOffset };
+	skinningBufferInfos[6] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinnedNormalsOffset, geometryHandler.skinnedTangentsOffset - geometryHandler.skinnedNormalsOffset };
+	skinningBufferInfos[7] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.skinnedTangentsOffset, geometryHandler.memorySize - geometryHandler.skinnedTangentsOffset };
+	vkUpdateDescriptorSets(logicalDevice, ARRAY_COUNT(skinningDescriptorWrites), skinningDescriptorWrites, 0, nullptr);
 
-	vkUpdateDescriptorSets(logicalDevice, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, nullptr);
+	drawDataDescriptorSet = DescriptorSetBuilder{}.set_default()
+		.storage_buffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+		.build(&drawDataDescriptorSetLayout);
+	VkDescriptorBufferInfo drawDataBufferInfos[1];
+	VkWriteDescriptorSet drawDataDescriptorWrites[1];
+	drawDataDescriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	drawDataDescriptorWrites[0].pNext = nullptr;
+	drawDataDescriptorWrites[0].dstSet = drawDataDescriptorSet;
+	drawDataDescriptorWrites[0].dstBinding = 0;
+	drawDataDescriptorWrites[0].dstArrayElement = 0;
+	drawDataDescriptorWrites[0].descriptorCount = 1;
+	drawDataDescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	drawDataDescriptorWrites[0].pBufferInfo = &drawDataBufferInfos[0];
+	drawDataBufferInfos[0] = VkDescriptorBufferInfo{ uniformMatricesHandler.buffer, 0, uniformMatricesHandler.maxMatrices * sizeof(Matrix4x3f) };
+	vkUpdateDescriptorSets(logicalDevice, ARRAY_COUNT(drawDataDescriptorWrites), drawDataDescriptorWrites, 0, nullptr);
 
 	// Pipelines
 	testPipelineLayout = PipelineLayoutBuilder{}.set_default()
-		.push_constant(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantMatrices))
+		.push_constant(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUModelInfo))
+		.set_layout(drawDataDescriptorSetLayout)
 		.build();
 	testPipeline = GraphicsPipelineBuilder{}.set_default()
 		.layout(testPipelineLayout)
@@ -1210,18 +1234,33 @@ void load_resources() {
 		.layout(skinningPipelineLayout)
 		.shader_name("./resources/shaders/skinning.spv")
 		.build();
+}
 
-	// Models
-	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf");
-	testAnimMesh = load_dmf_skeletal_mesh("./resources/models/test_anim.dmf");
-
+void finish_startup() {
 	graphicsStager.flush();
-
 	CHK_VK(vkDeviceWaitIdle(logicalDevice));
 }
 
 void begin_frame() {
-	CHK_VK(vkResetCommandPool(logicalDevice, graphicsCommandPool, 0));
+	if (Win32::shouldRecreateSwapchain) {
+		desktopSwapchainData.resize(Win32::framebufferWidth, Win32::framebufferHeight);
+		Win32::shouldRecreateSwapchain = false;
+	}
+	if (!desktopSwapchainData.shouldTryPresentToDesktopThisFrame && desktopSwapchainData.swapchain != VK_NULL_HANDLE) {
+		VkResult acquireResult = vkAcquireNextImageKHR(logicalDevice, desktopSwapchainData.swapchain, MILLISECOND_TO_NANOSECOND(0), VK_NULL_HANDLE, desktopSwapchainData.swapchainAcquireFence, &desktopSwapchainData.swapchainImageIdx);
+		if (acquireResult == VK_SUCCESS) {
+			desktopSwapchainData.shouldTryPresentToDesktopThisFrame = true;
+		} if (acquireResult == VK_TIMEOUT) {
+			// Couldn't acquire an image this frame? Just skip it, since we don't want to block the HMD
+		} else if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+			desktopSwapchainData.resize(Win32::framebufferWidth, Win32::framebufferHeight);
+			Win32::shouldRecreateSwapchain = false;
+		} else {
+			CHK_VK(acquireResult);
+		}
+	}
+
+	CHK_VK(vkResetCommandPool(logicalDevice, graphicsCommandPools[0], 0));
 
 	VkCommandBufferBeginInfo cmdBufInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	cmdBufInfo.flags = 0;
@@ -1229,10 +1268,22 @@ void begin_frame() {
 	CHK_VK(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
 
 	geometryHandler.reset_skinned_results();
-	skinningHandler.reset();
+	uniformMatricesHandler.reset();
 }
 
 void end_frame(b32 shouldRender) {
+	if (desktopSwapchainData.shouldTryPresentToDesktopThisFrame && !desktopSwapchainData.desktopSwapchainReadyForPresent) {
+		VkResult fenceCheckResult = vkGetFenceStatus(logicalDevice, desktopSwapchainData.swapchainAcquireFence);
+		if (fenceCheckResult == VK_SUCCESS) {
+			desktopSwapchainData.desktopSwapchainReadyForPresent = true;
+			CHK_VK(vkResetFences(logicalDevice, 1, &desktopSwapchainData.swapchainAcquireFence));
+		} else if (fenceCheckResult == VK_NOT_READY) {
+			// Not ready yet, don't block VR present
+		} else {
+			CHK_VK(fenceCheckResult);
+		}
+	}
+
 	if (shouldRender) {
 		VkImageMemoryBarrier imageTransferBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
 		imageTransferBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -1250,10 +1301,16 @@ void end_frame(b32 shouldRender) {
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
 		imageTransferBarrier.srcAccessMask = VK_ACCESS_NONE_KHR;
 		imageTransferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		imageTransferBarrier.image = VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx];
+		imageTransferBarrier.image = xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx];
 		imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+		if (desktopSwapchainData.desktopSwapchainReadyForPresent) {
+			imageTransferBarrier.subresourceRange.layerCount = 1;
+			imageTransferBarrier.image = desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx];
+			vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+			imageTransferBarrier.subresourceRange.layerCount = 2;
+		}
 
 		VkImageBlit finalBlit{};
 		finalBlit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1261,40 +1318,77 @@ void end_frame(b32 shouldRender) {
 		finalBlit.srcSubresource.baseArrayLayer = 0;
 		finalBlit.srcSubresource.layerCount = 2;
 		finalBlit.srcOffsets[0] = VkOffset3D{ 0, 0, 0 };
-		finalBlit.srcOffsets[1] = VkOffset3D{ i32(VK::mainFramebuffer.framebufferWidth), i32(VK::mainFramebuffer.framebufferHeight), 1 };
+		finalBlit.srcOffsets[1] = VkOffset3D{ i32(mainFramebuffer.framebufferWidth), i32(mainFramebuffer.framebufferHeight), 1 };
 		finalBlit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		finalBlit.dstSubresource.mipLevel = 0;
 		finalBlit.dstSubresource.baseArrayLayer = 0;
 		finalBlit.dstSubresource.layerCount = 2;
 		finalBlit.dstOffsets[0] = VkOffset3D{ 0, 0, 0 };
 		finalBlit.dstOffsets[1] = VkOffset3D{ i32(XR::xrRenderWidth), i32(XR::xrRenderHeight), 1 };
-		VK::vkCmdBlitImage(graphicsCommandBuffer, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_NEAREST);
+		VK::vkCmdBlitImage(graphicsCommandBuffer, mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_NEAREST);
 
 		imageTransferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 		imageTransferBarrier.dstAccessMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		imageTransferBarrier.image = VK::xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx];
+		imageTransferBarrier.image = xrSwapchainData.swapchainImages[xrSwapchainData.swapchainImageIdx];
 		imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+
+		if (desktopSwapchainData.desktopSwapchainReadyForPresent) {
+			finalBlit.srcSubresource.layerCount = 1;
+			finalBlit.dstSubresource.layerCount = 1;
+			finalBlit.dstOffsets[1] = VkOffset3D{ i32(desktopSwapchainData.width), i32(desktopSwapchainData.height), 1 };
+			VK::vkCmdBlitImage(graphicsCommandBuffer, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_LINEAR);
+			
+			imageTransferBarrier.subresourceRange.layerCount = 1;
+			imageTransferBarrier.image = desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx];
+			imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+		}
 	}
 	
 	CHK_VK(vkEndCommandBuffer(graphicsCommandBuffer));
 
 	VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	submitInfo.waitSemaphoreCount = 0;
+	// At some point I plan to put a post processing semaphore here instead, that way post processing can run while I upload model matrices and stuff for the next frame
 	submitInfo.pWaitSemaphores = nullptr;
-	//VkPipelineStageFlags waitStages[]{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-	submitInfo.pWaitDstStageMask = nullptr;
+	VkPipelineStageFlags waitStages[]{ VK_PIPELINE_STAGE_TRANSFER_BIT };
+	submitInfo.pWaitDstStageMask = waitStages;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &graphicsCommandBuffer;
-	submitInfo.signalSemaphoreCount = 0;
-	submitInfo.pSignalSemaphores = nullptr;
-	CHK_VK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-	CHK_VK(vkQueueWaitIdle(graphicsQueue));
+	VkSemaphore signalSemaphores[]{ desktopSwapchainData.renderFinishedSemaphore };
+	submitInfo.signalSemaphoreCount = shouldRender && desktopSwapchainData.desktopSwapchainReadyForPresent ? ARRAY_COUNT(signalSemaphores) : ARRAY_COUNT(signalSemaphores) - 1;
+	submitInfo.pSignalSemaphores = signalSemaphores;
+	CHK_VK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, geometryCullAndDrawFence));
+	swap(&graphicsCommandPools[0], &graphicsCommandPools[1]);
+	swap(&graphicsCommandBuffer, &inFlightGraphicsCommandBuffer);
+
+
+	if (shouldRender && desktopSwapchainData.desktopSwapchainReadyForPresent) {
+		VkResult imagePresentResult = VK_SUCCESS;
+		VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = &desktopSwapchainData.renderFinishedSemaphore;
+		presentInfo.swapchainCount = 1;
+		presentInfo.pSwapchains = &desktopSwapchainData.swapchain;
+		presentInfo.pImageIndices = &desktopSwapchainData.swapchainImageIdx;
+		presentInfo.pResults = &imagePresentResult;
+		VkResult queuePresentResult = vkQueuePresentKHR(graphicsQueue, &presentInfo);
+		if (queuePresentResult == VK_ERROR_OUT_OF_DATE_KHR || queuePresentResult == VK_SUBOPTIMAL_KHR) {
+			desktopSwapchainData.resize(Win32::framebufferWidth, Win32::framebufferHeight);
+			Win32::shouldRecreateSwapchain = false;
+		} else {
+			CHK_VK(queuePresentResult);
+		}
+
+		desktopSwapchainData.shouldTryPresentToDesktopThisFrame = false;
+		desktopSwapchainData.desktopSwapchainReadyForPresent = false;
+	}
 }
 
 void end_vulkan() {
-	skinningHandler.destroy();
+	uniformMatricesHandler.destroy();
 	geometryHandler.destroy();
 	if (testPipeline) {
 		vkDestroyPipeline(logicalDevice, testPipeline, VK_NULL_HANDLE);

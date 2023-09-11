@@ -2,14 +2,18 @@
 #shader vertex
 #extension multiview
 
-struct ProjectiveMatrix {
+struct Matrix4x3f {
 	vec4f row0;
 	vec4f row1;
-	vec4f row3;
+	vec4f row2;
 }
 
-(block) struct PushConstantMatrices {
-	ProjectiveMatrix[2] eyeMatrices;
+(block) struct PushConstantModel {
+	u32 transformIndex;
+}
+
+(block) struct TransformMatrices {
+	Matrix4x3f[] matrices;
 }
 
 (input, builtin VertexIndex) i32& inVertexIndex;
@@ -24,33 +28,34 @@ struct ProjectiveMatrix {
 (output, location 0) vec3f& passPos;
 (output, location 1) vec3f& passNormal;
 
-(push_constant) PushConstantMatrices& pushConstantMatrices;
+(descriptor_set 0, binding 0, restrict, nonwritable, storage_buffer) TransformMatrices& transformMatrices;
+(push_constant) PushConstantModel& modelInfo;
 
 (entrypoint) void vert_main(){
-	//vec3f pos = vec3f(f32((inVertexIndex >>> 1) * 4 - 1), f32((inVertexIndex & 1) * 4 - 1), 0.0F);
-	/*
-	i32 vertexIdx = inVertexIndex;
-	vec4f pos;
-	if(vertexIdx == 0){
-		pos = vec4f(0.0F, 1.5F, 0.0F, 1.0F);
-		passColor = vec3f(1.0F, 0.0F, 0.0F);
-	} else if(vertexIdx == 1){
-		pos = vec4f(-0.5F, 0.5F, 0.0F, 1.0F);
-		passColor = vec3f(0.0F, 1.0F, 0.0F);
-	} else if(vertexIdx == 2){
-		pos = vec4f(0.5F, 0.5F, 0.0F, 1.0F);
-		passColor = vec3f(0.0F, 0.0F, 1.0F);
-	}
-	*/
 	vec4f pos = vec4f(inPosition, 1.0F);
+	vec3f norm = inNormal;
 	i32 viewIdx = inViewIndex;
-	f32 x = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row0);
-	f32 y = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row1);
+	u32 transformIndex = modelInfo.transformIndex;
+	Matrix4x3f modelMat = transformMatrices.matrices[transformIndex];
+	vec4f transformedPos = vec4f(
+		dot(pos, modelMat.row0),
+		dot(pos, modelMat.row1),
+		dot(pos, modelMat.row2),
+		1.0F
+	);
+	vec3f transformedNorm = vec3f(
+		dot(norm, modelMat.row0.xyz),
+		dot(norm, modelMat.row1.xyz),
+		dot(norm, modelMat.row2.xyz)
+	);
+	f32 x = dot(transformedPos, transformMatrices.matrices[viewIdx + 1].row0);
+	f32 y = dot(transformedPos, transformMatrices.matrices[viewIdx + 1].row1);
 	f32 z = 0.05F; // Near plane
-	f32 w = dot(pos, pushConstantMatrices.eyeMatrices[viewIdx].row3);
+	// row2 is actually row3 in  this case, since the matrix is a ProjectiveTransformMatrix
+	f32 w = dot(transformedPos, transformMatrices.matrices[viewIdx + 1].row2);
 	outPosition = vec4f(x, -y, z, w);
-	passPos = pos.xyz;
-	passNormal = inNormal;
+	passPos = transformedPos.xyz;
+	passNormal = transformedNorm;
 }
 
 //---------------------------------------------------------//
@@ -62,5 +67,5 @@ struct ProjectiveMatrix {
 
 (entrypoint) void frag_main(){
 	vec3f lightDir = vec3f(0.57735026919F, 0.57735026919F, 0.57735026919F);
-	outFragColor = vec4f(vec3f(dot(passNormal, lightDir) * 0.5F + 0.5F), 1.0F);
+	outFragColor = vec4f(vec3f(dot(normalize(passNormal), lightDir) * 0.5F + 0.5F), 1.0F);
 }
