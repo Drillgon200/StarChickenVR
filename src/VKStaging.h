@@ -65,7 +65,7 @@ struct GPUUploadStager {
 		VkMemoryAllocateInfo memoryAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 		memoryAllocateInfo.allocationSize = ALIGN_HIGH(memoryRequirements[0].size, memoryRequirements[1].alignment) + memoryRequirements[1].size;
 		memoryAllocateInfo.memoryTypeIndex = VK::hostMemoryTypeIndex;
-		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &memoryAllocateInfo, VK_NULL_HANDLE, &memory));
+		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &memoryAllocateInfo, nullptr, &memory));
 		void* memoryMapping;
 		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, UPLOAD_BUFFER_SIZE, 0, &memoryMapping));
 
@@ -80,12 +80,12 @@ struct GPUUploadStager {
 
 	void destroy() {
 		for (u32 i = 0; i < 2; i++) {
-			VK::vkDestroyCommandPool(VK::logicalDevice, stagingBuffers[i].commandPool, VK_NULL_HANDLE);
-
-			VK::vkUnmapMemory(VK::logicalDevice, memory);
-			VK::vkDestroyBuffer(VK::logicalDevice, stagingBuffers[i].uploadBuffer, VK_NULL_HANDLE);
+			VK::vkDestroyCommandPool(VK::logicalDevice, stagingBuffers[i].commandPool, nullptr);
+			VK::vkDestroyBuffer(VK::logicalDevice, stagingBuffers[i].uploadBuffer, nullptr);
+			VK::vkDestroyFence(VK::logicalDevice, stagingBuffers[i].uploadFinishedFence, nullptr);
 		}
-		VK::vkFreeMemory(VK::logicalDevice, memory, VK_NULL_HANDLE);
+		VK::vkUnmapMemory(VK::logicalDevice, memory);
+		VK::vkFreeMemory(VK::logicalDevice, memory, nullptr);
 	}
 
 	VkCommandBuffer current_cmd_buf() {

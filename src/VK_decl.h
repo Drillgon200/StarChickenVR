@@ -67,6 +67,7 @@ namespace VK {
 	OP(vkDestroyPipeline)\
 	OP(vkCreateGraphicsPipelines)\
 	OP(vkCreatePipelineLayout)\
+	OP(vkDestroyPipelineLayout)\
 	OP(vkCreateShaderModule)\
 	OP(vkDestroyShaderModule)\
 	OP(vkCmdSetViewport)\
@@ -162,6 +163,7 @@ struct Framebuffer {
 	u32 framebufferHeight;
 	FramebufferAttachment attachments[MAX_FRAMEBUFFER_ATTACHMENTS];
 	u32 attachmentCount;
+	b32 addedToFreeList;
 
 	Framebuffer& set_default();
 	Framebuffer& render_pass(VkRenderPass pass);

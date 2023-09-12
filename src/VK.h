@@ -92,9 +92,6 @@ struct DesktopSwapchainData {
 	u32 height;
 
 	void create(i32 newWidth, i32 newHeight) {
-		print_integer(newWidth);
-		print(" ");
-		println_integer(newHeight);
 		u64 stackArenaFrame0 = stackArena.stackPtr;
 		if (newWidth <= 0 || newHeight <= 0 || !StarChicken::shouldUseDesktopWindow || vkGetPhysicalDeviceWin32PresentationSupportKHR(physicalDevice, graphicsFamily) == VK_FALSE) {
 			swapchain = VK_NULL_HANDLE;
@@ -202,12 +199,21 @@ struct DesktopSwapchainData {
 	}
 
 	void destroy() {
-		vkDestroyFence(logicalDevice, swapchainAcquireFence, nullptr);
-		vkDestroySemaphore(logicalDevice, this->renderFinishedSemaphore, nullptr);
-		vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
-		vkDestroySurfaceKHR(vkInstance, surface, nullptr);
+		if (swapchain != VK_NULL_HANDLE) {
+			vkDestroyFence(logicalDevice, swapchainAcquireFence, nullptr);
+			vkDestroySemaphore(logicalDevice, this->renderFinishedSemaphore, nullptr);
+			vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
+			vkDestroySurfaceKHR(vkInstance, surface, nullptr);
+		}
 	}
 } desktopSwapchainData;
+
+struct DestroyLists {
+	ArenaArrayList<VkDescriptorSetLayout, &globalArena> descriptorSetLayouts;
+	ArenaArrayList<Framebuffer*, &globalArena> framebuffers;
+	ArenaArrayList<VkPipelineLayout, &globalArena> pipelineLayouts;
+	ArenaArrayList<VkPipeline, &globalArena> pipelines;
+} destroyLists;
 
 void vulkan_failure(VkResult result, const char* msg) {
 	print("VK function failed! Error code: ");
@@ -598,21 +604,28 @@ Framebuffer& Framebuffer::build() {
 	framebufferInfo.height = framebufferHeight;
 	framebufferInfo.layers = 1;
 	CHK_VK(vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &framebuffer));
+	if (!addedToFreeList) {
+		addedToFreeList = true;
+		destroyLists.framebuffers.push_back(this);
+	}
 	return *this;;
 }
 
 void Framebuffer::destroy() {
-	vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
-	for (u32 i = 0; i < attachmentCount; i++) {
-		FramebufferAttachment& attachment = attachments[i];
-		if (attachment.ownsImageView) {
-			vkDestroyImageView(logicalDevice, attachment.imageView, nullptr);
-		}
-		if (attachment.image != VK_NULL_HANDLE) {
-			vkDestroyImage(logicalDevice, attachment.image, nullptr);
-		}
-		if (attachment.memory != VK_NULL_HANDLE) {
-			vkFreeMemory(logicalDevice, attachment.memory, nullptr);
+	if (framebuffer != VK_NULL_HANDLE) {
+		vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
+		framebuffer = VK_NULL_HANDLE;
+		for (u32 i = 0; i < attachmentCount; i++) {
+			FramebufferAttachment& attachment = attachments[i];
+			if (attachment.ownsImageView) {
+				vkDestroyImageView(logicalDevice, attachment.imageView, nullptr);
+			}
+			if (attachment.image != VK_NULL_HANDLE) {
+				vkDestroyImage(logicalDevice, attachment.image, nullptr);
+			}
+			if (attachment.memory != VK_NULL_HANDLE) {
+				vkFreeMemory(logicalDevice, attachment.memory, nullptr);
+			}
 		}
 	}
 }
@@ -773,6 +786,7 @@ struct PipelineLayoutBuilder {
 		layoutInfo.pPushConstantRanges = pushConstants;
 		VkPipelineLayout layout;
 		CHK_VK(vkCreatePipelineLayout(logicalDevice, &layoutInfo, VK_NULL_HANDLE, &layout));
+		destroyLists.pipelineLayouts.push_back(layout);
 		return layout;
 	}
 };
@@ -861,6 +875,7 @@ struct DescriptorSetBuilder {
 			layoutInfo.pNext = &layoutInfoFlags;
 			CHK_VK(vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, VK_NULL_HANDLE, &setLayout));
 			*currentSetLayout = setLayout;
+			destroyLists.descriptorSetLayouts.push_back(setLayout);
 		} else {
 			setLayout = *currentSetLayout;
 		}
@@ -1093,6 +1108,8 @@ struct GraphicsPipelineBuilder {
 
 		vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
 
+		destroyLists.pipelines.push_back(pipeline);
+
 		return pipeline;
 	}
 };
@@ -1156,6 +1173,8 @@ struct ComputePipelineBuilder {
 		CHK_VK(vkCreateComputePipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, VK_NULL_HANDLE, &pipeline));
 
 		vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
+
+		destroyLists.pipelines.push_back(pipeline);
 
 		return pipeline;
 	}
@@ -1335,7 +1354,13 @@ void end_frame(b32 shouldRender) {
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
 
 		if (desktopSwapchainData.desktopSwapchainReadyForPresent) {
+			Vector2f middle{ f32(XR::xrRenderWidth) * 0.5F, f32(XR::xrRenderHeight) * 0.5F };
+			Vector2f blitSourceExtent = Vector2f{ f32(desktopSwapchainData.width) * 0.5F, f32(desktopSwapchainData.height) * 0.5F };
+			blitSourceExtent *= min(middle.x / blitSourceExtent.x, middle.y / blitSourceExtent.y);
+
 			finalBlit.srcSubresource.layerCount = 1;
+			finalBlit.srcOffsets[0] = VkOffset3D{ max(i32(middle.x - blitSourceExtent.x), 0), max(i32(middle.y - blitSourceExtent.y), 0), 0 };
+			finalBlit.srcOffsets[1] = VkOffset3D{ min(i32(middle.x + blitSourceExtent.x), i32(XR::xrRenderWidth)), min(i32(middle.y + blitSourceExtent.y), i32(XR::xrRenderHeight)), 1 };
 			finalBlit.dstSubresource.layerCount = 1;
 			finalBlit.dstOffsets[1] = VkOffset3D{ i32(desktopSwapchainData.width), i32(desktopSwapchainData.height), 1 };
 			VK::vkCmdBlitImage(graphicsCommandBuffer, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_LINEAR);
@@ -1388,21 +1413,40 @@ void end_frame(b32 shouldRender) {
 }
 
 void end_vulkan() {
+	vkDeviceWaitIdle(logicalDevice);
+	desktopSwapchainData.destroy();
 	uniformMatricesHandler.destroy();
 	geometryHandler.destroy();
-	if (testPipeline) {
-		vkDestroyPipeline(logicalDevice, testPipeline, VK_NULL_HANDLE);
+	graphicsStager.destroy();
+	vkDestroyFence(logicalDevice, geometryCullAndDrawFence, nullptr);
+	vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+	for (Framebuffer* framebuffer : destroyLists.framebuffers) {
+		framebuffer->destroy();
 	}
-	if (mainRenderPass) {
-		vkDestroyRenderPass(logicalDevice, mainRenderPass, VK_NULL_HANDLE);
+	for (VkDescriptorPool pool : DescriptorSetBuilder::descriptorPools) {
+		vkDestroyDescriptorPool(logicalDevice, pool, nullptr);
 	}
-	if (logicalDevice) {
-		vkDestroyDevice(logicalDevice, VK_NULL_HANDLE);
+	for (VkDescriptorSetLayout layout : destroyLists.descriptorSetLayouts) {
+		vkDestroyDescriptorSetLayout(logicalDevice, layout, nullptr);
 	}
+	for (VkPipeline pipeline : destroyLists.pipelines) {
+		vkDestroyPipeline(logicalDevice, pipeline, nullptr);
+	}
+	for (VkPipelineLayout layout : destroyLists.pipelineLayouts) {
+		vkDestroyPipelineLayout(logicalDevice, layout, nullptr);
+	}
+	if (graphicsCommandPools[0] != VK_NULL_HANDLE) {
+		vkDestroyCommandPool(logicalDevice, graphicsCommandPools[0], nullptr);
+		vkDestroyCommandPool(logicalDevice, graphicsCommandPools[1], nullptr);
+	}
+	if (mainRenderPass != VK_NULL_HANDLE) {
+		vkDestroyRenderPass(logicalDevice, mainRenderPass, nullptr);
+	}
+	vkDestroyDevice(logicalDevice, nullptr);
 #if VK_DEBUG != 0
-	vkDestroyDebugUtilsMessengerEXT(vkInstance, messenger, VK_NULL_HANDLE);
+	vkDestroyDebugUtilsMessengerEXT(vkInstance, messenger, nullptr);
 #endif
-	vkDestroyInstance(vkInstance, VK_NULL_HANDLE);
+	vkDestroyInstance(vkInstance, nullptr);
 }
 
 }

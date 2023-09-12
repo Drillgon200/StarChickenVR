@@ -32,6 +32,7 @@ struct PlayerInfo {
 b32 shouldShutDown;
 b32 shouldUseDesktopWindow;
 
+u64 frameNumber;
 u64 prevFrameTime;
 u64 frameTime;
 u64 timerFrequency;
@@ -113,10 +114,10 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	if (!QueryPerformanceCounter(&perfCounter)) {
 		abort("Could not get performance counter");
 	}
+	frameNumber++;
 	prevFrameTime = frameTime;
 	frameTime = u64(perfCounter.QuadPart);
-	// TODO compute deltaTime from OpenXR predicted display times so it's more accurate
-	deltaTime = f64(frameTime - prevFrameTime) / f64(timerFrequency);
+	deltaTime = f64(openxrFrameBeginInfo.predictedDisplayPeriod) / 1000000000.0;
 	totalTime += deltaTime;
 
 	u64 stackArenaFrame0 = stackArena.stackPtr;
@@ -361,9 +362,11 @@ u32 run_star_chicken() {
 		frameArena.stackPtr = frameArenaFrame0;
 	}
 
-	print("Shutting down...\n");
-	VK::end_vulkan();
+	print("Shutting down OpenXR...\n");
 	XR::end_openxr();
+	print("Shutting down Vulkan...\n");
+	VK::end_vulkan();
+	print("Shutdown complete.\n");
 	return EXIT_SUCCESS;
 }
 

@@ -104,6 +104,28 @@ struct Vector2f {
 };
 #pragma pack(pop)
 
+FINLINE Vector2f operator*(Vector2f a, Vector2f b) {
+	return Vector2f{ a.x * b.x, a.y * b.y };
+}
+
+FINLINE Vector2f operator*(Vector2f a, f32 b) {
+	return Vector2f{ a.x * b, a.y * b };
+}
+
+FINLINE Vector2f operator*(f32 a, Vector2f b) {
+	return Vector2f{ a * b.x, a * b.y };
+}
+
+FINLINE void operator*=(Vector2f& a, Vector2f b) {
+	a.x *= b.x;
+	a.y *= b.y;
+}
+
+FINLINE void operator*=(Vector2f& a, f32 b) {
+	a.x *= b;
+	a.y *= b;
+}
+
 #pragma pack(push, 1)
 struct Vector3f {
 	f32 x, y, z;

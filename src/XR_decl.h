@@ -74,6 +74,7 @@ struct OpenXRFrameInfo {
 	XrPosef rightEyePose;
 	XrFovf rightEyeFov;
 	XrTime predictedDisplayTime;
+	XrDuration predictedDisplayPeriod;
 	b32 shouldRender;
 };
 

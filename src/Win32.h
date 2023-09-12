@@ -40,6 +40,7 @@ void error_box(const char* msg) {
 
 void poll_events() {
 	MSG message{};
+	//TODO: PeekMessageA blocks when the user resizes or moves the window around, stopping my game loop. This isn't ideal.
 	while (PeekMessageA_ptr(&message, NULL, 0, 0, PM_REMOVE)) {
 		TranslateMessage_ptr(&message);
 		DispatchMessageA_ptr(&message);
@@ -96,6 +97,7 @@ bool init(u32 width, u32 height) {
 		WNDCLASSA windowClass{};
 		windowClass.lpfnWndProc = window_callback;
 		windowClass.hInstance = instance;
+		windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
 		const char* className = "Star Chicken View Window";
 		windowClass.lpszClassName = className;
 		RegisterClassA_ptr(&windowClass);

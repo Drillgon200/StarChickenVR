@@ -510,7 +510,7 @@ NODISCARD OpenXRFrameInfo begin_frame() {
 	CHK_XR(xrAcquireSwapchainImage(xrSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
 	VK::xrSwapchainData.swapchainImageIdx = swapchainImageIdx;
 
-	OpenXRFrameInfo frameInfo{ OPENXR_IDENTITY_POSE, lastValidLeftFov, OPENXR_IDENTITY_POSE, lastValidRightFov, frameState.predictedDisplayTime, frameState.shouldRender };
+	OpenXRFrameInfo frameInfo{ OPENXR_IDENTITY_POSE, lastValidLeftFov, OPENXR_IDENTITY_POSE, lastValidRightFov, frameState.predictedDisplayTime, frameState.predictedDisplayPeriod, frameState.shouldRender };
 	update_eye_poses(&frameInfo);
 	return frameInfo;
 }
@@ -547,9 +547,19 @@ void end_frame(OpenXRFrameInfo& frameInfo) {
 
 void end_openxr() {
 	xrDestroyActionSet(gameplayActionSet);
+	if (stageSpace) {
+		xrDestroySpace(stageSpace);
+	}
+	if (localSpace) {
+		xrDestroySpace(localSpace);
+	}
+	if (viewSpace) {
+		xrDestroySpace(viewSpace);
+	}
 	if (xrSwapchain) {
 		xrDestroySwapchain(xrSwapchain);
 	}
+	xrDestroySession(session);
 #if XR_DEBUG != 0
 	xrDestroyDebugUtilsMessengerEXT(messenger);
 #endif
