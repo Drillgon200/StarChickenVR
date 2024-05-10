@@ -5,14 +5,15 @@
 #include <Windows.h>
 #pragma warning(pop)
 #include "StarChicken.h"
+#include <ws2tcpip.h>
 
 // It is actually possible to initialize with no import libraries (see link)
 // However, it requires going through a lot of undocumented windows stuff that could change at any time
 // and I don't want my program to break on some future version of windows just because I didn't want to link to windows at compile time
 // https://hero.handmade.network/forums/code-discussion/t/129-howto_-_building_without_import_libraries
-extern "C" void mainCRTStartup() {
-	const u32 failToInitializeDrillLib = 2;
-	u32 result = failToInitializeDrillLib;
+extern "C" void __stdcall mainCRTStartup() {
+	const U32 failToInitializeDrillLib = 2;
+	U32 result = failToInitializeDrillLib;
 	if (drill_lib_init()) {
 		result = StarChicken::run_star_chicken();
 	}

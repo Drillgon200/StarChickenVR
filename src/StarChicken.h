@@ -5,39 +5,43 @@
 #include "VK.h"
 #include "XR.h"
 #include "Resources.h"
+#include "SerializeTools.h"
+#include "MSDFGenerator.h"
+#include "PNG.h"
+
 namespace StarChicken {
 
-enum PlayerFinger : u32 {
+enum PlayerFinger : U32 {
 	PLAYER_FINGER_INDEX = 0,
 	PLAYER_FINGER_MIDDLE = 1,
 	PLAYER_FINGER_RING = 2,
 	PLAYER_FINGER_PINKY = 3,
 	PLAYER_FINGER_THUMB = 4,
-	PLAYER_FINGER_COUNT = 5
+	PLAYER_FINGER_Count = 5
 };
 
 struct PlayerHand {
-	Matrix4x3f transform;
-	f32 fingerCloseAmounts[PLAYER_FINGER_COUNT];
-	f32 fingerCloseTargets[PLAYER_FINGER_COUNT];
-	b32 fingerBlocked[PLAYER_FINGER_COUNT];
+	M4x3F32 transform;
+	F32 fingerCloseAmounts[PLAYER_FINGER_Count];
+	F32 fingerCloseTargets[PLAYER_FINGER_Count];
+	B32 fingerBlocked[PLAYER_FINGER_Count];
 };
 
 struct PlayerInfo {
 	PlayerHand leftHand;
 	PlayerHand rightHand;
-	Vector3f position;
+	V3F32 position;
 };
 
-b32 shouldShutDown;
-b32 shouldUseDesktopWindow;
+B32 shouldShutDown;
+B32 shouldUseDesktopWindow;
 
-u64 frameNumber;
-u64 prevFrameTime;
-u64 frameTime;
-u64 timerFrequency;
-f64 deltaTime;
-f64 totalTime;
+U64 frameNumber;
+U64 prevFrameTime;
+U64 frameTime;
+U64 timerFrequency;
+F64 deltaTime;
+F64 totalTime;
 
 PlayerInfo player;
 
@@ -46,24 +50,25 @@ VKGeometry::SkeletalModel testAnimModel;
 VKGeometry::SkeletalModel playerRightHandModel;
 VKGeometry::SkeletalModel playerLeftHandModel;
 
-ArenaArrayList<VKGeometry::StaticModel*, &frameArena> staticModelsToRender;
-ArenaArrayList<VKGeometry::SkeletalModel*, &frameArena> skeletalModelsToRender;
+ArenaArrayList<VKGeometry::StaticModel*> staticModelsToRender;
+ArenaArrayList<VKGeometry::SkeletalModel*> skeletalModelsToRender;
 
 void setup_scene() {
-	player.position = Vector3f{ 0.0F, 8.5F, 12.35F };
+	player.position = V3F32{ 0.0F, 8.5F, 12.35F };
 	player.leftHand.transform.set_identity();
 	player.rightHand.transform.set_identity();
 	VKGeometry::make_static_model(&worldModel, Resources::testMesh);
 	VKGeometry::make_skeletal_model(&testAnimModel, Resources::testAnimMesh);
-	testAnimModel.transform.translate(Vector3f{ 3.0F, 3.0F, 0.0F });
-	VKGeometry::make_skeletal_model(&playerRightHandModel, Resources::testAnimMesh);
+	testAnimModel.transform.translate(V3F32{ 3.0F, 3.0F, 0.0F });
+	VKGeometry::make_skeletal_model(&playerRightHandModel, Resources::rightHandMesh);
+	VKGeometry::make_skeletal_model(&playerLeftHandModel, Resources::leftHandMesh);
 }
 
 void update_player(XR::OpenXRFrameInfo& openxrFrameInfo) {
 	playerRightHandModel.transform = XR::userInput.rightHand.pose;
-	playerRightHandModel.transform.add_offset(player.position).scale_local(Vector3f{ 0.1F, 0.1F, 0.1F });
+	playerRightHandModel.transform.add_offset(player.position).rotate_axis_angle(V3F32_NORTH, -0.25F).rotate_axis_angle(V3F32_UP, -0.07F);
 
-	for (u32 finger = PLAYER_FINGER_INDEX; finger < PLAYER_FINGER_PINKY; finger++) {
+	for (U32 finger = PLAYER_FINGER_INDEX; finger < PLAYER_FINGER_PINKY; finger++) {
 		player.rightHand.fingerCloseTargets[finger] = XR::userInput.rightHand.grip;
 	}
 	if (XR::userInput.rightHand.grip > 0.5F) {
@@ -78,12 +83,12 @@ void update_player(XR::OpenXRFrameInfo& openxrFrameInfo) {
 	}
 
 	PlayerHand* hands[2]{ &player.leftHand, &player.rightHand };
-	for (u32 hand = 0; hand < ARRAY_COUNT(hands); hand++) {
-		for (u32 finger = PLAYER_FINGER_INDEX; finger <= PLAYER_FINGER_PINKY; finger++) {
+	for (U32 hand = 0; hand < ARRAY_COUNT(hands); hand++) {
+		for (U32 finger = PLAYER_FINGER_INDEX; finger <= PLAYER_FINGER_PINKY; finger++) {
 			if (!hands[hand]->fingerBlocked[finger]) {
-				f32 fingerCloseAmount = hands[hand]->fingerCloseAmounts[finger];
-				f32 fingerCloseTarget = hands[hand]->fingerCloseTargets[finger];
-				hands[hand]->fingerCloseAmounts[finger] = clamp01(fingerCloseAmount + clamp(fingerCloseTarget - fingerCloseAmount, -0.8F, 0.8F) * f32(deltaTime));
+				F32 fingerCloseAmount = hands[hand]->fingerCloseAmounts[finger];
+				F32 fingerCloseTarget = hands[hand]->fingerCloseTargets[finger];
+				hands[hand]->fingerCloseAmounts[finger] = clamp01(fingerCloseAmount + clamp(fingerCloseTarget - fingerCloseAmount, -0.8F, 0.8F) * F32(deltaTime));
 			}
 		}
 	}
@@ -102,9 +107,9 @@ void draw_skeletal_model(VKGeometry::SkeletalModel& model) {
 }
 
 void set_skeletal_model_to_default_pose(VKGeometry::SkeletalModel& model) {
-	u32 boneCount = model.mesh->skeletonData->boneCount;
-	model.poseMatrices = frameArena.alloc<Matrix4x3f>(boneCount);
-	for (u32 i = 0; i < boneCount; i++) {
+	U32 boneCount = model.mesh->skeletonData->boneCount;
+	model.poseMatrices = frameArena.alloc<M4x3F32>(boneCount);
+	for (U32 i = 0; i < boneCount; i++) {
 		model.poseMatrices[i] = model.mesh->skeletonData->bones[i].bindTransform;
 	}
 }
@@ -116,17 +121,18 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	}
 	frameNumber++;
 	prevFrameTime = frameTime;
-	frameTime = u64(perfCounter.QuadPart);
-	deltaTime = f64(openxrFrameBeginInfo.predictedDisplayPeriod) / 1000000000.0;
+	frameTime = U64(perfCounter.QuadPart);
+	deltaTime = F64(openxrFrameBeginInfo.predictedDisplayPeriod) / 1000000000.0;
 	totalTime += deltaTime;
 
-	u64 stackArenaFrame0 = stackArena.stackPtr;
+	MemoryArena& stackArena = get_scratch_arena();
+	U64 stackArenaFrame0 = stackArena.stackPtr;
 	VK::begin_frame();
 	if (openxrFrameBeginInfo.shouldRender) {
 		draw_static_model(worldModel);
 		set_skeletal_model_to_default_pose(playerRightHandModel);
 		set_skeletal_model_to_default_pose(testAnimModel);
-		playerRightHandModel.poseMatrices[1].rotate_quat(Quaternionf{}.from_axis_angle(AxisAnglef{ VECTOR3F_EAST, (sinf(f32(totalTime) * 0.75F) + 1.0F) * 0.125F }));
+		testAnimModel.poseMatrices[1].rotate_quat(QF32{}.from_axis_angle(AxisAngleF32{ V3F32_EAST, (sinf32(F32(totalTime) * 0.75F) + 1.0F) * 0.125F }));
 		draw_skeletal_model(playerRightHandModel);
 		draw_skeletal_model(testAnimModel);
 		
@@ -174,8 +180,8 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		VkViewport viewport{};
 		viewport.x = 0.0F;
 		viewport.y = 0.0F;
-		viewport.width = f32(XR::xrRenderWidth);
-		viewport.height = f32(XR::xrRenderHeight);
+		viewport.width = F32(XR::xrRenderWidth);
+		viewport.height = F32(XR::xrRenderHeight);
 		viewport.minDepth = 0.0F;
 		viewport.maxDepth = 1.0F;
 		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
@@ -207,7 +213,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		for (VKGeometry::StaticModel* model : staticModelsToRender) {
 			VK::GPUModelInfo modelInfo{ model->gpuMatrixIndex };
 			VK::vkCmdPushConstants(cmdBuf, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::GPUModelInfo), &modelInfo);
-			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, i32(model->mesh->verticesOffset), 0);
+			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, I32(model->mesh->verticesOffset), 0);
 		}
 
 		geometryBufferOffsets[0] = VK::geometryHandler.skinnedPositionsOffset;
@@ -218,7 +224,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
 			VK::GPUModelInfo modelInfo{ model->gpuMatrixIndex };
 			VK::vkCmdPushConstants(cmdBuf, VK::testPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::GPUModelInfo), &modelInfo);
-			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, i32(model->skinnedVerticesOffset), 0);
+			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, I32(model->skinnedVerticesOffset), 0);
 		}
 
 		VK::vkCmdEndRenderPass(cmdBuf);
@@ -226,7 +232,10 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 
 	XrSwapchainImageWaitInfo swapchainWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
 	swapchainWaitInfo.timeout = XR_INFINITE_DURATION;
-	CHK_XR(XR::xrWaitSwapchainImage(XR::xrSwapchain, &swapchainWaitInfo));
+	CHK_XR(XR::xrWaitSwapchainImage(XR::xrColorSwapchain, &swapchainWaitInfo));
+	if (XR::depthCompositionLayerSupported) {
+		CHK_XR(XR::xrWaitSwapchainImage(XR::xrDepthSwapchain, &swapchainWaitInfo));
+	}
 	CHK_VK(VK::vkWaitForFences(VK::logicalDevice, 1, &VK::geometryCullAndDrawFence, VK_TRUE, U64_MAX));
 	CHK_VK(VK::vkResetFences(VK::logicalDevice, 1, &VK::geometryCullAndDrawFence));
 
@@ -237,31 +246,31 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			}
 		}
 		for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
-			u64 stackArenaFrame1 = stackArena.stackPtr;
+			U64 stackArenaFrame1 = stackArena.stackPtr;
 			if (model->gpuMatrixIndex != 0) {
 				VK::uniformMatricesHandler.memoryMapping[model->gpuMatrixIndex] = model->transform;
 			}
 			if (model->skeletonMatrixOffset != 0) {
-				u32 boneCount = model->mesh->skeletonData->boneCount;
-				Matrix4x3f* matrices = stackArena.alloc<Matrix4x3f>(boneCount);
+				U32 boneCount = model->mesh->skeletonData->boneCount;
+				M4x3F32* matrices = stackArena.alloc<M4x3F32>(boneCount);
 				if (model->poseMatrices) {
 					VKGeometry::Bone* bones = model->mesh->skeletonData->bones;
-					for (u32 i = 0; i < boneCount; i++) {
+					for (U32 i = 0; i < boneCount; i++) {
 						if (bones[i].parentIdx == VKGeometry::Bone::PARENT_INVALID_IDX) {
 							matrices[i] = model->poseMatrices[i];
 						} else {
 							matrices[i] = matrices[bones[i].parentIdx] * model->poseMatrices[i];
 						}
 					}
-					for (u32 i = 0; i < boneCount; i++) {
+					for (U32 i = 0; i < boneCount; i++) {
 						matrices[i] = matrices[i] * model->mesh->skeletonData->bones[i].invBindTransform;
 					}
 				} else {
-					for (u32 i = 0; i < boneCount; i++) {
+					for (U32 i = 0; i < boneCount; i++) {
 						matrices[i].set_identity();
 					}
 				}
-				for (u32 i = 0; i < boneCount; i++) {
+				for (U32 i = 0; i < boneCount; i++) {
 					VK::uniformMatricesHandler.memoryMapping[model->skeletonMatrixOffset + i] = matrices[i];
 				}
 			}
@@ -277,7 +286,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			RAD_TO_TURN(openxrFrameBeginInfo.leftEyeFov.angleLeft),
 			RAD_TO_TURN(openxrFrameBeginInfo.leftEyeFov.angleUp),
 			RAD_TO_TURN(openxrFrameBeginInfo.leftEyeFov.angleDown));
-		Matrix4x3f leftTransform;
+		M4x3F32 leftTransform;
 		leftTransform.set_identity();
 		leftTransform.set_orientation_from_quat(XR::xr_quat_to_drillmath_quat(openxrFrameBeginInfo.leftEyePose.orientation).conjugate());
 		leftTransform.translate(-(player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.leftEyePose.position)));
@@ -287,7 +296,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			RAD_TO_TURN(openxrFrameBeginInfo.rightEyeFov.angleLeft),
 			RAD_TO_TURN(openxrFrameBeginInfo.rightEyeFov.angleUp),
 			RAD_TO_TURN(openxrFrameBeginInfo.rightEyeFov.angleDown));
-		Matrix4x3f rightTransform;
+		M4x3F32 rightTransform;
 		rightTransform.set_identity();
 		rightTransform.set_orientation_from_quat(XR::xr_quat_to_drillmath_quat(openxrFrameBeginInfo.rightEyePose.orientation).conjugate());
 		rightTransform.translate(-(player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.rightEyePose.position)));
@@ -302,19 +311,27 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	stackArena.stackPtr = stackArenaFrame0;
 }
 
-u32 run_star_chicken() {
+U32 run_star_chicken() {
+	PNG::init_loader();
+	MemoryArena& stackArena = get_scratch_arena();
+	U64 stackArenaFrame0 = stackArena.stackPtr;
+
+	//MSDFGenerator::generate_msdf_image("C:\\Users\\Drillgon\\programming\\vulkan_shooter\\StarChickenVR\\art\\test_smiley.svg"sa, "C:\\Users\\Drillgon\\programming\\vulkan_shooter\\StarChickenVR\\art\\output"sa, 64, 64, 16.0F, 16.0F, 12.0F);
+	//MSDFGenerator::generate_msdf_font("C:\\Users\\Drillgon\\programming\\vulkan_shooter\\StarChickenVR\\art\\font.svg"sa, "C:\\Users\\Drillgon\\programming\\vulkan_shooter\\StarChickenVR\\art\\debug\\font_output"sa, 64, 64, PX_TO_MILLIMETER(6.0F), PX_TO_MILLIMETER(12.0F), 12.0F);
+
+	//return 0;
+
 	LARGE_INTEGER perfCounter;
 	if (!QueryPerformanceCounter(&perfCounter)) {
 		abort("Could not get performanceCounter");
 	}
-	frameTime = prevFrameTime = u64(perfCounter.QuadPart);
+	frameTime = prevFrameTime = U64(perfCounter.QuadPart);
 	LARGE_INTEGER perfFreq;
 	if (!QueryPerformanceFrequency(&perfFreq)) {
 		abort("Could not get performance counter frequency");
 	}
-	timerFrequency = u64(perfFreq.QuadPart);
+	timerFrequency = U64(perfFreq.QuadPart);
 
-	u64 stackArenaFrame0 = stackArena.stackPtr;
 	shouldUseDesktopWindow = Win32::init(1920/2, 1080/2);
 	XR::init_openxr();
 	VK::init_vulkan();
@@ -325,6 +342,8 @@ u32 run_star_chicken() {
 	VK::finish_startup();
 	setup_scene();
 	stackArena.stackPtr = stackArenaFrame0;
+	staticModelsToRender.allocator = &frameArena;
+	skeletalModelsToRender.allocator = &frameArena;
 
 	while (!shouldShutDown) {
 		if (shouldUseDesktopWindow) {
@@ -334,8 +353,8 @@ u32 run_star_chicken() {
 			}
 		}
 		
-		u64 frameArenaFrame0 = frameArena.stackPtr;
-		const u32 initialModelToRenderCapacity = 32;
+		U64 frameArenaFrame0 = frameArena.stackPtr;
+		const U32 initialModelToRenderCapacity = 32;
 		staticModelsToRender.reset();
 		staticModelsToRender.reserve(initialModelToRenderCapacity);
 		skeletalModelsToRender.reset();
@@ -367,6 +386,7 @@ u32 run_star_chicken() {
 	print("Shutting down Vulkan...\n");
 	VK::end_vulkan();
 	print("Shutdown complete.\n");
+
 	return EXIT_SUCCESS;
 }
 

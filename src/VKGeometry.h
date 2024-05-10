@@ -5,67 +5,67 @@
 namespace VKGeometry {
 
 struct Bone {
-	static constexpr u32 PARENT_INVALID_IDX = U32_MAX;
+	static constexpr U32 PARENT_INVALID_IDX = U32_MAX;
 
-	Matrix4x3f bindTransform;
-	Matrix4x3f invBindTransform;
-	u32 parentIdx;
+	M4x3F32 bindTransform;
+	M4x3F32 invBindTransform;
+	U32 parentIdx;
 };
 
 struct Skeleton {
 	// Skeletons have a linked list of freed transforms. If the list is empty, allocate a new one
-	u32 nextFreeTransformPointer;
-	u32 boneCount;
+	U32 nextFreeTransformPointer;
+	U32 boneCount;
 	// Technically only valid in C, not C++, but MSVC supports it, and other compilers have extensions for flexible array members if I ever decide to switch
 	Bone bones[];
 };
 
 struct StaticMesh {
-	u32 indicesOffset;
-	u32 verticesOffset;
-	u32 indicesCount;
-	u32 verticesCount;
+	U32 indicesOffset;
+	U32 verticesOffset;
+	U32 indicesCount;
+	U32 verticesCount;
 };
 
 struct SkeletalMesh {
 	StaticMesh geometry;
 	// Several meshes may have the same skeleton structure (e.g. multiple humanoid models animated the same way)
 	Skeleton* skeletonData;
-	u32 skinningDataOffset;
+	U32 skinningDataOffset;
 };
 
 struct SkeletalAnimation {
-	u32 keyframeCount;
-	u32 boneCount;
-	f32 framerate;
-	u32 lengthMilliseconds;
+	U32 keyframeCount;
+	U32 boneCount;
+	F32 framerate;
+	U32 lengthMilliseconds;
 	// Array of pose arrays
 	// Array contains one pose array for each keyframe, and each pose array contains one matrix for each bone
-	Matrix4x3f* matrices;
+	M4x3F32* matrices;
 };
 
 struct StaticModel {
 	StaticMesh* mesh;
-	Matrix4x3f transform;
-	u32 gpuMatrixIndex;
+	M4x3F32 transform;
+	U32 gpuMatrixIndex;
 };
 
 struct SkeletalModel {
 	SkeletalMesh* mesh;
-	Matrix4x3f* poseMatrices;
-	Matrix4x3f transform;
-	u32 gpuMatrixIndex;
-	u32 skinnedVerticesOffset;
-	u32 skeletonMatrixOffset;
+	M4x3F32* poseMatrices;
+	M4x3F32 transform;
+	U32 gpuMatrixIndex;
+	U32 skinnedVerticesOffset;
+	U32 skeletonMatrixOffset;
 };
 
 #pragma pack(push, 1)
 struct GPUSkinnedModel {
-	u32 matricesOffset;
-	u32 vertexOffset;
-	u32 skinnedVerticesOffset;
-	u32 skinningDataOffset;
-	u32 vertexCount;
+	U32 matricesOffset;
+	U32 vertexOffset;
+	U32 skinnedVerticesOffset;
+	U32 skinningDataOffset;
+	U32 vertexCount;
 };
 #pragma pack(pop)
 
@@ -73,60 +73,60 @@ struct GeometryHandler {
 	VkDeviceMemory memory;
 	VkDeviceSize memorySize;
 	VkBuffer buffer;
-	u64 indicesOffset;
-	u64 positionsOffset;
-	u64 texcoordsOffset;
-	u64 normalsOffset;
-	u64 tangentsOffset;
-	u64 skinDataOffset;
-	u64 skinnedPositionsOffset;
-	u64 skinnedNormalsOffset;
-	u64 skinnedTangentsOffset;
-	u32 indicesAllocationCap;
-	u32 geometryVertexAllocationCap;
-	u32 skinningVertexAllocationCap;
-	u32 skinnedVertexAllocationCap;
-	u32 indicesAllocationOffset;
-	u32 geometryVertexAllocationOffset;
-	u32 skinningVertexAllocationOffset;
-	u32 skinnedVertexAllocationOffset;
+	U64 indicesOffset;
+	U64 positionsOffset;
+	U64 texcoordsOffset;
+	U64 normalsOffset;
+	U64 tangentsOffset;
+	U64 skinDataOffset;
+	U64 skinnedPositionsOffset;
+	U64 skinnedNormalsOffset;
+	U64 skinnedTangentsOffset;
+	U32 indicesAllocationCap;
+	U32 geometryVertexAllocationCap;
+	U32 skinningVertexAllocationCap;
+	U32 skinnedVertexAllocationCap;
+	U32 indicesAllocationOffset;
+	U32 geometryVertexAllocationOffset;
+	U32 skinningVertexAllocationOffset;
+	U32 skinnedVertexAllocationOffset;
 
 	void init(VkDeviceSize size) {
 		if (size < 4096) {
 			abort("Geometry needs 4k bytes");
 		}
-		const u64 alignment = VK::physicalDeviceProperties.limits.minStorageBufferOffsetAlignment;
-		const u64 indexSize = sizeof(u16);
-		f64 vertexDataSizesTotal = f64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) + f64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) + f64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) + f64(indexSize);
+		const U64 alignment = VK::physicalDeviceProperties.limits.minStorageBufferOffsetAlignment;
+		const U64 indexSize = sizeof(U16);
+		F64 vertexDataSizesTotal = F64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) + F64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) + F64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) + F64(indexSize);
 		// Approximate weights for how relatively many vertices we need space for in each section.
 		// I'll come back to this later when I have actual data and set them accordingly
 		// I'm not actually sure if I want to keep with static allocation like this.
 		// Dynamic allocation could work better, since that could conform memory allocation to gameplay needs.
 		// Anyway, I'm not going to think too hard about it now
-		f64 indicesDataScaledSize = 0.15 * (f64(indexSize) / vertexDataSizesTotal);
-		f64 geometryDataScaledSize = 0.35 * (f64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
-		f64 skinningDataScaledSize = 0.2 * (f64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) / vertexDataSizesTotal);
-		f64 skinningGeometryScaledSize = 0.3 * (f64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
+		F64 indicesDataScaledSize = 0.15 * (F64(indexSize) / vertexDataSizesTotal);
+		F64 geometryDataScaledSize = 0.35 * (F64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
+		F64 skinningDataScaledSize = 0.2 * (F64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) / vertexDataSizesTotal);
+		F64 skinningGeometryScaledSize = 0.3 * (F64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
 
-		u64 maxAllocatableIndices = min<u64>(U32_MAX, (u64(indicesDataScaledSize * f64(size)) - alignment) / indexSize);
-		indicesAllocationCap = u32(maxAllocatableIndices);
+		U64 maxAllocatableIndices = min<U64>(U32_MAX, (U64(indicesDataScaledSize * F64(size)) - alignment) / indexSize);
+		indicesAllocationCap = U32(maxAllocatableIndices);
 		indicesOffset = 0;
 		// Vertices must be at most I32_MAX, since 
-		u64 maxAllocatableVertices = min<u64>(I32_MAX, (u64(geometryDataScaledSize * f64(size)) - alignment * 4) / VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE);
-		geometryVertexAllocationCap = u32(maxAllocatableVertices);
+		U64 maxAllocatableVertices = min<U64>(I32_MAX, (U64(geometryDataScaledSize * F64(size)) - alignment * 4) / VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE);
+		geometryVertexAllocationCap = U32(maxAllocatableVertices);
 		positionsOffset = ALIGN_HIGH(indicesOffset + indicesAllocationCap * indexSize, alignment);
-		texcoordsOffset = ALIGN_HIGH(positionsOffset + geometryVertexAllocationCap * sizeof(Vector3f), alignment);
-		normalsOffset = ALIGN_HIGH(texcoordsOffset + geometryVertexAllocationCap * sizeof(Vector2f), alignment);
-		tangentsOffset = ALIGN_HIGH(normalsOffset + geometryVertexAllocationCap * sizeof(Vector3f), alignment);
-		u64 maxAllocatableSkinningIndicesAndWeights = min<u64>(I32_MAX, (u64(skinningDataScaledSize * f64(size)) - alignment) / VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE);
-		skinningVertexAllocationCap = u32(maxAllocatableSkinningIndicesAndWeights);
-		skinDataOffset = ALIGN_HIGH(tangentsOffset + geometryVertexAllocationCap * sizeof(Vector3f), alignment);
-		u64 maxAllocatableSkinnedVertices = min<u64>(I32_MAX, (u64(skinningGeometryScaledSize * f64(size)) - alignment * 3) / VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE);
-		skinnedVertexAllocationCap = u32(maxAllocatableSkinnedVertices);
-		skinnedPositionsOffset = ALIGN_HIGH(skinDataOffset + skinningVertexAllocationCap * u64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE), alignment);
-		skinnedNormalsOffset = ALIGN_HIGH(skinnedPositionsOffset + skinnedVertexAllocationCap * sizeof(Vector3f), alignment);
-		skinnedTangentsOffset = ALIGN_HIGH(skinnedNormalsOffset + skinnedVertexAllocationCap * sizeof(Vector3f), alignment);
-		u64 finalSizeRequired = skinnedTangentsOffset + skinnedVertexAllocationCap * sizeof(Vector3f);
+		texcoordsOffset = ALIGN_HIGH(positionsOffset + geometryVertexAllocationCap * sizeof(V3F32), alignment);
+		normalsOffset = ALIGN_HIGH(texcoordsOffset + geometryVertexAllocationCap * sizeof(V2F32), alignment);
+		tangentsOffset = ALIGN_HIGH(normalsOffset + geometryVertexAllocationCap * sizeof(V3F32), alignment);
+		U64 maxAllocatableSkinningIndicesAndWeights = min<U64>(I32_MAX, (U64(skinningDataScaledSize * F64(size)) - alignment) / VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE);
+		skinningVertexAllocationCap = U32(maxAllocatableSkinningIndicesAndWeights);
+		skinDataOffset = ALIGN_HIGH(tangentsOffset + geometryVertexAllocationCap * sizeof(V3F32), alignment);
+		U64 maxAllocatableSkinnedVertices = min<U64>(I32_MAX, (U64(skinningGeometryScaledSize * F64(size)) - alignment * 3) / VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE);
+		skinnedVertexAllocationCap = U32(maxAllocatableSkinnedVertices);
+		skinnedPositionsOffset = ALIGN_HIGH(skinDataOffset + skinningVertexAllocationCap * U64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE), alignment);
+		skinnedNormalsOffset = ALIGN_HIGH(skinnedPositionsOffset + skinnedVertexAllocationCap * sizeof(V3F32), alignment);
+		skinnedTangentsOffset = ALIGN_HIGH(skinnedNormalsOffset + skinnedVertexAllocationCap * sizeof(V3F32), alignment);
+		U64 finalSizeRequired = skinnedTangentsOffset + skinnedVertexAllocationCap * sizeof(V3F32);
 		memorySize = finalSizeRequired;
 
 		indicesAllocationOffset = 0;
@@ -154,16 +154,16 @@ struct GeometryHandler {
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 	}
 
-	void alloc_static(u32* indicesOffsetOut, u32* verticesOffsetOut, u32 numIndices, u32 numVertices) {
+	void alloc_static(U32* indicesOffsetOut, U32* verticesOffsetOut, U32 numIndices, U32 numVertices) {
 		if (numVertices > U16_MAX) {
 			abort("More vertices than maximum index, split the model or implement 32 bit indices");
 		}
-		u32 indicesStart = indicesAllocationOffset;
+		U32 indicesStart = indicesAllocationOffset;
 		indicesAllocationOffset = indicesStart + numIndices;
 		if (indicesAllocationOffset > indicesAllocationCap) {
 			abort("Ran out of memory for indices buffer. Perhaps time to implement streaming?");
 		}
-		u32 verticesStart = geometryVertexAllocationOffset;
+		U32 verticesStart = geometryVertexAllocationOffset;
 		geometryVertexAllocationOffset = verticesStart + numVertices;
 		if (geometryVertexAllocationOffset > geometryVertexAllocationCap) {
 			abort("Ran out of memory for geometry vertex buffer. Perhaps time to implement streaming?");
@@ -172,21 +172,21 @@ struct GeometryHandler {
 		*verticesOffsetOut = verticesStart;
 	}
 
-	void alloc_skeletal(u32* indicesOffsetOut, u32* verticesOffsetOut, u32* skinningDataOffset, u32 numIndices, u32 numVertices) {
+	void alloc_skeletal(U32* indicesOffsetOut, U32* verticesOffsetOut, U32* skinningDataOffset, U32 numIndices, U32 numVertices) {
 		if (numVertices > U16_MAX) {
 			abort("More vertices than maximum index, split the model or implement 32 bit indices");
 		}
-		u32 indicesStart = indicesAllocationOffset;
+		U32 indicesStart = indicesAllocationOffset;
 		indicesAllocationOffset = indicesStart + numIndices;
 		if (indicesAllocationOffset > indicesAllocationCap) {
 			abort("Ran out of memory for indices buffer. Perhaps time to implement streaming?");
 		}
-		u32 verticesStart = geometryVertexAllocationOffset;
+		U32 verticesStart = geometryVertexAllocationOffset;
 		geometryVertexAllocationOffset = verticesStart + numVertices;
 		if (geometryVertexAllocationOffset > geometryVertexAllocationCap) {
 			abort("Ran out of memory for geometry vertex buffer. Perhaps time to implement streaming?");
 		}
-		u32 skinningStart = skinningVertexAllocationOffset;
+		U32 skinningStart = skinningVertexAllocationOffset;
 		skinningVertexAllocationOffset = skinningStart + numVertices;
 		if (skinningVertexAllocationOffset > skinningVertexAllocationCap) {
 			abort("Ran out of memory for skinning data buffer. Perhaps time to implement streaming?");
@@ -198,8 +198,8 @@ struct GeometryHandler {
 
 	// Skinned results should be allocated each frame.
 	// This means CPU culled objects don't use skinned memory, and a cheap bump allocator can be used.
-	u32 alloc_skinned_result(u32 numVertices) {
-		u32 skinnedVerticesStart = skinnedVertexAllocationOffset;
+	U32 alloc_skinned_result(U32 numVertices) {
+		U32 skinnedVerticesStart = skinnedVertexAllocationOffset;
 		skinnedVertexAllocationOffset += numVertices;
 		if (skinnedVertexAllocationOffset > skinnedVertexAllocationCap) {
 			abort("Ran out of memory for skinned vertices result. Think of a way to handle this without crashing.");
@@ -220,16 +220,16 @@ struct GeometryHandler {
 struct UniformMatricesHandler {
 	VkDeviceMemory memory;
 	VkBuffer buffer;
-	Matrix4x3f* memoryMapping;
-	u32 maxMatrices;
+	M4x3F32* memoryMapping;
+	U32 maxMatrices;
 	// Matrix is always at least 3. The first matrix is the identity matrix and the next two are eye matrices
-	u32 matrixOffset;
+	U32 matrixOffset;
 
-	void init(u32 size) {
+	void init(U32 size) {
 		if (size < 4096) {
 			abort("Needs 4k of matrix data");
 		}
-		maxMatrices = size / sizeof(Matrix4x3f);
+		maxMatrices = size / sizeof(M4x3F32);
 		matrixOffset = 3;
 
 		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -252,7 +252,7 @@ struct UniformMatricesHandler {
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, size, 0, reinterpret_cast<void**>(&memoryMapping)));
 
-		memoryMapping[0] = Matrix4x3f{}.set_identity();
+		memoryMapping[0] = M4x3F32{}.set_identity();
 	}
 
 	void destroy() {
@@ -260,22 +260,22 @@ struct UniformMatricesHandler {
 		VK::vkFreeMemory(VK::logicalDevice, memory, nullptr);
 	}
 
-	u32 alloc_and_set(u32 numMatrices, Matrix4x3f* matrices) {
-		u32 offset = matrixOffset;
+	U32 alloc_and_set(U32 numMatrices, M4x3F32* matrices) {
+		U32 offset = matrixOffset;
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
 			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
 			offset = 0;
 		} else {
-			for (u32 i = 0; i < numMatrices; i++) {
+			for (U32 i = 0; i < numMatrices; i++) {
 				memoryMapping[offset + i] = matrices[i];
 			}
 		}
 		return offset;
 	}
 
-	u32 alloc(u32 numMatrices) {
-		u32 offset = matrixOffset;
+	U32 alloc(U32 numMatrices) {
+		U32 offset = matrixOffset;
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
 			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
@@ -286,12 +286,12 @@ struct UniformMatricesHandler {
 
 	void set_eye_matrices(ProjectiveTransformMatrix left, ProjectiveTransformMatrix right) {
 		// These two aren't really Matrix4x3fs, since the third row is omitted instead of the fourth, but they will fit in a Matrix4x3f
-		memoryMapping[1] = Matrix4x3f{
+		memoryMapping[1] = M4x3F32{
 			left.m00, left.m01, left.m02, left.m03,
 			left.m10, left.m11, left.m12, left.m13,
 			left.m30, left.m31, left.m32, left.m33
 		};
-		memoryMapping[2] = Matrix4x3f{
+		memoryMapping[2] = M4x3F32{
 			right.m00, right.m01, right.m02, right.m03,
 			right.m10, right.m11, right.m12, right.m13,
 			right.m30, right.m31, right.m32, right.m33
@@ -302,7 +302,7 @@ struct UniformMatricesHandler {
 		VkMappedMemoryRange memoryRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
 		memoryRange.memory = memory;
 		memoryRange.offset = 0;
-		memoryRange.size = ALIGN_HIGH(matrixOffset * sizeof(Matrix4x3f), VK::physicalDeviceProperties.limits.nonCoherentAtomSize);
+		memoryRange.size = ALIGN_HIGH(matrixOffset * sizeof(M4x3F32), VK::physicalDeviceProperties.limits.nonCoherentAtomSize);
 		CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryRange));
 	}
 

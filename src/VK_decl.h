@@ -125,22 +125,24 @@ VK_INSTANCE_FUNCTIONS
 VK_DEVICE_FUNCTIONS
 #undef OP
 
-static constexpr u32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector2f) + sizeof(Vector3f) + sizeof(Vector3f);
-static constexpr u32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(u8) * 4 + sizeof(u8) * 4;
-static constexpr u32 VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE = sizeof(Vector3f) + sizeof(Vector3f) + sizeof(Vector3f);
+static constexpr U32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V2F32) + sizeof(V3F32) + sizeof(V3F32);
+static constexpr U32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(U8) * 4 + sizeof(U8) * 4;
+static constexpr U32 VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V3F32) + sizeof(V3F32);
 
 struct XrSwapchainData {
 	// Set at init time when the swapchain is created
-	VkImage* swapchainImages;
-	//VkFramebuffer* swapchainFramebuffers;
-	u32 swapchainImageCount;
+	VkImage* swapchainColorImages;
+	VkImage* swapchainDepthImages;
+	U32 swapchainColorImageCount;
+	U32 swapchainDepthImageCount;
 	// Set when a swapchain image is acquired
-	u32 swapchainImageIdx;
+	U32 swapchainColorImageIdx;
+	U32 swapchainDepthImageIdx;
 };
 
 #pragma pack(push, 1)
 struct GPUModelInfo {
-	u32 transformIdx;
+	U32 transformIdx;
 };
 #pragma pack(pop)
 
@@ -152,23 +154,23 @@ struct FramebufferAttachment {
 	VkDeviceMemory memory;
 	VkImage image;
 	VkImageView imageView;
-	b32 ownsImageView;
+	B32 ownsImageView;
 };
 
 struct Framebuffer {
-	static constexpr u32 MAX_FRAMEBUFFER_ATTACHMENTS = 4;
+	static constexpr U32 MAX_FRAMEBUFFER_ATTACHMENTS = 4;
 	VkFramebuffer framebuffer;
 	VkRenderPass renderPass;
-	u32 framebufferWidth;
-	u32 framebufferHeight;
+	U32 framebufferWidth;
+	U32 framebufferHeight;
 	FramebufferAttachment attachments[MAX_FRAMEBUFFER_ATTACHMENTS];
-	u32 attachmentCount;
-	b32 addedToFreeList;
+	U32 attachmentCount;
+	B32 addedToFreeList;
 
 	Framebuffer& set_default();
 	Framebuffer& render_pass(VkRenderPass pass);
-	Framebuffer& dimensions(u32 width, u32 height);
-	Framebuffer& new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, u32 layerCount);
+	Framebuffer& dimensions(U32 width, U32 height);
+	Framebuffer& new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, U32 layerCount);
 	Framebuffer& existing_attachment(VkImageView view);
 	Framebuffer& build();
 	void destroy();
@@ -176,14 +178,14 @@ struct Framebuffer {
 
 extern Framebuffer mainFramebuffer;
 
-extern u32 hostMemoryTypeIndex;
-extern u32 deviceMemoryTypeIndex;
+extern U32 hostMemoryTypeIndex;
+extern U32 deviceMemoryTypeIndex;
 
 extern VkPhysicalDeviceProperties physicalDeviceProperties;
 
-extern u32 graphicsFamily;
-extern u32 transferFamily;
-extern u32 computeFamily;
+extern U32 graphicsFamily;
+extern U32 transferFamily;
+extern U32 computeFamily;
 
 extern VkQueue graphicsQueue;
 extern VkQueue transferQueue;

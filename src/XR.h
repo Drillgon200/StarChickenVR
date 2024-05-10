@@ -6,12 +6,6 @@
 #include "VK_decl.h"
 namespace XR {
 
-const char* XR_ENABLED_EXTENSIONS[]{ 
-#if XR_DEBUG != 0
-	XR_EXT_DEBUG_UTILS_EXTENSION_NAME,
-#endif
-	"XR_KHR_vulkan_enable2" };
-
 PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
 PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
 PFN_xrEnumerateApiLayerProperties xrEnumerateApiLayerProperties;
@@ -25,7 +19,10 @@ XrDebugUtilsMessengerEXT messenger;
 XrSystemId systemID;
 XrSession session;
 XrSessionState currentSessionState;
-XrSwapchain xrSwapchain;
+XrSwapchain xrColorSwapchain;
+XrSwapchain xrDepthSwapchain;
+
+B32 depthCompositionLayerSupported;
 
 XrSpace stageSpace;
 XrSpace localSpace;
@@ -44,23 +41,23 @@ HandActions leftHandActions;
 HandActions rightHandActions;
 VRUserInput userInput;
 
-u32 xrRenderWidth;
-u32 xrRenderHeight;
+U32 xrRenderWidth;
+U32 xrRenderHeight;
 XrPosef lastValidLeftEyePose;
 XrFovf lastValidLeftFov;
 XrPosef lastValidRightEyePose;
 XrFovf lastValidRightFov;
 
-FINLINE Quaternionf xr_quat_to_drillmath_quat(XrQuaternionf q) {
-	return Quaternionf{ q.x, q.y, q.z, q.w };
+FINLINE QF32 xr_quat_to_drillmath_quat(XrQuaternionf q) {
+	return QF32{ q.x, q.y, q.z, q.w };
 }
 
-FINLINE Vector3f xr_vec3_to_drillmath_vec3(XrVector3f v) {
-	return Vector3f{ v.x, v.y, v.z };
+FINLINE V3F32 xr_vec3_to_drillmath_vec3(XrVector3f v) {
+	return V3F32{ v.x, v.y, v.z };
 }
 
-FINLINE Matrix4x3f xr_pose_to_drillmath_mat4x3(XrPosef p) {
-	Matrix4x3f result;
+FINLINE M4x3F32 xr_pose_to_drillmath_mat4x3(XrPosef p) {
+	M4x3F32 result;
 	result.set_orientation_from_quat(xr_quat_to_drillmath_quat(p.orientation));
 	result.set_offset(xr_vec3_to_drillmath_vec3(p.position));
 	return result;
@@ -128,23 +125,28 @@ void init_openxr() {
 		ExitProcess(EXIT_FAILURE);
 	}
 
-	u32 propertyCount{};
+	U32 propertyCount{};
 	CHK_XR(xrEnumerateInstanceExtensionProperties(nullptr, 0, &propertyCount, nullptr));
+	MemoryArena& stackArena = get_scratch_arena();
 	XrExtensionProperties* properties = stackArena.alloc<XrExtensionProperties>(propertyCount);
 	zero_memory(properties, propertyCount * sizeof(XrExtensionProperties));
-	for (u32 i = 0; i < propertyCount; i++) {
+	for (U32 i = 0; i < propertyCount; i++) {
 		properties[i].type = XR_TYPE_EXTENSION_PROPERTIES;
 	}
 	CHK_XR(xrEnumerateInstanceExtensionProperties(nullptr, propertyCount, &propertyCount, properties));
-	for (u32 i = 0; i < propertyCount; i++) {
+	B32 vulkanSupport = false;
+	for (U32 i = 0; i < propertyCount; i++) {
 		properties[i].type = XR_TYPE_EXTENSION_PROPERTIES;
 		if (strcmp(properties[i].extensionName, "XR_KHR_vulkan_enable2") == 0) {
-			goto vulkanSupported;
+			vulkanSupport = true;
+		} else if (strcmp(properties[i].extensionName, "XR_KHR_composition_layer_depth") == 0) {
+			depthCompositionLayerSupported = true;
 		}
 	}
-	print("XR_KHR_vulkan_enable2 not supported, exiting.\n");
-	return;
-vulkanSupported:;
+	if (!vulkanSupport) {
+		print("XR_KHR_vulkan_enable2 not supported, exiting.\n");
+		return;
+	}
 
 	XrApplicationInfo applicationInfo{};
 	strcpy(applicationInfo.applicationName, "Star Chicken VR");
@@ -156,8 +158,16 @@ vulkanSupported:;
 	instanceCreateInfo.applicationInfo = applicationInfo;
 	instanceCreateInfo.enabledApiLayerCount = 0;
 	instanceCreateInfo.enabledApiLayerNames = nullptr;
-	instanceCreateInfo.enabledExtensionCount = ARRAY_COUNT(XR_ENABLED_EXTENSIONS);
-	instanceCreateInfo.enabledExtensionNames = XR_ENABLED_EXTENSIONS;
+	ArenaArrayList<const char*> extensions{ &stackArena };
+#if XR_DEBUG != 0
+	extensions.push_back(XR_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
+	extensions.push_back("XR_KHR_vulkan_enable2");
+	if (depthCompositionLayerSupported) {
+		extensions.push_back("XR_KHR_composition_layer_depth");
+	}
+	instanceCreateInfo.enabledExtensionCount = extensions.size;
+	instanceCreateInfo.enabledExtensionNames = extensions.data;
 #if XR_DEBUG != 0
 	XrDebugUtilsMessengerCreateInfoEXT messengerCreateInfo{ XR_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
 	messengerCreateInfo.messageSeverities =
@@ -198,11 +208,11 @@ vulkanSupported:;
 	print(systemProperties.systemName);
 	print("\n");
 
-	u32 numViews = 0;
+	U32 numViews = 0;
 	CHK_XR(xrEnumerateViewConfigurationViews(xrInstance, systemID, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &numViews, nullptr));
 	XrViewConfigurationView* views = stackArena.alloc<XrViewConfigurationView>(numViews);
 	zero_memory(views, numViews * sizeof(XrViewConfigurationView));
-	for (u32 i = 0; i < numViews; i++) {
+	for (U32 i = 0; i < numViews; i++) {
 		views[i].type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
 	}
 	CHK_XR(xrEnumerateViewConfigurationViews(xrInstance, systemID, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, numViews, &numViews, views));
@@ -233,12 +243,13 @@ void create_gameplay_session() {
 	sessionCreateInfo.next = &vulkanBinding;
 	CHK_XR(xrCreateSession(xrInstance, &sessionCreateInfo, &session));
 
-	u32 numReferenceSpaces = 0;
+	U32 numReferenceSpaces = 0;
 	CHK_XR(xrEnumerateReferenceSpaces(session, 0, &numReferenceSpaces, nullptr));
+	MemoryArena& stackArena = get_scratch_arena();
 	XrReferenceSpaceType* referenceSpaceTypes = stackArena.alloc<XrReferenceSpaceType>(numReferenceSpaces);
 	zero_memory(referenceSpaceTypes, numReferenceSpaces * sizeof(XrReferenceSpaceType));
 	CHK_XR(xrEnumerateReferenceSpaces(session, numReferenceSpaces, &numReferenceSpaces, referenceSpaceTypes));
-	for (u32 i = 0; i < numReferenceSpaces; i++) {
+	for (U32 i = 0; i < numReferenceSpaces; i++) {
 		XrReferenceSpaceType type = referenceSpaceTypes[i];
 		XrReferenceSpaceCreateInfo referenceSpaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
 		referenceSpaceInfo.referenceSpaceType = type;
@@ -255,43 +266,69 @@ void create_gameplay_session() {
 		abort("System did not support stage space\n");
 	}
 	
-	u32 formatCount = 0;
+	U32 formatCount = 0;
 	CHK_XR(xrEnumerateSwapchainFormats(session, 0, &formatCount, nullptr));
-	i64* supportedSwapchainFormats = stackArena.alloc<i64>(formatCount);
+	I64* supportedSwapchainFormats = stackArena.alloc<I64>(formatCount);
 	CHK_XR(xrEnumerateSwapchainFormats(session, formatCount, &formatCount, supportedSwapchainFormats));
-	for (u32 i = 0; i < formatCount; i++) {
-		if (supportedSwapchainFormats[i] == OPENXR_SWAPCHAIN_IMAGE_FORMAT) {
-			goto swapchainFormatSupported;
+	B32 swapchainColorFormatSupported = false;
+	B32 swapchainDepthFormatSupported = false;
+	for (U32 i = 0; i < formatCount; i++) {
+		if (supportedSwapchainFormats[i] == OPENXR_SWAPCHAIN_COLOR_FORMAT) {
+			swapchainColorFormatSupported = true;
+		}
+		if (supportedSwapchainFormats[i] == OPENXR_SWAPCHAIN_DEPTH_FORMAT) {
+			swapchainDepthFormatSupported = true;
 		}
 	}
-	abort("Desired swapchain image format not supported!");
-swapchainFormatSupported:;
-
+	if (!swapchainColorFormatSupported) {
+		abort("Desired swapchain image format not supported!");
+	}
+	if (!swapchainDepthFormatSupported) {
+		depthCompositionLayerSupported = false;
+	}
+	
 	XrSwapchainCreateInfo swapchainCreateInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainCreateInfo.createFlags = 0;
-	swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-	swapchainCreateInfo.format = OPENXR_SWAPCHAIN_IMAGE_FORMAT;
+	swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT; // Should actually be XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT?
+	swapchainCreateInfo.format = OPENXR_SWAPCHAIN_COLOR_FORMAT;
 	swapchainCreateInfo.sampleCount = 1;
 	swapchainCreateInfo.width = xrRenderWidth;
 	swapchainCreateInfo.height = xrRenderHeight;
 	swapchainCreateInfo.faceCount = 1;
 	swapchainCreateInfo.arraySize = 2; // 2 eyes
 	swapchainCreateInfo.mipCount = 1;
-	CHK_XR(xrCreateSwapchain(session, &swapchainCreateInfo, &xrSwapchain));
+	CHK_XR(xrCreateSwapchain(session, &swapchainCreateInfo, &xrColorSwapchain));
+	if (depthCompositionLayerSupported) {
+		swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+		swapchainCreateInfo.format = OPENXR_SWAPCHAIN_DEPTH_FORMAT;
+		CHK_XR(xrCreateSwapchain(session, &swapchainCreateInfo, &xrDepthSwapchain));
+	}
 
-	u32 numSwapchainImages = 0;
-	CHK_XR(xrEnumerateSwapchainImages(xrSwapchain, 0, &numSwapchainImages, nullptr));
-	XrSwapchainImageVulkan2KHR* swapchainImages = stackArena.alloc<XrSwapchainImageVulkan2KHR>(numSwapchainImages);
-	zero_memory(swapchainImages, numSwapchainImages * sizeof(XrSwapchainImageVulkan2KHR));
-	for (u32 i = 0; i < numSwapchainImages; i++) {
+	U32 numSwapchainImages = 0;
+	CHK_XR(xrEnumerateSwapchainImages(xrColorSwapchain, 0, &numSwapchainImages, nullptr));
+	XrSwapchainImageVulkan2KHR* swapchainImages = stackArena.zalloc<XrSwapchainImageVulkan2KHR>(numSwapchainImages);
+	for (U32 i = 0; i < numSwapchainImages; i++) {
 		swapchainImages[i].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR;
 	}
-	CHK_XR(xrEnumerateSwapchainImages(xrSwapchain, numSwapchainImages, &numSwapchainImages, reinterpret_cast<XrSwapchainImageBaseHeader*>(swapchainImages)));
-	VK::xrSwapchainData.swapchainImages = globalArena.alloc<VkImage>(numSwapchainImages);
-	for (u32 i = 0; i < numSwapchainImages; i++) {
-		VK::xrSwapchainData.swapchainImages[i] = swapchainImages[i].image;
+	CHK_XR(xrEnumerateSwapchainImages(xrColorSwapchain, numSwapchainImages, &numSwapchainImages, reinterpret_cast<XrSwapchainImageBaseHeader*>(swapchainImages)));
+	VK::xrSwapchainData.swapchainColorImages = globalArena.alloc<VkImage>(numSwapchainImages);
+	for (U32 i = 0; i < numSwapchainImages; i++) {
+		VK::xrSwapchainData.swapchainColorImages[i] = swapchainImages[i].image;
 	}
-	VK::xrSwapchainData.swapchainImageCount = numSwapchainImages;
+	VK::xrSwapchainData.swapchainColorImageCount = numSwapchainImages;
+	if (depthCompositionLayerSupported) {
+		CHK_XR(xrEnumerateSwapchainImages(xrDepthSwapchain, 0, &numSwapchainImages, nullptr));
+		swapchainImages = stackArena.zalloc<XrSwapchainImageVulkan2KHR>(numSwapchainImages);
+		for (U32 i = 0; i < numSwapchainImages; i++) {
+			swapchainImages[i].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR;
+		}
+		CHK_XR(xrEnumerateSwapchainImages(xrDepthSwapchain, numSwapchainImages, &numSwapchainImages, reinterpret_cast<XrSwapchainImageBaseHeader*>(swapchainImages)));
+		VK::xrSwapchainData.swapchainDepthImages = globalArena.alloc<VkImage>(numSwapchainImages);
+		for (U32 i = 0; i < numSwapchainImages; i++) {
+			VK::xrSwapchainData.swapchainDepthImages[i] = swapchainImages[i].image;
+		}
+		VK::xrSwapchainData.swapchainDepthImageCount = numSwapchainImages;
+	}
 
 	XrActionSetCreateInfo actionSetInfo{ XR_TYPE_ACTION_SET_CREATE_INFO };
 	strcpy(actionSetInfo.actionSetName, "gameplay");
@@ -442,14 +479,14 @@ void collect_input(XrTime predictedDisplayTime) {
 
 	HandActions* handActions[]{ &leftHandActions, &rightHandActions };
 	VRUserHandInput* userInputHands[]{ &userInput.leftHand, &userInput.rightHand };
-	for (u32 i = 0; i < ARRAY_COUNT(handActions); i++) {
+	for (U32 i = 0; i < ARRAY_COUNT(handActions); i++) {
 		HandActions& handAction = *handActions[i];
 		VRUserHandInput& handInput = *userInputHands[i];
 
 		actionStateInfo.action = handAction.thumbstick;
 		CHK_XR(xrGetActionStateVector2f(session, &actionStateInfo, &vec2fOutput));
 		if (vec2fOutput.isActive) {
-			handInput.thumbstrickDirection = Vector2f{ vec2fOutput.currentState.x, vec2fOutput.currentState.y };
+			handInput.thumbstrickDirection = V2F32{ vec2fOutput.currentState.x, vec2fOutput.currentState.y };
 		}
 		actionStateInfo.action = handAction.trigger;
 		CHK_XR(xrGetActionStateFloat(session, &actionStateInfo, &floatOutput));
@@ -482,7 +519,7 @@ void update_eye_poses(OpenXRFrameInfo* frameInfo) {
 	viewLocateInfo.space = stageSpace;
 	XrViewState viewState{ XR_TYPE_VIEW_STATE };
 	XrView views[2]{ { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
-	u32 viewCount = 0;
+	U32 viewCount = 0;
 	CHK_XR(xrLocateViews(session, &viewLocateInfo, &viewState, ARRAY_COUNT(views), &viewCount, views));
 	if (viewCount == 2) {
 		if (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) {
@@ -506,9 +543,14 @@ NODISCARD OpenXRFrameInfo begin_frame() {
 	CHK_XR(xrWaitFrame(session, &frameWaitInfo, &frameState));
 
 	XrSwapchainImageAcquireInfo swapchainAcquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-	u32 swapchainImageIdx = U32_MAX;
-	CHK_XR(xrAcquireSwapchainImage(xrSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
-	VK::xrSwapchainData.swapchainImageIdx = swapchainImageIdx;
+	U32 swapchainImageIdx = U32_MAX;
+	CHK_XR(xrAcquireSwapchainImage(xrColorSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
+	VK::xrSwapchainData.swapchainColorImageIdx = swapchainImageIdx;
+	if (depthCompositionLayerSupported) {
+		CHK_XR(xrAcquireSwapchainImage(xrDepthSwapchain, &swapchainAcquireInfo, &swapchainImageIdx));
+		VK::xrSwapchainData.swapchainDepthImageIdx = swapchainImageIdx;
+	}
+	
 
 	OpenXRFrameInfo frameInfo{ OPENXR_IDENTITY_POSE, lastValidLeftFov, OPENXR_IDENTITY_POSE, lastValidRightFov, frameState.predictedDisplayTime, frameState.predictedDisplayPeriod, frameState.shouldRender };
 	update_eye_poses(&frameInfo);
@@ -517,7 +559,10 @@ NODISCARD OpenXRFrameInfo begin_frame() {
 
 void end_frame(OpenXRFrameInfo& frameInfo) {
 	XrSwapchainImageReleaseInfo swapchainReleaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-	CHK_XR(xrReleaseSwapchainImage(xrSwapchain, &swapchainReleaseInfo));
+	CHK_XR(xrReleaseSwapchainImage(xrColorSwapchain, &swapchainReleaseInfo));
+	if (depthCompositionLayerSupported) {
+		CHK_XR(xrReleaseSwapchainImage(xrDepthSwapchain, &swapchainReleaseInfo));
+	}
 
 	XrCompositionLayerProjectionView views[2]{};
 	views[0].type = views[1].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
@@ -525,10 +570,25 @@ void end_frame(OpenXRFrameInfo& frameInfo) {
 	views[1].pose = frameInfo.rightEyePose;
 	views[0].fov = frameInfo.leftEyeFov;
 	views[1].fov = frameInfo.rightEyeFov;
-	views[0].subImage.swapchain = views[1].subImage.swapchain = xrSwapchain;
-	views[0].subImage.imageRect = views[1].subImage.imageRect = XrRect2Di{ XrOffset2Di{ 0, 0 }, XrExtent2Di{ i32(xrRenderWidth), i32(xrRenderHeight) } };
+	views[0].subImage.swapchain = views[1].subImage.swapchain = xrColorSwapchain;
+	views[0].subImage.imageRect = views[1].subImage.imageRect = XrRect2Di{ XrOffset2Di{ 0, 0 }, XrExtent2Di{ I32(xrRenderWidth), I32(xrRenderHeight) } };
 	views[0].subImage.imageArrayIndex = 0;
 	views[1].subImage.imageArrayIndex = 1;
+	if (depthCompositionLayerSupported) {
+		XrCompositionLayerDepthInfoKHR viewDepths[2]{};
+		viewDepths[0].type = viewDepths[1].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+		viewDepths[0].subImage.swapchain = viewDepths[1].subImage.swapchain = xrDepthSwapchain;
+		viewDepths[0].subImage.imageRect = viewDepths[1].subImage.imageRect = XrRect2Di{ XrOffset2Di{ 0, 0 }, XrExtent2Di{ I32(xrRenderWidth), I32(xrRenderHeight) } };
+		viewDepths[0].subImage.imageArrayIndex = 0;
+		viewDepths[1].subImage.imageArrayIndex = 1;
+		viewDepths[0].minDepth = viewDepths[1].minDepth = 0.0F;
+		viewDepths[0].maxDepth = viewDepths[1].maxDepth = 1.0F;
+		viewDepths[0].nearZ = viewDepths[1].nearZ = F32_INF;
+		viewDepths[0].farZ = viewDepths[1].farZ = PROJECTION_NEAR_PLANE;
+		views[0].next = &viewDepths[0];
+		views[1].next = &viewDepths[1];
+	}
+	
 
 	XrCompositionLayerProjection displayImages{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
 	displayImages.layerFlags = 0;
@@ -556,8 +616,11 @@ void end_openxr() {
 	if (viewSpace) {
 		xrDestroySpace(viewSpace);
 	}
-	if (xrSwapchain) {
-		xrDestroySwapchain(xrSwapchain);
+	if (xrDepthSwapchain) {
+		xrDestroySwapchain(xrDepthSwapchain);
+	}
+	if (xrColorSwapchain) {
+		xrDestroySwapchain(xrColorSwapchain);
 	}
 	xrDestroySession(session);
 #if XR_DEBUG != 0

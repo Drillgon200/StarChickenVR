@@ -22,15 +22,14 @@ decltype(GetWindowRect)* GetWindowRect_ptr;
 decltype(SetProcessDPIAware)* SetProcessDPIAware_ptr;
 
 HMODULE user32DLL;
-HMODULE shcoreDLL;
 HINSTANCE instance;
 HWND window;
-u32 windowWidth;
-u32 windowHeight;
-i32 framebufferWidth;
-i32 framebufferHeight;
-b32 shouldRecreateSwapchain;
-b32 windowShouldClose;
+U32 windowWidth;
+U32 windowHeight;
+I32 framebufferWidth;
+I32 framebufferHeight;
+B32 shouldRecreateSwapchain;
+B32 windowShouldClose;
 
 void error_box(const char* msg) {
 	if (window) {
@@ -76,7 +75,7 @@ LRESULT CALLBACK window_callback(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 	return result;
 }
 
-bool init(u32 width, u32 height) {
+bool init(U32 width, U32 height) {
 	bool success = true;
 	instance = GetModuleHandleA(nullptr);
 	user32DLL = LoadLibraryA("User32.dll");
@@ -93,6 +92,7 @@ bool init(u32 width, u32 height) {
 		CreateWindowExA_ptr = reinterpret_cast<decltype(CreateWindowExA_ptr)>(reinterpret_cast<void*>(GetProcAddress(user32DLL, "CreateWindowExA")));
 		ShowWindow_ptr = reinterpret_cast<decltype(ShowWindow_ptr)>(reinterpret_cast<void*>(GetProcAddress(user32DLL, "ShowWindow")));
 		GetWindowRect_ptr = reinterpret_cast<decltype(GetWindowRect_ptr)>(reinterpret_cast<void*>(GetProcAddress(user32DLL, "GetWindowRect")));
+		SetProcessDPIAware_ptr = reinterpret_cast<decltype(SetProcessDPIAware_ptr)>(reinterpret_cast<void*>(GetProcAddress(user32DLL, "SetProcessDPIAware")));
 
 		WNDCLASSA windowClass{};
 		windowClass.lpfnWndProc = window_callback;
@@ -114,10 +114,6 @@ bool init(u32 width, u32 height) {
 				framebufferHeight = rect.bottom - rect.top;
 			}
 		}
-	}
-	shcoreDLL = LoadLibraryA("Shcore.dll");
-	if (shcoreDLL != NULL) {
-		SetProcessDPIAware_ptr = reinterpret_cast<decltype(SetProcessDPIAware_ptr)>(reinterpret_cast<void*>(GetProcAddress(shcoreDLL, "SetProcessDPIAware")));
 	}
 	if (SetProcessDPIAware_ptr) {
 		// Windows has a feature that renders applications at a lower resolution and does a blurry upscale to make them look bigger

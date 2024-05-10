@@ -4,23 +4,24 @@
 
 namespace Resources {
 
-enum DMFObjectID : u32 {
+enum DMFObjectID : U32 {
 	DMF_OBJECT_ID_NONE = 0,
 	DMF_OBJECT_ID_MESH = 1,
-	DMF_OBJECT_ID_ANIMATED_MESH = 2
+	DMF_OBJECT_ID_ANIMATED_MESH = 2,
+	DMF_OBJECT_ID_Count = 3
 };
 
-static constexpr u32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
-static constexpr u32 LAST_KNOWN_DAF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+static constexpr U32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
+static constexpr U32 LAST_KNOWN_DAF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
 
-void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, u32* skinningDataOffsetOut) {
-	u32 numVertices = modelFile.read_u32();
-	u32 numIndices = modelFile.read_u32();
-	u32 vertexDataSize = numVertices * VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
+void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, U32* skinningDataOffsetOut) {
+	U32 numVertices = modelFile.read_u32();
+	U32 numIndices = modelFile.read_u32();
+	U32 vertexDataSize = numVertices * VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
 	if (skinningDataOffsetOut != nullptr) {
 		vertexDataSize += numVertices * VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE;
 	}
-	u32 indexDataSize = numIndices * sizeof(u16);
+	U32 indexDataSize = numIndices * sizeof(U16);
 	if (modelFile.failed) {
 		print("Model failed read position: ");
 		println_integer(modelFile.offset);
@@ -36,26 +37,27 @@ void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, 
 	} else {
 		VK::geometryHandler.alloc_static(&mesh->indicesOffset, &mesh->verticesOffset, numIndices, numVertices);
 	}
-	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.positionsOffset + mesh->verticesOffset * sizeof(Vector3f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector3f));
-	modelFile.offset += numVertices * sizeof(Vector3f);
-	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.texcoordsOffset + mesh->verticesOffset * sizeof(Vector2f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector2f));
-	modelFile.offset += numVertices * sizeof(Vector2f);
-	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.normalsOffset + mesh->verticesOffset * sizeof(Vector3f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector3f));
-	modelFile.offset += numVertices * sizeof(Vector3f);
-	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.tangentsOffset + mesh->verticesOffset * sizeof(Vector3f), modelFile.bytes + modelFile.offset, numVertices * sizeof(Vector3f));
-	modelFile.offset += numVertices * sizeof(Vector3f);
+	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.positionsOffset + mesh->verticesOffset * sizeof(V3F32), modelFile.bytes + modelFile.offset, numVertices * sizeof(V3F32));
+	modelFile.offset += numVertices * sizeof(V3F32);
+	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.texcoordsOffset + mesh->verticesOffset * sizeof(V2F32), modelFile.bytes + modelFile.offset, numVertices * sizeof(V2F32));
+	modelFile.offset += numVertices * sizeof(V2F32);
+	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.normalsOffset + mesh->verticesOffset * sizeof(V3F32), modelFile.bytes + modelFile.offset, numVertices * sizeof(V3F32));
+	modelFile.offset += numVertices * sizeof(V3F32);
+	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.tangentsOffset + mesh->verticesOffset * sizeof(V3F32), modelFile.bytes + modelFile.offset, numVertices * sizeof(V3F32));
+	modelFile.offset += numVertices * sizeof(V3F32);
 	if (skinningDataOffsetOut) {
-		VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.skinDataOffset + *skinningDataOffsetOut * u64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE), modelFile.bytes + modelFile.offset, numVertices * u64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE));
+		VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.skinDataOffset + *skinningDataOffsetOut * U64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE), modelFile.bytes + modelFile.offset, numVertices * U64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE));
 		modelFile.offset += numVertices * VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE;
 	}
-	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset + mesh->indicesOffset * sizeof(u16), modelFile.bytes + modelFile.offset, numIndices * sizeof(u16));
+	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset + mesh->indicesOffset * sizeof(U16), modelFile.bytes + modelFile.offset, numIndices * sizeof(U16));
 	modelFile.offset += indexDataSize;
 }
 
-VKGeometry::StaticMesh load_dmf_static_mesh(const char* modelFileName) {
-	u64 stackArenaFrame0 = stackArena.stackPtr;
-	u32 modelFileSize;
-	byte* modelData = read_full_file_to_arena<byte>(&modelFileSize, stackArena, modelFileName);
+VKGeometry::StaticMesh load_dmf_static_mesh(StrA modelFileName) {
+	MemoryArena& stackArena = get_scratch_arena();
+	U64 stackArenaFrame0 = stackArena.stackPtr;
+	U32 modelFileSize;
+	Byte* modelData = read_full_file_to_arena<Byte>(&modelFileSize, stackArena, modelFileName);
 	if (modelData == nullptr) {
 		print("Failed to read model file: ");
 		println(modelFileName);
@@ -69,7 +71,7 @@ VKGeometry::StaticMesh load_dmf_static_mesh(const char* modelFileName) {
 	if (modelFile.read_u32() < LAST_KNOWN_DMF_VERSION) {
 		abort("Model file out of date");
 	}
-	u32 numObjects = modelFile.read_u32();
+	U32 numObjects = modelFile.read_u32();
 	if (numObjects == 0) {
 		abort("No objects in file");
 	}
@@ -79,7 +81,7 @@ VKGeometry::StaticMesh load_dmf_static_mesh(const char* modelFileName) {
 	if (objectType != DMF_OBJECT_ID_MESH) {
 		abort("Tried to load non static mesh from file to static mesh");
 	}
-	String meshName = modelFile.read_string();
+	StrA meshName = modelFile.read_stra();
 	read_and_upload_dmf_mesh(&mesh, modelFile, nullptr);
 
 	if (modelFile.failed) {
@@ -89,10 +91,11 @@ VKGeometry::StaticMesh load_dmf_static_mesh(const char* modelFileName) {
 	return mesh;
 }
 
-VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(const char* modelFileName) {
-	u64 stackArenaFrame0 = stackArena.stackPtr;
-	u32 modelFileSize;
-	byte* modelData = read_full_file_to_arena<byte>(&modelFileSize, stackArena, modelFileName);
+VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(StrA modelFileName) {
+	MemoryArena& stackArena = get_scratch_arena();
+	U64 stackArenaFrame0 = stackArena.stackPtr;
+	U32 modelFileSize;
+	Byte* modelData = read_full_file_to_arena<Byte>(&modelFileSize, stackArena, modelFileName);
 	if (modelData == nullptr) {
 		print("Failed to read model file: ");
 		println(modelFileName);
@@ -106,7 +109,7 @@ VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(const char* modelFileName) {
 	if (modelFile.read_u32() < LAST_KNOWN_DMF_VERSION) {
 		abort("Model file out of date");
 	}
-	u32 numObjects = modelFile.read_u32();
+	U32 numObjects = modelFile.read_u32();
 	if (numObjects == 0) {
 		abort("No objects in file");
 	}
@@ -116,33 +119,33 @@ VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(const char* modelFileName) {
 	if (objectType != DMF_OBJECT_ID_ANIMATED_MESH) {
 		abort("Tried to load non animated mesh from file to skeletal mesh");
 	}
-	String name = modelFile.read_string();
-	u32 numBones = modelFile.read_u32();
-	u32 skeletonSize = OFFSET_OF(VKGeometry::Skeleton, bones[numBones]);
+	StrA name = modelFile.read_stra();
+	U32 numBones = modelFile.read_u32();
+	U32 skeletonSize = OFFSET_OF(VKGeometry::Skeleton, bones[numBones]);
 	VKGeometry::Skeleton* skeleton = globalArena.alloc_bytes<VKGeometry::Skeleton>(skeletonSize);
 	skeleton->boneCount = numBones;
 
-	for (u32 boneIdx = 0; boneIdx < numBones; boneIdx++) {
-		String boneName = modelFile.read_string();
-		u32 parentIdx = modelFile.read_u32();
+	for (U32 boneIdx = 0; boneIdx < numBones; boneIdx++) {
+		StrA boneName = modelFile.read_stra();
+		U32 parentIdx = modelFile.read_u32();
 		if (parentIdx != VKGeometry::Bone::PARENT_INVALID_IDX && parentIdx >= boneIdx) {
 			abort("Bone parent index out of range (parents must be written before children)");
 		}
 		VKGeometry::Bone& bone = skeleton->bones[boneIdx];
 		bone.parentIdx = parentIdx;
-		bone.bindTransform = modelFile.read_matrix4x3f();
+		bone.bindTransform = modelFile.read_m4x3f32();
 		if (parentIdx == VKGeometry::Bone::PARENT_INVALID_IDX) {
 			bone.invBindTransform = bone.bindTransform;
 		} else {
-			Matrix4x3f& parentBindTransform = skeleton->bones[parentIdx].invBindTransform; // the bind transforms aren't yet inverted
+			M4x3F32& parentBindTransform = skeleton->bones[parentIdx].invBindTransform; // the bind transforms aren't yet inverted
 			bone.invBindTransform = parentBindTransform * bone.bindTransform;
 		}
 	}
-	for (u32 boneIdx = 0; boneIdx < numBones; boneIdx++) {
+	for (U32 boneIdx = 0; boneIdx < numBones; boneIdx++) {
 		skeleton->bones[boneIdx].invBindTransform.invert();
 	}
 
-	u32 numSubMeshes = modelFile.read_u32();
+	U32 numSubMeshes = modelFile.read_u32();
 	if (numSubMeshes < 1) {
 		abort("Animated skeleton had no meshes to animate");
 	}
@@ -156,10 +159,11 @@ VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(const char* modelFileName) {
 	return mesh;
 }
 
-VKGeometry::SkeletalAnimation load_daf(const char* animationFileName) {
-	u64 stackArenaFrame0 = stackArena.stackPtr;
-	u32 modelFileSize;
-	byte* modelData = read_full_file_to_arena<byte>(&modelFileSize, stackArena, animationFileName);
+VKGeometry::SkeletalAnimation load_daf(StrA animationFileName) {
+	MemoryArena& stackArena = get_scratch_arena();
+	U64 stackArenaFrame0 = stackArena.stackPtr;
+	U32 modelFileSize;
+	Byte* modelData = read_full_file_to_arena<Byte>(&modelFileSize, stackArena, animationFileName);
 	if (modelData == nullptr) {
 		print("Failed to read animation file: ");
 		println(animationFileName);
@@ -178,10 +182,10 @@ VKGeometry::SkeletalAnimation load_daf(const char* animationFileName) {
 	anim.boneCount = modelFile.read_u32();
 	anim.framerate = modelFile.read_f32();
 	anim.lengthMilliseconds = modelFile.read_u32();
-	anim.matrices = globalArena.alloc<Matrix4x3f>(anim.boneCount * anim.keyframeCount);
-	for (u32 frame = 0; frame < anim.keyframeCount; frame++) {
-		for (u32 bone = 0; bone < anim.boneCount; bone++) {
-			anim.matrices[frame * anim.boneCount + bone] = modelFile.read_matrix4x3f();
+	anim.matrices = globalArena.alloc<M4x3F32>(anim.boneCount * anim.keyframeCount);
+	for (U32 frame = 0; frame < anim.keyframeCount; frame++) {
+		for (U32 bone = 0; bone < anim.boneCount; bone++) {
+			anim.matrices[frame * anim.boneCount + bone] = modelFile.read_m4x3f32();
 		}
 	}
 
@@ -214,17 +218,34 @@ VKGeometry::SkeletalMesh testAnimMesh;
 #define BONE_INDEX_RIGHTHAND_THUMBTIP 16
 VKGeometry::SkeletalMesh rightHandMesh;
 VKGeometry::SkeletalAnimation rightHandCloseAnim;
+#define BONE_INDEX_LEFTHAND_WRIST 0
+#define BONE_INDEX_LEFTHAND_PALM 1
+#define BONE_INDEX_LEFTHAND_INDEXBASE 2
+#define BONE_INDEX_LEFTHAND_INDEXMIDDLE 3
+#define BONE_INDEX_LEFTHAND_INDEXTIP 4
+#define BONE_INDEX_LEFTHAND_MIDDLEBASE 5
+#define BONE_INDEX_LEFTHAND_MIDDLEMIDDLE 6
+#define BONE_INDEX_LEFTHAND_MIDDLETIP 7
+#define BONE_INDEX_LEFTHAND_RINGBASE 8
+#define BONE_INDEX_LEFTHAND_RINGMIDDLE 9
+#define BONE_INDEX_LEFTHAND_RINGTIP 10
+#define BONE_INDEX_LEFTHAND_PINKYBASE 11
+#define BONE_INDEX_LEFTHAND_PINKYMIDDLE 12
+#define BONE_INDEX_LEFTHAND_PINKYTIP 13
+#define BONE_INDEX_LEFTHAND_THUMBBASE 14
+#define BONE_INDEX_LEFTHAND_THUMBMIDDLE 15
+#define BONE_INDEX_LEFTHAND_THUMBTIP 16
+VKGeometry::SkeletalMesh leftHandMesh;
 
 
 
 void load_resources() {
-	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf");
-	testAnimMesh = load_dmf_skeletal_mesh("./resources/models/test_anim.dmf");
-	rightHandMesh = load_dmf_skeletal_mesh("./resources/models/right_hand.dmf");
-	rightHandCloseAnim = load_daf("./resources/models/right_hand_close.daf");
+	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf"sa);
+	testAnimMesh = load_dmf_skeletal_mesh("./resources/models/test_anim.dmf"sa);
+	rightHandMesh = load_dmf_skeletal_mesh("./resources/models/right_hand.dmf"sa);
+	rightHandCloseAnim = load_daf("./resources/models/right_hand_close.daf"sa);
 	ASSERT(rightHandCloseAnim.boneCount == rightHandMesh.skeletonData->boneCount, "rightHandCloseAnim animation bone count did not match rightHandMesh bone count");
-
-
+	leftHandMesh = load_dmf_skeletal_mesh("./resources/models/left_hand.dmf"sa);
 }
 
 

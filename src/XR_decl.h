@@ -14,7 +14,8 @@
 #define CHK_XR(cmd) { XrResult chkXr_Result = (cmd); if(XR_FAILED(chkXr_Result)){ ::XR::openxr_failure(chkXr_Result); } if(chkXr_Result == XR_SESSION_LOSS_PENDING){ abort("XR Session Loss Pending"); } } 
 #define XR_DEBUG 1
 namespace XR {
-#define OPENXR_SWAPCHAIN_IMAGE_FORMAT VK_FORMAT_R8G8B8A8_SRGB
+#define OPENXR_SWAPCHAIN_COLOR_FORMAT VK_FORMAT_R8G8B8A8_SRGB
+#define OPENXR_SWAPCHAIN_DEPTH_FORMAT VK_FORMAT_D32_SFLOAT
 // Preprocessor hack to make defining and loading functions easier (just add them to the end of this macro when needed)
 #define XR_FUNCTIONS OP(xrDestroyInstance)\
 	OP(xrCreateDebugUtilsMessengerEXT)\
@@ -75,14 +76,14 @@ struct OpenXRFrameInfo {
 	XrFovf rightEyeFov;
 	XrTime predictedDisplayTime;
 	XrDuration predictedDisplayPeriod;
-	b32 shouldRender;
+	B32 shouldRender;
 };
 
 struct VRUserHandInput {
-	Matrix4x3f pose;
-	Vector2f thumbstrickDirection;
-	f32 trigger;
-	f32 grip;
+	M4x3F32 pose;
+	V2F32 thumbstrickDirection;
+	F32 trigger;
+	F32 grip;
 };
 
 struct VRUserInput {
@@ -96,14 +97,16 @@ extern XrSession session;
 extern XrSessionState currentSessionState;
 extern VRUserInput userInput;
 
-extern u32 xrRenderWidth;
-extern u32 xrRenderHeight;
+extern B32 depthCompositionLayerSupported;
+
+extern U32 xrRenderWidth;
+extern U32 xrRenderHeight;
 
 void openxr_failure(XrResult result);
 void end_openxr();
-Quaternionf xr_quat_to_drillmath_quat(XrQuaternionf q);
-Vector3f xr_vec3_to_drillmath_vec3(XrVector3f v);
-Matrix4x3f xr_pose_to_drillmath_mat4x3(XrPosef p);
+QF32 xr_quat_to_drillmath_quat(XrQuaternionf q);
+V3F32 xr_vec3_to_drillmath_vec3(XrVector3f v);
+M4x3F32 xr_pose_to_drillmath_mat4x3(XrPosef p);
 
 void update_eye_poses(OpenXRFrameInfo* frameInfo);
 

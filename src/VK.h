@@ -36,16 +36,16 @@ VkDevice logicalDevice;
 
 VkPhysicalDeviceProperties physicalDeviceProperties;
 
-u32 graphicsFamily;
-u32 transferFamily;
-u32 computeFamily;
+U32 graphicsFamily;
+U32 transferFamily;
+U32 computeFamily;
 #define FAMILY_PRESENT_BIT_GRAPHICS (1 << 0)
 #define FAMILY_PRESENT_BIT_TRANSFER (1 << 1)
 #define FAMILY_PRESENT_BIT_COMPUTE (1 << 2)
-u32 familyPresentBits;
+U32 familyPresentBits;
 
-u32 hostMemoryTypeIndex;
-u32 deviceMemoryTypeIndex;
+U32 hostMemoryTypeIndex;
+U32 deviceMemoryTypeIndex;
 
 VkQueue graphicsQueue;
 VkQueue transferQueue;
@@ -84,15 +84,16 @@ struct DesktopSwapchainData {
 	VkImage* swapchainImages;
 	VkFence swapchainAcquireFence;
 	VkSemaphore renderFinishedSemaphore;
-	b32 shouldTryPresentToDesktopThisFrame;
-	b32 desktopSwapchainReadyForPresent;
-	u32 swapchainImageCount;
-	u32 swapchainImageIdx;
-	u32 width;
-	u32 height;
+	B32 shouldTryPresentToDesktopThisFrame;
+	B32 desktopSwapchainReadyForPresent;
+	U32 swapchainImageCount;
+	U32 swapchainImageIdx;
+	U32 width;
+	U32 height;
 
-	void create(i32 newWidth, i32 newHeight) {
-		u64 stackArenaFrame0 = stackArena.stackPtr;
+	void create(I32 newWidth, I32 newHeight) {
+		MemoryArena& stackArena = get_scratch_arena();
+		U64 stackArenaFrame0 = stackArena.stackPtr;
 		if (newWidth <= 0 || newHeight <= 0 || !StarChicken::shouldUseDesktopWindow || vkGetPhysicalDeviceWin32PresentationSupportKHR(physicalDevice, graphicsFamily) == VK_FALSE) {
 			swapchain = VK_NULL_HANDLE;
 			width = 0;
@@ -112,19 +113,19 @@ struct DesktopSwapchainData {
 				width = surfaceCaps.currentExtent.width;
 				height = surfaceCaps.currentExtent.height;
 			} else {
-				width = clamp(u32(newWidth), surfaceCaps.minImageExtent.width, surfaceCaps.maxImageExtent.height);
-				height = clamp(u32(newHeight), surfaceCaps.minImageExtent.height, surfaceCaps.maxImageExtent.height);
+				width = clamp(U32(newWidth), surfaceCaps.minImageExtent.width, surfaceCaps.maxImageExtent.height);
+				height = clamp(U32(newHeight), surfaceCaps.minImageExtent.height, surfaceCaps.maxImageExtent.height);
 			}
 
 			if (width == 0 || height == 0) {
 				swapchain = VK_NULL_HANDLE;
 			} else {
-				u32 surfaceFormatCount;
+				U32 surfaceFormatCount;
 				CHK_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, nullptr));
 				VkSurfaceFormatKHR* surfaceFormatsSupported = stackArena.alloc<VkSurfaceFormatKHR>(surfaceFormatCount);
 				CHK_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, surfaceFormatsSupported));
 				VkSurfaceFormatKHR surfaceFormat = surfaceFormatsSupported[0];
-				for (u32 i = 0; i < surfaceFormatCount; i++) {
+				for (U32 i = 0; i < surfaceFormatCount; i++) {
 					if (surfaceFormatsSupported[i].format == VK_FORMAT_B8G8R8A8_SRGB && surfaceFormatsSupported[i].colorSpace == VK_COLORSPACE_SRGB_NONLINEAR_KHR) {
 						surfaceFormat = surfaceFormatsSupported[i];
 						break;
@@ -132,11 +133,11 @@ struct DesktopSwapchainData {
 				}
 
 				VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-				u32 presentModeCount;
+				U32 presentModeCount;
 				CHK_VK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr));
 				VkPresentModeKHR* presentModesSupported = stackArena.alloc<VkPresentModeKHR>(presentModeCount);
 				CHK_VK(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModesSupported));
-				for (u32 i = 0; i < presentModeCount; i++) {
+				for (U32 i = 0; i < presentModeCount; i++) {
 					if (presentModesSupported[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
 						presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
 						break;
@@ -163,7 +164,7 @@ struct DesktopSwapchainData {
 				swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 				CHK_VK(vkCreateSwapchainKHR(logicalDevice, &swapchainCreateInfo, VK_NULL_HANDLE, &swapchain));
 
-				u32 newSwapchainImageCount;
+				U32 newSwapchainImageCount;
 				CHK_VK(vkGetSwapchainImagesKHR(logicalDevice, swapchain, &newSwapchainImageCount, nullptr));
 				if (newSwapchainImageCount > swapchainImageCount) {
 					swapchainImages = globalArena.alloc_and_commit<VkImage>(newSwapchainImageCount);
@@ -185,7 +186,7 @@ struct DesktopSwapchainData {
 		stackArena.stackPtr = stackArenaFrame0;
 	}
 
-	void resize(i32 newWidth, i32 newHeight) {
+	void resize(I32 newWidth, I32 newHeight) {
 		// Heavy sync, but this is only expected to run when the user resizes the desktop window anyway
 		CHK_VK(vkDeviceWaitIdle(logicalDevice));
 		if (swapchain != VK_NULL_HANDLE) {
@@ -209,10 +210,10 @@ struct DesktopSwapchainData {
 } desktopSwapchainData;
 
 struct DestroyLists {
-	ArenaArrayList<VkDescriptorSetLayout, &globalArena> descriptorSetLayouts;
-	ArenaArrayList<Framebuffer*, &globalArena> framebuffers;
-	ArenaArrayList<VkPipelineLayout, &globalArena> pipelineLayouts;
-	ArenaArrayList<VkPipeline, &globalArena> pipelines;
+	ArenaArrayList<VkDescriptorSetLayout> descriptorSetLayouts;
+	ArenaArrayList<Framebuffer*> framebuffers;
+	ArenaArrayList<VkPipelineLayout> pipelineLayouts;
+	ArenaArrayList<VkPipeline> pipelines;
 } destroyLists;
 
 void vulkan_failure(VkResult result, const char* msg) {
@@ -225,7 +226,7 @@ void vulkan_failure(VkResult result, const char* msg) {
 	ExitProcess(EXIT_FAILURE);
 }
 
-b32 load_first_vulkan_functions() {
+B32 load_first_vulkan_functions() {
 	HMODULE vulkan = LoadLibraryA("vulkan-1.dll");
 	if (!vulkan) {
 		print("vulkan-1.dll not found! Perhaps upgrade your graphics drivers?\n");
@@ -278,15 +279,22 @@ void init_vulkan() {
 		abort("OpenXR minimum vulkan version is greater than our vulkan version, exiting");
 	}
 
+	MemoryArena& stackArena = get_scratch_arena();
+
+	destroyLists.descriptorSetLayouts.allocator = &globalArena;
+	destroyLists.framebuffers.allocator = &globalArena;
+	destroyLists.pipelineLayouts.allocator = &globalArena;
+	destroyLists.pipelines.allocator = &globalArena;
+
 	/*u32 instanceExtensionCount{};
 	CHK_XR(XR::xrGetVulkanInstanceExtensionsKHR(XR::xrInstance, XR::systemID, 0, &instanceExtensionCount, nullptr));
 	char* xrRequiredExtensions = stackArena.alloc<char>(instanceExtensionCount + 1);
 	CHK_XR(XR::xrGetVulkanInstanceExtensionsKHR(XR::xrInstance, XR::systemID, instanceExtensionCount, &instanceExtensionCount, xrRequiredExtensions));
 	xrRequiredExtensions[instanceExtensionCount] = 0;*/
 
-	ArenaArrayList<const char*> enabledLayers{};
+	ArenaArrayList<const char*> enabledLayers{ &stackArena };
 	enabledLayers.push_back_n(ENABLED_VALIDATION_LAYERS, ARRAY_COUNT(ENABLED_VALIDATION_LAYERS));
-	ArenaArrayList<const char*> enabledExtensions{};
+	ArenaArrayList<const char*> enabledExtensions{ &stackArena };
 	enabledExtensions.push_back_n(INSTANCE_EXTENSIONS, ARRAY_COUNT(INSTANCE_EXTENSIONS));
 	/*while(*xrRequiredExtensions){
 		enabledExtensions.push_back(xrRequiredExtensions);
@@ -345,12 +353,12 @@ void init_vulkan() {
 	xrGraphicsDeviceInfo.vulkanInstance = vkInstance;
 	CHK_XR(XR::xrGetVulkanGraphicsDevice2KHR(XR::xrInstance, &xrGraphicsDeviceInfo, &physicalDevice));
 
-	u32 familyCount = 0;
+	U32 familyCount = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, nullptr);
 	VkQueueFamilyProperties* queueFamilyProperties = stackArena.alloc<VkQueueFamilyProperties>(familyCount);
 	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, queueFamilyProperties);
-	for (u32 i = 0; i < familyCount; i++) {
-		u32 queueFlags = queueFamilyProperties[i].queueFlags;
+	for (U32 i = 0; i < familyCount; i++) {
+		U32 queueFlags = queueFamilyProperties[i].queueFlags;
 		if (queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 			graphicsFamily = i;
 			familyPresentBits |= FAMILY_PRESENT_BIT_GRAPHICS;
@@ -372,9 +380,9 @@ allNecessaryQueuesPresent:;
 
 	vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
 
-	f32 queuePriority = 1.0F;
+	F32 queuePriority = 1.0F;
 	VkDeviceQueueCreateInfo queueCreateInfos[3]{};
-	u32 queueCreateInfoCount = 1;
+	U32 queueCreateInfoCount = 1;
 	queueCreateInfos[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	queueCreateInfos[0].queueFamilyIndex = graphicsFamily;
 	queueCreateInfos[0].queueCount = 1;
@@ -452,11 +460,11 @@ allNecessaryQueuesPresent:;
 
 	hostMemoryTypeIndex = U32_MAX;
 	deviceMemoryTypeIndex = U32_MAX;
-	u32 hostHeapIdx{};
-	u32 deviceHeapIdx{};
+	U32 hostHeapIdx{};
+	U32 deviceHeapIdx{};
 	VkPhysicalDeviceMemoryProperties memoryProperties;
 	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-	for (u32 i = 0; i < memoryProperties.memoryTypeCount; i++) {
+	for (U32 i = 0; i < memoryProperties.memoryTypeCount; i++) {
 		VkMemoryType type = memoryProperties.memoryTypes[i];
 		if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT && (hostMemoryTypeIndex == U32_MAX || memoryProperties.memoryHeaps[type.heapIndex].size > memoryProperties.memoryHeaps[hostHeapIdx].size)) {
 			hostHeapIdx = type.heapIndex;
@@ -473,8 +481,8 @@ allNecessaryQueuesPresent:;
 	}
 	
 	graphicsStager.init(graphicsQueue, graphicsFamily);
-	geometryHandler.init(128 * ONE_MEGABYTE);
-	uniformMatricesHandler.init(2 * ONE_MEGABYTE);
+	geometryHandler.init(128 * MEGABYTE);
+	uniformMatricesHandler.init(2 * MEGABYTE);
 
 	VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -502,13 +510,13 @@ Framebuffer& Framebuffer::render_pass(VkRenderPass pass) {
 	return *this;
 }
 
-Framebuffer& Framebuffer::dimensions(u32 width, u32 height) {
+Framebuffer& Framebuffer::dimensions(U32 width, U32 height) {
 	framebufferWidth = width;
 	framebufferHeight = height;
 	return *this;
 }
 
-Framebuffer& Framebuffer::new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, u32 layerCount) {
+Framebuffer& Framebuffer::new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, U32 layerCount) {
 	if (attachmentCount == MAX_FRAMEBUFFER_ATTACHMENTS) {
 		abort("Max framebuffer attachments exceeded");
 	}
@@ -592,7 +600,7 @@ Framebuffer& Framebuffer::build() {
 	}
 
 	VkImageView attachmentViews[MAX_FRAMEBUFFER_ATTACHMENTS];
-	for (u32 i = 0; i < MAX_FRAMEBUFFER_ATTACHMENTS; i++) {
+	for (U32 i = 0; i < MAX_FRAMEBUFFER_ATTACHMENTS; i++) {
 		attachmentViews[i] = attachments[i].imageView;
 	}
 	VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
@@ -615,7 +623,7 @@ void Framebuffer::destroy() {
 	if (framebuffer != VK_NULL_HANDLE) {
 		vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
 		framebuffer = VK_NULL_HANDLE;
-		for (u32 i = 0; i < attachmentCount; i++) {
+		for (U32 i = 0; i < attachmentCount; i++) {
 			FramebufferAttachment& attachment = attachments[i];
 			if (attachment.ownsImageView) {
 				vkDestroyImageView(logicalDevice, attachment.imageView, nullptr);
@@ -631,12 +639,12 @@ void Framebuffer::destroy() {
 }
 
 struct RenderPassBuilder {
-	static constexpr u32 MAX_COLOR_ATTACHMENTS = 4;
-	static constexpr u32 MAX_DEPTH_ATTACHMENTS = 1;
-	static constexpr u32 MAX_ATTACHMENTS = MAX_COLOR_ATTACHMENTS + MAX_DEPTH_ATTACHMENTS;
+	static constexpr U32 MAX_COLOR_ATTACHMENTS = 4;
+	static constexpr U32 MAX_DEPTH_ATTACHMENTS = 1;
+	static constexpr U32 MAX_ATTACHMENTS = MAX_COLOR_ATTACHMENTS + MAX_DEPTH_ATTACHMENTS;
 	VkAttachmentDescription attachmentDescriptions[MAX_ATTACHMENTS];
-	u32 numAttachments;
-	b32 hasDepthAttachment;
+	U32 numAttachments;
+	B32 hasDepthAttachment;
 
 	RenderPassBuilder& set_default() {
 		numAttachments = 0;
@@ -687,7 +695,7 @@ struct RenderPassBuilder {
 
 	VkRenderPass build() {
 		VkAttachmentReference colorRefs[MAX_COLOR_ATTACHMENTS];
-		for (u32 i = 0; i < MAX_COLOR_ATTACHMENTS; i++) {
+		for (U32 i = 0; i < MAX_COLOR_ATTACHMENTS; i++) {
 			colorRefs[i].attachment = i;
 			colorRefs[i].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		}
@@ -720,11 +728,11 @@ struct RenderPassBuilder {
 		passInfo.pDependencies = nullptr;
 		VkRenderPassMultiviewCreateInfo renderPassMultiview{ VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
 		renderPassMultiview.subpassCount = 1;
-		u32 viewMask = 0b11; // broadcast to both eyes
+		U32 viewMask = 0b11; // broadcast to both eyes
 		renderPassMultiview.pViewMasks = &viewMask;
 		renderPassMultiview.dependencyCount = 0;
 		renderPassMultiview.pViewOffsets = 0;
-		u32 correlationMask = 0b11; // the two eyes will be very similar
+		U32 correlationMask = 0b11; // the two eyes will be very similar
 		renderPassMultiview.correlationMaskCount = 1;
 		renderPassMultiview.pCorrelationMasks = &correlationMask;
 		passInfo.pNext = &renderPassMultiview;
@@ -743,24 +751,24 @@ void create_render_targets() {
 		.render_pass(mainRenderPass)
 		.dimensions(XR::xrRenderWidth, XR::xrRenderHeight)
 		.new_attachment(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 2)
-		.new_attachment(VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT, 2)
+		.new_attachment(VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | (XR::depthCompositionLayerSupported ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0), VK_IMAGE_ASPECT_DEPTH_BIT, 2)
 		.build();
 }
 
 struct PipelineLayoutBuilder {
-	static constexpr u32 MAX_PUSH_CONSTANTS = 1;
-	static constexpr u32 MAX_SET_LAYOUTS = 4;
+	static constexpr U32 MAX_PUSH_CONSTANTS = 1;
+	static constexpr U32 MAX_SET_LAYOUTS = 4;
 	VkPushConstantRange pushConstants[MAX_PUSH_CONSTANTS];
 	VkDescriptorSetLayout setLayouts[MAX_SET_LAYOUTS];
-	u32 pushConstantCount;
-	u32 setLayoutCount;
+	U32 pushConstantCount;
+	U32 setLayoutCount;
 
 	PipelineLayoutBuilder& set_default() {
 		pushConstantCount = 0;
 		return *this;
 	}
 
-	PipelineLayoutBuilder& push_constant(VkShaderStageFlags stage, u32 offset, u32 size) {
+	PipelineLayoutBuilder& push_constant(VkShaderStageFlags stage, U32 offset, U32 size) {
 		if (pushConstantCount == MAX_PUSH_CONSTANTS) {
 			// Since we create all pipeline layouts at startup, this will always trigger in testing, so it's almost like a static assert
 			abort("PipelineLayoutInfo push constant capacity exceeded");
@@ -794,7 +802,7 @@ struct PipelineLayoutBuilder {
 
 
 struct DescriptorSetBuilder {
-	static ArenaArrayList<VkDescriptorPool, &globalArena> descriptorPools;
+	static ArenaArrayList<VkDescriptorPool> descriptorPools;
 
 	static void alloc_new_descriptor_pool() {
 		VkDescriptorPoolSize poolSizes[]{
@@ -812,31 +820,32 @@ struct DescriptorSetBuilder {
 		poolInfo.pPoolSizes = poolSizes;
 		VkDescriptorPool pool;
 		vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &pool);
+		descriptorPools.allocator = &globalArena;
 		descriptorPools.push_back(pool);
 	}
 
 	static void reset_descriptor_pools() {
-		for (u32 i = 0; i < descriptorPools.size; i++) {
+		for (U32 i = 0; i < descriptorPools.size; i++) {
 			vkDestroyDescriptorPool(logicalDevice, descriptorPools.data[i], nullptr);
 		}
 		descriptorPools.clear();
 	}
 
-	static constexpr u32 MAX_LAYOUT_BINDINGS = 16;
+	static constexpr U32 MAX_LAYOUT_BINDINGS = 16;
 	VkDescriptorSetLayoutBinding bindings[MAX_LAYOUT_BINDINGS];
 	VkDescriptorBindingFlags bindingFlags[MAX_LAYOUT_BINDINGS];
-	u32 bindingCount;
+	U32 bindingCount;
 
 	DescriptorSetBuilder& set_default() {
 		bindingCount = 0;
 		return *this;
 	}
 
-	DescriptorSetBuilder& storage_buffer(u32 bindingIndex, VkShaderStageFlags stageFlags) {
+	DescriptorSetBuilder& storage_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags) {
 		if (bindingCount == MAX_LAYOUT_BINDINGS) {
 			abort("Ran out of layout bindings");
 		}
-		u32 bindingIdx = bindingCount++;
+		U32 bindingIdx = bindingCount++;
 		VkDescriptorSetLayoutBinding& binding = bindings[bindingIdx];
 		binding.binding = bindingIndex;
 		binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -847,11 +856,11 @@ struct DescriptorSetBuilder {
 		return *this;
 	}
 
-	DescriptorSetBuilder& uniform_buffer(u32 bindingIndex, VkShaderStageFlags stageFlags) {
+	DescriptorSetBuilder& uniform_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags) {
 		if (bindingCount == MAX_LAYOUT_BINDINGS) {
 			abort("Ran out of layout bindings");
 		}
-		u32 bindingIdx = bindingCount++;
+		U32 bindingIdx = bindingCount++;
 		VkDescriptorSetLayoutBinding& binding = bindings[bindingIdx];
 		binding.binding = bindingIndex;
 		binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -898,28 +907,28 @@ struct DescriptorSetBuilder {
 		return descriptorSet;
 	}
 };
-ArenaArrayList<VkDescriptorPool, &globalArena> DescriptorSetBuilder::descriptorPools;
+ArenaArrayList<VkDescriptorPool> DescriptorSetBuilder::descriptorPools;
 
 struct GraphicsPipelineBuilder {
-	static constexpr u32 MAX_ATTRIBUTE_DESCRIPTIONS = 8;
-	static constexpr u32 MAX_BINDING_DESCRIPTIONS = 8;
+	static constexpr U32 MAX_ATTRIBUTE_DESCRIPTIONS = 8;
+	static constexpr U32 MAX_BINDING_DESCRIPTIONS = 8;
 
-	const char* shaderFileName;
+	StrA shaderFileName;
 	VkPipelineLayout pipelineLayout;
 	VkVertexInputAttributeDescription attributeDescriptions[MAX_ATTRIBUTE_DESCRIPTIONS];
 	VkVertexInputBindingDescription bindingDescriptions[MAX_BINDING_DESCRIPTIONS];
-	u32 attributeDescriptionCount;
-	u32 bindingDescriptionCount;
+	U32 attributeDescriptionCount;
+	U32 bindingDescriptionCount;
 
 	GraphicsPipelineBuilder& set_default() {
-		shaderFileName = nullptr;
+		shaderFileName = StrA{};
 		pipelineLayout = VK_NULL_HANDLE;
 		attributeDescriptionCount = 0;
 		bindingDescriptionCount= 0;
 		return *this;
 	}
 
-	GraphicsPipelineBuilder& shader_name(const char* shaderFile) {
+	GraphicsPipelineBuilder& shader_name(StrA shaderFile) {
 		shaderFileName = shaderFile;
 		return *this;
 	}
@@ -929,7 +938,7 @@ struct GraphicsPipelineBuilder {
 		return *this;
 	}
 
-	GraphicsPipelineBuilder& vertex_attribute(u32 binding, u32 location, VkFormat format, u32 size) {
+	GraphicsPipelineBuilder& vertex_attribute(U32 binding, U32 location, VkFormat format, U32 size) {
 		if (attributeDescriptionCount == MAX_ATTRIBUTE_DESCRIPTIONS) {
 			abort("Maximum attribute descriptions exceeded");
 		}
@@ -959,13 +968,14 @@ struct GraphicsPipelineBuilder {
 		if (pipelineLayout == VK_NULL_HANDLE) {
 			abort("Must set pipeline layout to build VkPipeline");
 		}
-		if (shaderFileName == nullptr) {
+		if (shaderFileName.is_empty()) {
 			abort("Must set shader file name to build VkPipeline");
 		}
 
-		u64 stackArenaFrame0 = stackArena.stackPtr;
-		u32 spirvDwordCount;
-		u32* spirv = read_full_file_to_arena<u32>(&spirvDwordCount, stackArena, shaderFileName);
+		MemoryArena& stackArena = get_scratch_arena();
+		U64 stackArenaFrame0 = stackArena.stackPtr;
+		U32 spirvDwordCount;
+		U32* spirv = read_full_file_to_arena<U32>(&spirvDwordCount, stackArena, shaderFileName);
 		if (spirv == nullptr) {
 			print("File read failed: ");
 			println(shaderFileName);
@@ -973,7 +983,7 @@ struct GraphicsPipelineBuilder {
 		}
 		VkShaderModuleCreateInfo moduleInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 		moduleInfo.flags = 0;
-		moduleInfo.codeSize = spirvDwordCount * sizeof(u32);
+		moduleInfo.codeSize = spirvDwordCount * sizeof(U32);
 		moduleInfo.pCode = spirv;
 		VkShaderModule shaderModule;
 		CHK_VK(vkCreateShaderModule(logicalDevice, &moduleInfo, VK_NULL_HANDLE, &shaderModule));
@@ -1009,8 +1019,8 @@ struct GraphicsPipelineBuilder {
 		VkViewport viewport{};
 		viewport.x = 0.0F;
 		viewport.y = 0.0F;
-		viewport.width = f32(XR::xrRenderWidth);
-		viewport.height = f32(XR::xrRenderHeight);
+		viewport.width = F32(XR::xrRenderWidth);
+		viewport.height = F32(XR::xrRenderHeight);
 		viewport.minDepth = 0.0F;
 		viewport.maxDepth = 1.0F;
 		VkRect2D scissor{};
@@ -1116,15 +1126,15 @@ struct GraphicsPipelineBuilder {
 
 struct ComputePipelineBuilder {
 	VkPipelineLayout pipelineLayout;
-	const char* shaderFileName;
+	StrA shaderFileName;
 
 	ComputePipelineBuilder& set_default() {
 		pipelineLayout = VK_NULL_HANDLE;
-		shaderFileName = nullptr;
+		shaderFileName = StrA{};
 		return *this;
 	}
 
-	ComputePipelineBuilder& shader_name(const char* fileName) {
+	ComputePipelineBuilder& shader_name(StrA fileName) {
 		shaderFileName = fileName;
 		return *this;
 	}
@@ -1138,13 +1148,14 @@ struct ComputePipelineBuilder {
 		if (pipelineLayout == VK_NULL_HANDLE) {
 			abort("Must set pipeline layout to build VkPipeline");
 		}
-		if (shaderFileName == nullptr) {
+		if (shaderFileName.is_empty()) {
 			abort("Must set shader file name to build VkPipeline");
 		}
 
-		u64 stackArenaFrame0 = stackArena.stackPtr;
-		u32 spirvDwordCount;
-		u32* spirv = read_full_file_to_arena<u32>(&spirvDwordCount, stackArena, shaderFileName);
+		MemoryArena& stackArena = get_scratch_arena();
+		U64 stackArenaFrame0 = stackArena.stackPtr;
+		U32 spirvDwordCount;
+		U32* spirv = read_full_file_to_arena<U32>(&spirvDwordCount, stackArena, shaderFileName);
 		if (spirv == nullptr) {
 			print("File read failed: ");
 			println(shaderFileName);
@@ -1152,7 +1163,7 @@ struct ComputePipelineBuilder {
 		}
 		VkShaderModuleCreateInfo moduleInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 		moduleInfo.flags = 0;
-		moduleInfo.codeSize = spirvDwordCount * sizeof(u32);
+		moduleInfo.codeSize = spirvDwordCount * sizeof(U32);
 		moduleInfo.pCode = spirv;
 		VkShaderModule shaderModule;
 		CHK_VK(vkCreateShaderModule(logicalDevice, &moduleInfo, nullptr, &shaderModule));
@@ -1195,7 +1206,7 @@ void load_pipelines_and_descriptors() {
 	
 	VkDescriptorBufferInfo skinningBufferInfos[8];
 	VkWriteDescriptorSet skinningDescriptorWrites[8];
-	for (u32 i = 0; i < 8; i++) {
+	for (U32 i = 0; i < 8; i++) {
 		VkWriteDescriptorSet& descriptorWrite = skinningDescriptorWrites[i];
 		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrite.pNext = nullptr;
@@ -1206,7 +1217,7 @@ void load_pipelines_and_descriptors() {
 		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		descriptorWrite.pBufferInfo = &skinningBufferInfos[i];
 	}
-	skinningBufferInfos[0] = VkDescriptorBufferInfo{ uniformMatricesHandler.buffer, 0, uniformMatricesHandler.maxMatrices * sizeof(Matrix4x3f) };
+	skinningBufferInfos[0] = VkDescriptorBufferInfo{ uniformMatricesHandler.buffer, 0, uniformMatricesHandler.maxMatrices * sizeof(M4x3F32) };
 	skinningBufferInfos[1] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.positionsOffset, geometryHandler.texcoordsOffset - geometryHandler.positionsOffset };
 	skinningBufferInfos[2] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.normalsOffset, geometryHandler.tangentsOffset - geometryHandler.normalsOffset };
 	skinningBufferInfos[3] = VkDescriptorBufferInfo{ geometryHandler.buffer, geometryHandler.tangentsOffset, geometryHandler.skinDataOffset - geometryHandler.tangentsOffset };
@@ -1229,7 +1240,7 @@ void load_pipelines_and_descriptors() {
 	drawDataDescriptorWrites[0].descriptorCount = 1;
 	drawDataDescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	drawDataDescriptorWrites[0].pBufferInfo = &drawDataBufferInfos[0];
-	drawDataBufferInfos[0] = VkDescriptorBufferInfo{ uniformMatricesHandler.buffer, 0, uniformMatricesHandler.maxMatrices * sizeof(Matrix4x3f) };
+	drawDataBufferInfos[0] = VkDescriptorBufferInfo{ uniformMatricesHandler.buffer, 0, uniformMatricesHandler.maxMatrices * sizeof(M4x3F32) };
 	vkUpdateDescriptorSets(logicalDevice, ARRAY_COUNT(drawDataDescriptorWrites), drawDataDescriptorWrites, 0, nullptr);
 
 	// Pipelines
@@ -1239,11 +1250,11 @@ void load_pipelines_and_descriptors() {
 		.build();
 	testPipeline = GraphicsPipelineBuilder{}.set_default()
 		.layout(testPipelineLayout)
-		.shader_name("./resources/shaders/vrtest.spv")
-		.vertex_attribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(Vector3f)) // pos
-		.vertex_attribute(1, 1, VK_FORMAT_R32G32_SFLOAT, sizeof(Vector2f)) // tex
-		.vertex_attribute(2, 2, VK_FORMAT_R32G32B32_SFLOAT, sizeof(Vector3f)) // norm
-		.vertex_attribute(3, 3, VK_FORMAT_R32G32B32_SFLOAT, sizeof(Vector3f)) // tan
+		.shader_name("./resources/shaders/vrtest.spv"sa)
+		.vertex_attribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(V3F32)) // pos
+		.vertex_attribute(1, 1, VK_FORMAT_R32G32_SFLOAT, sizeof(V2F32)) // tex
+		.vertex_attribute(2, 2, VK_FORMAT_R32G32B32_SFLOAT, sizeof(V3F32)) // norm
+		.vertex_attribute(3, 3, VK_FORMAT_R32G32B32_SFLOAT, sizeof(V3F32)) // tan
 		.build();
 	skinningPipelineLayout = PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel))
@@ -1251,7 +1262,7 @@ void load_pipelines_and_descriptors() {
 		.build();
 	skinningPipeline = ComputePipelineBuilder{}.set_default()
 		.layout(skinningPipelineLayout)
-		.shader_name("./resources/shaders/skinning.spv")
+		.shader_name("./resources/shaders/skinning.spv"sa)
 		.build();
 }
 
@@ -1290,7 +1301,7 @@ void begin_frame() {
 	uniformMatricesHandler.reset();
 }
 
-void end_frame(b32 shouldRender) {
+void end_frame(B32 shouldRender) {
 	if (desktopSwapchainData.shouldTryPresentToDesktopThisFrame && !desktopSwapchainData.desktopSwapchainReadyForPresent) {
 		VkResult fenceCheckResult = vkGetFenceStatus(logicalDevice, desktopSwapchainData.swapchainAcquireFence);
 		if (fenceCheckResult == VK_SUCCESS) {
@@ -1318,12 +1329,26 @@ void end_frame(b32 shouldRender) {
 		imageTransferBarrier.subresourceRange.baseArrayLayer = 0;
 		imageTransferBarrier.subresourceRange.layerCount = 2;
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+		if (XR::depthCompositionLayerSupported) {
+			imageTransferBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			imageTransferBarrier.image = mainFramebuffer.attachments[1].image;
+			imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+			imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		}
 		imageTransferBarrier.srcAccessMask = VK_ACCESS_NONE_KHR;
 		imageTransferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		imageTransferBarrier.image = xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx];
+		imageTransferBarrier.image = xrSwapchainData.swapchainColorImages[xrSwapchainData.swapchainColorImageIdx];
 		imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+		if (XR::depthCompositionLayerSupported) {
+			imageTransferBarrier.image = xrSwapchainData.swapchainDepthImages[xrSwapchainData.swapchainDepthImageIdx];
+			imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+			imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		}
 		if (desktopSwapchainData.desktopSwapchainReadyForPresent) {
 			imageTransferBarrier.subresourceRange.layerCount = 1;
 			imageTransferBarrier.image = desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx];
@@ -1337,33 +1362,47 @@ void end_frame(b32 shouldRender) {
 		finalBlit.srcSubresource.baseArrayLayer = 0;
 		finalBlit.srcSubresource.layerCount = 2;
 		finalBlit.srcOffsets[0] = VkOffset3D{ 0, 0, 0 };
-		finalBlit.srcOffsets[1] = VkOffset3D{ i32(mainFramebuffer.framebufferWidth), i32(mainFramebuffer.framebufferHeight), 1 };
+		finalBlit.srcOffsets[1] = VkOffset3D{ I32(mainFramebuffer.framebufferWidth), I32(mainFramebuffer.framebufferHeight), 1 };
 		finalBlit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		finalBlit.dstSubresource.mipLevel = 0;
 		finalBlit.dstSubresource.baseArrayLayer = 0;
 		finalBlit.dstSubresource.layerCount = 2;
 		finalBlit.dstOffsets[0] = VkOffset3D{ 0, 0, 0 };
-		finalBlit.dstOffsets[1] = VkOffset3D{ i32(XR::xrRenderWidth), i32(XR::xrRenderHeight), 1 };
-		VK::vkCmdBlitImage(graphicsCommandBuffer, mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, xrSwapchainData.swapchainImages[VK::xrSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_NEAREST);
+		finalBlit.dstOffsets[1] = VkOffset3D{ I32(XR::xrRenderWidth), I32(XR::xrRenderHeight), 1 };
+		vkCmdBlitImage(graphicsCommandBuffer, mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, xrSwapchainData.swapchainColorImages[xrSwapchainData.swapchainColorImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_NEAREST);
+		if (XR::depthCompositionLayerSupported) {
+			finalBlit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			finalBlit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			vkCmdBlitImage(graphicsCommandBuffer, mainFramebuffer.attachments[1].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, xrSwapchainData.swapchainDepthImages[xrSwapchainData.swapchainDepthImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_NEAREST);
+			finalBlit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			finalBlit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		}
 
 		imageTransferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 		imageTransferBarrier.dstAccessMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		imageTransferBarrier.image = xrSwapchainData.swapchainImages[xrSwapchainData.swapchainImageIdx];
+		imageTransferBarrier.image = xrSwapchainData.swapchainColorImages[xrSwapchainData.swapchainColorImageIdx];
 		imageTransferBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+		if (XR::depthCompositionLayerSupported) {
+			imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			imageTransferBarrier.image = xrSwapchainData.swapchainDepthImages[xrSwapchainData.swapchainDepthImageIdx];
+			imageTransferBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageTransferBarrier);
+			imageTransferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		}
 
 		if (desktopSwapchainData.desktopSwapchainReadyForPresent) {
-			Vector2f middle{ f32(XR::xrRenderWidth) * 0.5F, f32(XR::xrRenderHeight) * 0.5F };
-			Vector2f blitSourceExtent = Vector2f{ f32(desktopSwapchainData.width) * 0.5F, f32(desktopSwapchainData.height) * 0.5F };
+			V2F32 middle{ F32(XR::xrRenderWidth) * 0.5F, F32(XR::xrRenderHeight) * 0.5F };
+			V2F32 blitSourceExtent = V2F32{ F32(desktopSwapchainData.width) * 0.5F, F32(desktopSwapchainData.height) * 0.5F };
 			blitSourceExtent *= min(middle.x / blitSourceExtent.x, middle.y / blitSourceExtent.y);
 
 			finalBlit.srcSubresource.layerCount = 1;
-			finalBlit.srcOffsets[0] = VkOffset3D{ max(i32(middle.x - blitSourceExtent.x), 0), max(i32(middle.y - blitSourceExtent.y), 0), 0 };
-			finalBlit.srcOffsets[1] = VkOffset3D{ min(i32(middle.x + blitSourceExtent.x), i32(XR::xrRenderWidth)), min(i32(middle.y + blitSourceExtent.y), i32(XR::xrRenderHeight)), 1 };
+			finalBlit.srcOffsets[0] = VkOffset3D{ max(I32(middle.x - blitSourceExtent.x), 0), max(I32(middle.y - blitSourceExtent.y), 0), 0 };
+			finalBlit.srcOffsets[1] = VkOffset3D{ min(I32(middle.x + blitSourceExtent.x), I32(XR::xrRenderWidth)), min(I32(middle.y + blitSourceExtent.y), I32(XR::xrRenderHeight)), 1 };
 			finalBlit.dstSubresource.layerCount = 1;
-			finalBlit.dstOffsets[1] = VkOffset3D{ i32(desktopSwapchainData.width), i32(desktopSwapchainData.height), 1 };
-			VK::vkCmdBlitImage(graphicsCommandBuffer, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_LINEAR);
+			finalBlit.dstOffsets[1] = VkOffset3D{ I32(desktopSwapchainData.width), I32(desktopSwapchainData.height), 1 };
+			vkCmdBlitImage(graphicsCommandBuffer, VK::mainFramebuffer.attachments[0].image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &finalBlit, VK_FILTER_LINEAR);
 			
 			imageTransferBarrier.subresourceRange.layerCount = 1;
 			imageTransferBarrier.image = desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx];

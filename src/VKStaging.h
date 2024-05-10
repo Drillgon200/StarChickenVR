@@ -10,24 +10,24 @@ struct StagingBuffer {
 	VkCommandPool commandPool;
 	VkCommandBuffer cmdBuffer;
 	VkFence uploadFinishedFence;
-	u32 offset;
-	b32 submitted;
+	U32 offset;
+	B32 submitted;
 };
 
 struct GPUUploadStager {
-	static constexpr u32 UPLOAD_BUFFER_SIZE = 8 * ONE_MEGABYTE;
+	static constexpr U32 UPLOAD_BUFFER_SIZE = 8 * MEGABYTE;
 
 	VkQueue queue;
 	VkDeviceMemory memory;
 	StagingBuffer stagingBuffers[2];
-	u32 currentBufferIdx;
+	U32 currentBufferIdx;
 
-	void init(VkQueue queueToUse, u32 queueFamilyIdx) {
+	void init(VkQueue queueToUse, U32 queueFamilyIdx) {
 		queue = queueToUse;
 		currentBufferIdx = 0;
 
 		VkMemoryRequirements memoryRequirements[2];
-		for (u32 i = 0; i < 2; i++) {
+		for (U32 i = 0; i < 2; i++) {
 			StagingBuffer& stagingBuffer = stagingBuffers[i];
 			VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 			bufferInfo.flags = 0;
@@ -69,17 +69,17 @@ struct GPUUploadStager {
 		void* memoryMapping;
 		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, UPLOAD_BUFFER_SIZE, 0, &memoryMapping));
 
-		u32 mappedDataOffset = 0;
-		for (u32 i = 0; i < 2; i++) {
+		U32 mappedDataOffset = 0;
+		for (U32 i = 0; i < 2; i++) {
 			mappedDataOffset = ALIGN_HIGH(mappedDataOffset, memoryRequirements[i].alignment);
 			CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, stagingBuffers[i].uploadBuffer, memory, mappedDataOffset));
-			stagingBuffers[i].memoryMapping = reinterpret_cast<byte*>(memoryMapping) + mappedDataOffset;
-			mappedDataOffset += u32(memoryRequirements[i].size);
+			stagingBuffers[i].memoryMapping = reinterpret_cast<Byte*>(memoryMapping) + mappedDataOffset;
+			mappedDataOffset += U32(memoryRequirements[i].size);
 		}
 	}
 
 	void destroy() {
-		for (u32 i = 0; i < 2; i++) {
+		for (U32 i = 0; i < 2; i++) {
 			VK::vkDestroyCommandPool(VK::logicalDevice, stagingBuffers[i].commandPool, nullptr);
 			VK::vkDestroyBuffer(VK::logicalDevice, stagingBuffers[i].uploadBuffer, nullptr);
 			VK::vkDestroyFence(VK::logicalDevice, stagingBuffers[i].uploadFinishedFence, nullptr);
@@ -92,12 +92,12 @@ struct GPUUploadStager {
 		return stagingBuffers[currentBufferIdx].cmdBuffer;
 	}
 
-	void upload_to_buffer(VkBuffer dst, u64 dstOffset, void* src, u64 size) {
+	void upload_to_buffer(VkBuffer dst, U64 dstOffset, void* src, U64 size) {
 		while (size) {
 			StagingBuffer& stagingBuffer = stagingBuffers[currentBufferIdx];
 			wait_for_staging_buffer(stagingBuffer);
-			u32 amountToCopy = u32(min<u64>(size, UPLOAD_BUFFER_SIZE - stagingBuffer.offset));
-			memcpy(reinterpret_cast<byte*>(stagingBuffer.memoryMapping) + stagingBuffer.offset, src, amountToCopy);
+			U32 amountToCopy = U32(min<U64>(size, UPLOAD_BUFFER_SIZE - stagingBuffer.offset));
+			memcpy(reinterpret_cast<Byte*>(stagingBuffer.memoryMapping) + stagingBuffer.offset, src, amountToCopy);
 			VkBufferCopy region{};
 			region.srcOffset = stagingBuffer.offset;
 			region.dstOffset = dstOffset;
@@ -105,7 +105,7 @@ struct GPUUploadStager {
 			VK::vkCmdCopyBuffer(stagingBuffer.cmdBuffer, stagingBuffer.uploadBuffer, dst, 1, &region);
 			stagingBuffer.offset += amountToCopy;
 			dstOffset += amountToCopy;
-			src = reinterpret_cast<byte*>(src) + amountToCopy;
+			src = reinterpret_cast<Byte*>(src) + amountToCopy;
 			size -= amountToCopy;
 			if (stagingBuffer.offset == UPLOAD_BUFFER_SIZE) {
 				flush();

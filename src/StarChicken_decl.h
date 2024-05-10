@@ -4,10 +4,10 @@ namespace StarChicken {
 
 #define PROJECTION_NEAR_PLANE 0.05F
 
-	extern u64 frameNumber;
-	extern f64 deltaTime;
-	extern f64 totalTime;
+	extern U64 frameNumber;
+	extern F64 deltaTime;
+	extern F64 totalTime;
 
-	extern b32 shouldShutDown;
-	extern b32 shouldUseDesktopWindow;
+	extern B32 shouldShutDown;
+	extern B32 shouldUseDesktopWindow;
 }
