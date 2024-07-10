@@ -240,12 +240,12 @@ VKGeometry::SkeletalMesh leftHandMesh;
 
 
 void load_resources() {
-	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf"sa);
-	testAnimMesh = load_dmf_skeletal_mesh("./resources/models/test_anim.dmf"sa);
-	rightHandMesh = load_dmf_skeletal_mesh("./resources/models/right_hand.dmf"sa);
-	rightHandCloseAnim = load_daf("./resources/models/right_hand_close.daf"sa);
+	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf"a);
+	testAnimMesh = load_dmf_skeletal_mesh("./resources/models/test_anim.dmf"a);
+	rightHandMesh = load_dmf_skeletal_mesh("./resources/models/right_hand.dmf"a);
+	rightHandCloseAnim = load_daf("./resources/models/right_hand_close.daf"a);
 	ASSERT(rightHandCloseAnim.boneCount == rightHandMesh.skeletonData->boneCount, "rightHandCloseAnim animation bone count did not match rightHandMesh bone count");
-	leftHandMesh = load_dmf_skeletal_mesh("./resources/models/left_hand.dmf"sa);
+	leftHandMesh = load_dmf_skeletal_mesh("./resources/models/left_hand.dmf"a);
 }
 
 

@@ -1,11 +1,13 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
-#pragma warning(push, 0)
-#include <Windows.h>
-#pragma warning(pop)
+#include "Win32.h"
+//#include <ws2tcpip.h>
 #include "StarChicken.h"
-#include <ws2tcpip.h>
+#ifdef TESTING_ENABLE
+#include "../tests/StarChickenTests.h"
+#endif
+
 
 // It is actually possible to initialize with no import libraries (see link)
 // However, it requires going through a lot of undocumented windows stuff that could change at any time
@@ -15,7 +17,12 @@ extern "C" void __stdcall mainCRTStartup() {
 	const U32 failToInitializeDrillLib = 2;
 	U32 result = failToInitializeDrillLib;
 	if (drill_lib_init()) {
+		PNG::init_loader();
+#ifdef TESTING_ENABLE
+		StarChickenTests::run_all();
+#else
 		result = StarChicken::run_star_chicken();
+#endif
 	}
 	ExitProcess(result);
 }

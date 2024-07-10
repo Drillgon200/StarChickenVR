@@ -207,7 +207,8 @@ struct HuffmanTree {
 enum CompressionMethod {
 	COMPRESSION_METHOD_NONE = 0,
 	COMPRESSION_METHOD_DEFLATE = 8,
-	COMPRESSION_METHOD_RESERVED = 15
+	COMPRESSION_METHOD_RESERVED = 15,
+	COMPRESSION_METHOD_DUMMY_VALUE_TO_TELL_MSVC_THIS_IS_NOT_A_BITFIELD_IN_ORDER_TO_SILENCE_OTHERWISE_USEFUL_C26813_WARNING = 17
 };
 
 enum CompressionLevel {
@@ -334,11 +335,11 @@ void read_tree_lengths(BitReader& reader, HuffmanTree& decompressTree, U32 numCo
 
 void decompress_trees(BitReader& reader, HuffmanTree* outLitLen, HuffmanTree* outDist) {
 	constexpr U32 maxHLit = 286;
-	constexpr U32 minHLit = 257;
+	//constexpr U32 minHLit = 257;
 	constexpr U32 maxHDist = 32;
-	constexpr U32 minHDistn = 1;
+	//constexpr U32 minHDistn = 1;
 	constexpr U32 maxHCLen = 19;
-	constexpr U32 minHCLen = 4;
+	//constexpr U32 minHCLen = 4;
 
 	U32 hlit = reader.read_bits(5) + 257;
 	U32 hdist = reader.read_bits(5) + 1;

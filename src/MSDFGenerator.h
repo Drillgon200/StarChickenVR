@@ -358,11 +358,11 @@ Shape parse_shape(MemoryArena& arena, StrA shapeStr) {
 	ShapePath* path = nullptr;
 	StrA cmdStr{};
 	for (U64 i = 0; i < shapeStr.length; i++) {
-		if (shapeStr.skip(i).starts_with("d=\"M"sa) || shapeStr.skip(i).starts_with("d=\"m"sa)) {
-			cmdStr = shapeStr.skip(i + 3);
+		if (shapeStr.skip(I64(i)).starts_with("d=\"M"a) || shapeStr.skip(I64(i)).starts_with("d=\"m"a)) {
+			cmdStr = shapeStr.skip(I64(i + 3));
 			break;
 		}
-		if (shapeStr.skip(i).starts_with("</svg>"sa)) {
+		if (shapeStr.skip(I64(i)).starts_with("</svg>"a)) {
 			break;
 		}
 	}
@@ -650,7 +650,7 @@ B32 detect_error_pixel_pair(RGBA8 a, RGBA8 b, U8 threshold) {
 void error_correct(RGBA8* image, U32 width, U32 height) {
 	U8 thresholdX = 20;
 	U8 thresholdY = 20;
-	U8 thersholdXY = thresholdX + thresholdY;
+	U8 thersholdXY = U8(thresholdX + thresholdY);
 	for (U32 y = 0; y < height; y++) {
 		for (U32 x = 0; x < width; x++) {
 			if (x > 0 && detect_error_pixel_pair(image[y * width + x], image[y * width + x - 1], thresholdX) ||
@@ -695,20 +695,20 @@ void generate_msdf_image(StrA inputFilePath, StrA outputFilePath, U32 sizeX, U32
 	MSDFImageFile* output = stackArena.alloc_bytes<MSDFImageFile>(outputFileSize);
 	zero_memory(output, outputFileSize);
 
-	I64 nextGlyphLayer = inputStr.find("id=\"layer1\""sa);
+	I64 nextGlyphLayer = inputStr.find("id=\"layer1\""a);
 	if (nextGlyphLayer == -1) {
 		println("Could not find layer1 in file");
 		stackArena.stackPtr = oldStackPtr;
 		return;
 	}
-	inputStr.skip(nextGlyphLayer + "id=\"layer1\""sa.length);
+	inputStr.skip(I64(nextGlyphLayer + "id=\"layer1\""a.length));
 	Shape shape = parse_shape(stackArena, inputStr);
 	preprocess_shape(shape);
 	render_shape_to_msdf(output->imageData, shape, sizeX, sizeY, svgWidth, svgHeight, radius);
 	error_correct(output->imageData, sizeX, sizeY);
 
 	// DEBUG
-	PNG::write_image(stracat(stackArena, outputFilePath, ".png"sa), output->imageData, sizeX, sizeY);
+	PNG::write_image(stracat(stackArena, outputFilePath, ".png"a), output->imageData, sizeX, sizeY);
 	RGBA8* testOutput = stackArena.alloc<RGBA8>(sizeX * sizeY * sizeof(RGBA8));
 	for (U32 y = 0; y < sizeY; y++) {
 		for (U32 x = 0; x < sizeX; x++) {
@@ -716,7 +716,7 @@ void generate_msdf_image(StrA inputFilePath, StrA outputFilePath, U32 sizeX, U32
 			testOutput[y * sizeX + x] = RGBA8{ med, med, med, 255 };
 		}
 	}
-	PNG::write_image(stracat(stackArena, outputFilePath, "_res.png"sa), testOutput, sizeX, sizeY);
+	PNG::write_image(stracat(stackArena, outputFilePath, "_res.png"a), testOutput, sizeX, sizeY);
 	// DEBUG END
 
 	output->imageWidth = sizeX;
@@ -744,22 +744,22 @@ void generate_msdf_font(StrA inputFilePath, StrA outputFilePath, U32 glyphResolu
 	RGBA8* tmpGlyphOutput = stackArena.alloc<RGBA8>(glyphResolutionX * glyphResolutionY);
 
 	while (true) {
-		I64 nextGlyphLayer = inputStr.find("GlyphLayer-"sa);
+		I64 nextGlyphLayer = inputStr.find("GlyphLayer-"a);
 		if (nextGlyphLayer == -1) {
 			break;
 		}
-		inputStr = inputStr.skip(nextGlyphLayer + "GlyphLayer-"sa.length);
+		inputStr = inputStr.skip(I64(nextGlyphLayer + "GlyphLayer-"a.length));
 		char glyph = inputStr[0];
-		if (inputStr.starts_with("&lt;"sa)) {
+		if (inputStr.starts_with("&lt;"a)) {
 			glyph = '<';
-		} else if (inputStr.starts_with("&gt;"sa)) {
+		} else if (inputStr.starts_with("&gt;"a)) {
 			glyph = '>';
-		} else if (inputStr.starts_with("&quot;"sa)) {
+		} else if (inputStr.starts_with("&quot;"a)) {
 			glyph = '"';
-		} else if (inputStr.starts_with("&amp;"sa)) {
+		} else if (inputStr.starts_with("&amp;"a)) {
 			glyph = '&';
 		}
-		print(stracat(stackArena, "Generating shape for glyph: "sa, StrA{ &glyph, 1 }, "\n"sa));
+		print(stracat(stackArena, "Generating shape for glyph: "a, StrA{ &glyph, 1 }, "\n"a));
 		Shape shape = parse_shape(stackArena, inputStr);
 		preprocess_shape(shape);
 		render_shape_to_msdf(tmpGlyphOutput, shape, glyphResolutionX, glyphResolutionY, svgWidth, svgHeight, radius);
@@ -767,7 +767,7 @@ void generate_msdf_font(StrA inputFilePath, StrA outputFilePath, U32 glyphResolu
 
 		// DEBUG
 		MEMORY_ARENA_FRAME(stackArena) {
-			PNG::write_image(stracat(stackArena, outputFilePath, "_"sa, StrA{ &glyph, 1 }, SerializeTools::is_lower_alpha(glyph) ? "_lower"sa : ""sa, ".png"sa), tmpGlyphOutput, glyphResolutionX, glyphResolutionY);
+			PNG::write_image(stracat(stackArena, outputFilePath, "_"a, StrA{ &glyph, 1 }, SerializeTools::is_lower_alpha(glyph) ? "_lower"a : ""a, ".png"a), tmpGlyphOutput, glyphResolutionX, glyphResolutionY);
 			RGBA8* testOutput = stackArena.alloc<RGBA8>(glyphResolutionX * glyphResolutionY * sizeof(RGBA8));
 			for (U32 y = 0; y < glyphResolutionY; y++) {
 				for (U32 x = 0; x < glyphResolutionX; x++) {
@@ -775,7 +775,7 @@ void generate_msdf_font(StrA inputFilePath, StrA outputFilePath, U32 glyphResolu
 					testOutput[y * glyphResolutionX + x] = RGBA8{ med, med, med, 255 };
 				}
 			}
-			PNG::write_image(stracat(stackArena, outputFilePath, "_"sa, StrA{&glyph, 1}, SerializeTools::is_lower_alpha(glyph) ? "_lower"sa : ""sa, "_res.png"sa), testOutput, glyphResolutionX, glyphResolutionY);
+			PNG::write_image(stracat(stackArena, outputFilePath, "_"a, StrA{&glyph, 1}, SerializeTools::is_lower_alpha(glyph) ? "_lower"a : ""a, "_res.png"a), testOutput, glyphResolutionX, glyphResolutionY);
 		}
 		// DEBUG END
 
@@ -787,10 +787,11 @@ void generate_msdf_font(StrA inputFilePath, StrA outputFilePath, U32 glyphResolu
 		}
 	}
 
-	PNG::write_image(stracat(stackArena, outputFilePath, "_full_atlas.png"sa), output->imageData, glyphResolutionX * 16, glyphResolutionY * 16);
+	PNG::write_image(stracat(stackArena, outputFilePath, "_full_atlas.png"a), output->imageData, glyphResolutionX * 16, glyphResolutionY * 16);
 	output->imageWidth = glyphResolutionX * 16;
 	output->imageHeight = glyphResolutionY * 16;
 	B32 success = write_data_to_file(outputFilePath, output, outputFileSize);
+	(success);
 
 	stackArena.stackPtr = oldStackPtr;
 }

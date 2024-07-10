@@ -312,7 +312,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 }
 
 U32 run_star_chicken() {
-	PNG::init_loader();
+	if (Win32::timeBeginPeriod_ptr) {
+		Win32::timeBeginPeriod_ptr(1);
+	}
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 stackArenaFrame0 = stackArena.stackPtr;
 
@@ -386,6 +388,9 @@ U32 run_star_chicken() {
 	print("Shutting down Vulkan...\n");
 	VK::end_vulkan();
 	print("Shutdown complete.\n");
+	if (Win32::timeEndPeriod_ptr) {
+		Win32::timeEndPeriod_ptr(1);
+	}
 
 	return EXIT_SUCCESS;
 }

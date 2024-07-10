@@ -4,6 +4,9 @@
 #define NOMINMAX
 #pragma warning(push, 0)
 #include <Windows.h>
+#include <timeapi.h>
+#undef near
+#undef far
 #pragma warning(pop)
 #include "StarChicken_decl.h"
 
@@ -21,7 +24,11 @@ decltype(ShowWindow)* ShowWindow_ptr;
 decltype(GetWindowRect)* GetWindowRect_ptr;
 decltype(SetProcessDPIAware)* SetProcessDPIAware_ptr;
 
+decltype(timeBeginPeriod)* timeBeginPeriod_ptr;
+decltype(timeEndPeriod)* timeEndPeriod_ptr;
+
 HMODULE user32DLL;
+HMODULE winmmDLL;
 HINSTANCE instance;
 HWND window;
 U32 windowWidth;
@@ -79,6 +86,7 @@ bool init(U32 width, U32 height) {
 	bool success = true;
 	instance = GetModuleHandleA(nullptr);
 	user32DLL = LoadLibraryA("User32.dll");
+	winmmDLL = LoadLibraryA("Winmm.dll");
 	if (user32DLL == NULL) {
 		success = false;
 	} else {
@@ -114,6 +122,10 @@ bool init(U32 width, U32 height) {
 				framebufferHeight = rect.bottom - rect.top;
 			}
 		}
+	}
+	if (winmmDLL) {
+		timeBeginPeriod_ptr = reinterpret_cast<decltype(timeBeginPeriod_ptr)>(reinterpret_cast<void*>(GetProcAddress(winmmDLL, "timeBeginPeriod")));
+		timeEndPeriod_ptr = reinterpret_cast<decltype(timeEndPeriod_ptr)>(reinterpret_cast<void*>(GetProcAddress(winmmDLL, "timeEndPeriod")));
 	}
 	if (SetProcessDPIAware_ptr) {
 		// Windows has a feature that renders applications at a lower resolution and does a blurry upscale to make them look bigger

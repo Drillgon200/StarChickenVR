@@ -10,6 +10,7 @@ namespace VK {
 
 #define VK_ENABLE_VALIDATION_LAYERS 1
 
+//TODO enable gpu assisted validation, VkValidationFeaturesEXT
 const char* ENABLED_VALIDATION_LAYERS[]{ "VK_LAYER_KHRONOS_validation", "VK_LAYER_KHRONOS_synchronization2" };
 
 const char* INSTANCE_EXTENSIONS[]{
@@ -751,7 +752,7 @@ void create_render_targets() {
 		.render_pass(mainRenderPass)
 		.dimensions(XR::xrRenderWidth, XR::xrRenderHeight)
 		.new_attachment(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 2)
-		.new_attachment(VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | (XR::depthCompositionLayerSupported ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0), VK_IMAGE_ASPECT_DEPTH_BIT, 2)
+		.new_attachment(VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | (XR::depthCompositionLayerSupported ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0u), VK_IMAGE_ASPECT_DEPTH_BIT, 2)
 		.build();
 }
 
@@ -1250,7 +1251,7 @@ void load_pipelines_and_descriptors() {
 		.build();
 	testPipeline = GraphicsPipelineBuilder{}.set_default()
 		.layout(testPipelineLayout)
-		.shader_name("./resources/shaders/vrtest.spv"sa)
+		.shader_name("./resources/shaders/vrtest.spv"a)
 		.vertex_attribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(V3F32)) // pos
 		.vertex_attribute(1, 1, VK_FORMAT_R32G32_SFLOAT, sizeof(V2F32)) // tex
 		.vertex_attribute(2, 2, VK_FORMAT_R32G32B32_SFLOAT, sizeof(V3F32)) // norm
@@ -1262,7 +1263,7 @@ void load_pipelines_and_descriptors() {
 		.build();
 	skinningPipeline = ComputePipelineBuilder{}.set_default()
 		.layout(skinningPipelineLayout)
-		.shader_name("./resources/shaders/skinning.spv"sa)
+		.shader_name("./resources/shaders/skinning.spv"a)
 		.build();
 }
 

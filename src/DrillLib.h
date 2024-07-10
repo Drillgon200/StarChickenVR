@@ -133,7 +133,7 @@ struct MemoryArena {
 	U64 stackMaxSize;
 	U64 stackPtr;
 
-	bool init(U64 capacity) {
+	B32 init(U64 capacity) {
 		stackBase = reinterpret_cast<U8*>(VirtualAlloc(nullptr, ((capacity + 4095) & ~0xFFF) + MEMORY_ARENA_BYTES_TO_COMMIT_AT_A_TIME, MEM_RESERVE, PAGE_READWRITE));
 		stackBase = reinterpret_cast<U8*>(ALIGN_HIGH(reinterpret_cast<UPtr>(stackBase), MEMORY_ARENA_BYTES_TO_COMMIT_AT_A_TIME));
 		if (!stackBase) {
@@ -272,11 +272,18 @@ struct ArenaArrayList {
 		}
 	}
 
-	FINLINE void push_back(const T value) {
+	template<typename Val>
+	FINLINE void push_back(Val value) {
 		if (size == capacity) {
 			reserve(max<U32>(capacity * 2, 8));
 		}
-		data[size++] = value;
+		data[size++] = T(value);
+	}
+
+	template<typename Val, typename... Others>
+	FINLINE void push_back(Val value, Others... others) {
+		push_back(value);
+		push_back(others...);
 	}
 
 	FINLINE T& push_back() {
@@ -368,8 +375,76 @@ struct ArenaArrayList {
 		capacity = 0;
 	}
 
-	FINLINE bool empty() {
+	FINLINE B32 empty() {
 		return size == 0;
+	}
+};
+
+template<typename T, typename... Values>
+ArenaArrayList<T> make_arena_array_list(MemoryArena& arena, T val1, Values... values) {
+	ArenaArrayList<T> list{ &arena };
+	list.push_back(val1, values...);
+	return list;
+}
+
+template<typename T>
+struct Hasher;
+
+// https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+template<>
+struct Hasher<U8> {
+	U32 operator()(U32 val) {
+		return 0;
+	}
+};
+template<>
+struct Hasher<U16> {
+	U32 operator()(U32 val) {
+		return 0;
+	}
+};
+template<>
+struct Hasher<U32> {
+	U32 operator()(U32 val) {
+		return 0;
+	}
+};
+template<>
+struct Hasher<U64> {
+	U32 operator()(U32 val) {
+		return 0;
+	}
+};
+
+template<typename T, T emptyVal, typename THasher = Hasher<T>>
+struct ArenaHashMap {
+	MemoryArena* allocator;
+	T* data;
+	U32 size;
+	U32 capacity;
+
+	void reserve(U32 newCapacity) {
+		if (newCapacity > capacity) {
+			newCapacity = next_power_of_two(newCapacity);
+			data = (allocator ? allocator : &globalArena)->realloc(data, capacity, newCapacity);
+			capacity = newCapacity;
+		}
+	}
+
+	B32 remove(const T& val) {
+		U32 searchIndex = THasher{}(val);
+	}
+
+	B32 insert(const T& val) {
+
+	}
+
+	B32 contains(const T& val) {
+
+	}
+
+	B32 empty() {
+
 	}
 };
 
@@ -459,7 +534,7 @@ struct StrA {
 		return slice(0, amount);
 	}
 	FINLINE StrA suffix(I64 amount) const {
-		return slice(amount < 0 ? -amount : length - amount, I64_MAX);
+		return slice(amount < 0 ? -amount : I64(length) - amount, I64_MAX);
 	}
 	FINLINE StrA skip(I64 amount) const {
 		return slice(amount, I64_MAX);
@@ -467,6 +542,13 @@ struct StrA {
 	FINLINE StrA substr(U64 begin, U64 newLength) const {
 		U64 start = min(begin, length);
 		return StrA{ str + start, min(newLength, length - start) };
+	}
+	FINLINE StrA rep(MemoryArena& arena, U32 n) {
+		char* result = arena.alloc<char>(n * length);
+		for (U32 i = 0; i < n; i++) {
+			memcpy(result + i * length, str, length);
+		}
+		return StrA{ result, n * length };
 	}
 	const char* begin() const {
 		return str;
@@ -482,10 +564,17 @@ struct StrA {
 	}
 };
 
+template<>
+struct Hasher<StrA> {
+	FINLINE U32 operator()(StrA str) {
+		return 0;
+	}
+};
+
 // Here's one of the C++ features I'll be using, should make string literals much nicer
 // Technically user defined literal suffixes that don't start with an underscore are reserved, but I don't really care.
 // If it becomes an issue, I'll change it then
-FINLINE constexpr StrA operator""sa(const char* lit, U64 len) {
+FINLINE constexpr StrA operator""a(const char* lit, U64 len) {
 	return StrA{ lit, len };
 }
 
@@ -511,6 +600,207 @@ StrA stracat(MemoryArena& arena, StrA strA, Others... others) {
 	copy_strings_to_buffer(result, strA, others...);
 	return StrA{ result, totalLength };
 }
+StrA u2stra(MemoryArena& arena, U64 num) {
+	char buffer[64];
+	char* bufferPtr = &buffer[64];
+	do {
+		*--bufferPtr = char(num % 10 + '0');
+		num /= 10;
+	} while (num);
+	U64 size = U64(&buffer[64] - bufferPtr);
+	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+	arena.stackPtr += size;
+	memcpy(result, bufferPtr, size);
+	return StrA{ result, size };
+}
+StrA i2stra(MemoryArena& arena, I64 num) {
+	if (num == I64_MIN) {
+		// It is important that this string gets copied to the arena for string formatting purposes
+		StrA min64BitInt = "-9223372036854775808"a;
+		char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+		memcpy(result, min64BitInt.str, min64BitInt.length);
+		arena.stackPtr += min64BitInt.length;
+		return StrA{ result, min64BitInt.length };
+	}
+	B32 negative = num < 0ll;
+	U64 unsignedNum = U64(negative ? -num : num);
+	char buffer[64];
+	char* bufferPtr = &buffer[64];
+	do {
+		*--bufferPtr = char(unsignedNum % 10 + '0');
+		unsignedNum /= 10;
+	} while (unsignedNum);
+	if (negative) {
+		*--bufferPtr = '-';
+	}
+	U64 size = U64(&buffer[64] - bufferPtr);
+	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+	arena.stackPtr += size;
+	memcpy(result, bufferPtr, size);
+	return StrA{ result, size };
+}
+namespace SerializeTools {
+void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue);
+}
+StrA f2stra(MemoryArena& arena, F64 num) {
+	U32 bufferSize = 256;
+	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+	SerializeTools::serialize_f64(result, &bufferSize, num);
+	arena.stackPtr += bufferSize;
+	return StrA{ result, bufferSize };
+}
+
+B32 strafmt_write_until_format_specifier(MemoryArena& arena, StrA* format) {
+	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+	U64 formatIdx = 0;
+	U32 dstSize = 0;
+	const char* fmtStr = format->str;
+	for (; formatIdx < format->length; formatIdx++, dstSize++) {
+		if (fmtStr[formatIdx] == '%') {
+			formatIdx++;
+			format->str += formatIdx, format->length -= formatIdx, arena.stackPtr += dstSize;
+			return true;
+		} else if (fmtStr[formatIdx] == '\\') {
+			formatIdx++;
+			if (formatIdx == format->length) {
+				break;
+			}
+		}
+		result[dstSize] = fmtStr[formatIdx];
+	}
+	format->str += formatIdx, format->length -= formatIdx, arena.stackPtr += dstSize;
+	return false;
+}
+StrA strafmt(MemoryArena& arena, StrA format) {
+	U64 prevStackPtr = arena.stackPtr;
+	strafmt_write_until_format_specifier(arena, &format);
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+
+// MSVC accepts these without forward declarations, but I don't think that's correct C++
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, StrA, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, const char*, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, U64, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, U32, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, U16, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, U8, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, I64, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, I32, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, I16, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, I8, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, F64, Values...);
+template<typename... Values>
+StrA strafmt(MemoryArena&, StrA, F32, Values...);
+template<typename T, typename... Values>
+StrA strafmt(MemoryArena&, StrA, const ArenaArrayList<T>&, Values...);
+
+
+
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, StrA val, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		memcpy(arena.stackBase + arena.stackPtr, val.str, val.length);
+		arena.stackPtr += val.length;
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, const char* val, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		while (*val) {
+			arena.stackBase[arena.stackPtr++] = U8(*val++);
+		}
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, U64 val, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		u2stra(arena, val);
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, U32 val, Values... others) {
+	return strafmt(arena, format, U64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, U16 val, Values... others) {
+	return strafmt(arena, format, U64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, U8 val, Values... others) {
+	return strafmt(arena, format, U64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, I64 val, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		i2stra(arena, val);
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, I32 val, Values... others) {
+	return strafmt(arena, format, I64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, I16 val, Values... others) {
+	return strafmt(arena, format, I64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, I8 val, Values... others) {
+	return strafmt(arena, format, I64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, F64 val, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		f2stra(arena, val);
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, F32 val, Values... others) {
+	return strafmt(arena, format, F64(val), others...);
+}
+template<typename T, typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, const ArenaArrayList<T>& list, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		arena.stackBase[arena.stackPtr++] = U8('[');
+		for (const T* val = list.data; val != list.data + list.size; val++) {
+			strafmt(arena, "%"a, *val);
+			if (val + 1 != list.data + list.size) {
+				arena.stackBase[arena.stackPtr++] = U8(',');
+				arena.stackBase[arena.stackPtr++] = U8(' ');
+			}
+		}
+		arena.stackBase[arena.stackPtr++] = U8(']');
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
+}
+
 
 struct RWSpinLock {
 	I32 lock;
@@ -558,7 +848,7 @@ struct ByteBuf {
 		failed = false;
 	}
 
-	FINLINE bool has_data_left(U32 size) {
+	FINLINE B32 has_data_left(U32 size) {
 		return I64(capacity) - I64(offset) >= I64(size);
 	}
 
@@ -734,7 +1024,7 @@ void print(StrA str) {
 }
 void println(StrA str) {
 	print(str);
-	print("\n"sa);
+	print("\n"a);
 }
 void print_integer(U64 num) {
 	if (num == 0) {
@@ -764,9 +1054,6 @@ void print_integer_pad(U64 num, I32 pad) {
 	}
 	print(str);
 }
-namespace SerializeTools {
-void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue);
-}
 void print_float(F64 f) {
 	char floatBuf[64];
 	U32 floatBufSize = sizeof(floatBuf);
@@ -782,10 +1069,13 @@ void println_float(F64 f) {
 	print("\n");
 }
 
-[[noreturn]] void abort(const char* message) {
+[[noreturn]] void abort(StrA message) {
 	print(message);
 	__debugbreak();
 	ExitProcess(EXIT_FAILURE);
+}
+[[noreturn]] void abort(const char* message) {
+	abort(StrA{ message, strlen(message) });
 }
 
 template<typename T>

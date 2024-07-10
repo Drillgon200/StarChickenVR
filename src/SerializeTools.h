@@ -243,7 +243,7 @@ void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue) {
 	}
 	if (exponent == -1023) {
 		// Subnormal
-		U32 normalizeFactor = 53 - (64 - _lzcnt_u64(significand));
+		U32 normalizeFactor = 53 - (64 - U32(_lzcnt_u64(significand)));
 		exponent -= normalizeFactor;
 		significand <<= normalizeFactor;
 	} else if (exponent == 1024) {
@@ -414,7 +414,7 @@ void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue) {
 		// Step 2: compute xi and zi
 		const I32 p = 52;
 		U64 pow5Hi = POWER_OF_5_TABLE[(POWER_OF_5_TABLE_OFFSET + k0) * 2 + 0];
-		U64 pow5Lo = POWER_OF_5_TABLE[(POWER_OF_5_TABLE_OFFSET + k0) * 2 + 1];
+		//U64 pow5Lo = POWER_OF_5_TABLE[(POWER_OF_5_TABLE_OFFSET + k0) * 2 + 1];
 		U64 xi = (pow5Hi - (pow5Hi >> p + 2)) >> (64 - p - beta - 1);
 		U64 zi = (pow5Hi + (pow5Hi >> p + 1)) >> (64 - p - beta - 1);
 		// Step 3: compute xiTilde and ziTilde 
@@ -470,7 +470,7 @@ generateDigits:;
 	I32 digitCount = 0;
 	I32 trailingZeroCount = 0;
 	while (base10Digits) {
-		char digit = base10Digits % 10 + '0';
+		char digit = char(base10Digits % 10 + '0');
 		if (trailingZeroCount == digitCount && digit == '0') {
 			trailingZeroCount++;
 		}
@@ -502,7 +502,7 @@ generateDigits:;
 			*--digitPtr = finalExponent % 10 + '0';
 			finalExponent /= 10;
 		}
-		memcpy(resultPtr, digitPtr, &digits[63] - digitPtr);
+		memcpy(resultPtr, digitPtr, U64(&digits[63] - digitPtr));
 		resultPtr += &digits[63] - digitPtr;
 	} else {
 		if (decimalPoint <= 0) {
@@ -521,7 +521,7 @@ generateDigits:;
 			}
 		}
 	}
-	U32 finalNumberCharCount = resultPtr - &digits[0];
+	U32 finalNumberCharCount = U32(resultPtr - &digits[0]);
 	memcpy(dstBuffer, &digits[0], min(finalNumberCharCount, dstBufferCapacity));
 	*dstBufferSize += min(finalNumberCharCount, dstBufferCapacity);
 }
