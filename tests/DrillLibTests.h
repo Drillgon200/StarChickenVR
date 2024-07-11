@@ -40,6 +40,68 @@ void ArenaArrayList_basic() {
 	}
 }
 
+void ArenaHashMap_basic() {
+	ArenaHashMap<U32, U32, 0> map{ &get_scratch_arena() };
+	TEST_EXPECT(map.empty());
+	map.insert(1, 0);
+	TEST_EXPECT(map.contains(1));
+	TEST_EXPECT(*map.find(1) == 0);
+	map.insert(5, 12);
+	TEST_EXPECT(!map.empty());
+	TEST_EXPECT(map.size == 2);
+	TEST_EXPECT(*map.find(5) == 12);
+	TEST_EXPECT(*map.find(1) == 0);
+	map.remove(1);
+	TEST_EXPECT(map.size == 1);
+	TEST_EXPECT(map.find(1) == nullptr);
+	TEST_EXPECT(*map.find(5) == 12);
+}
+
+void ArenaHashMap_stress() {
+	ArenaHashMap<U32, U32, 0> map{ &get_scratch_arena() };
+	U32 testAmount = 10000;
+	for (U32 i = 1; i <= testAmount; i++) {
+		map.insert(i, i + testAmount * 2);
+	}
+	TEST_EXPECT(map.capacity >= testAmount);
+	TEST_EXPECT(map.size == testAmount);
+	U32 numFound = 0;
+	U32 numCorrect = 0;
+	for (U32 i = 1; i <= testAmount; i++) {
+		if (U32* found = map.find(i)) {
+			numFound++;
+			numCorrect += *found == i + testAmount * 2;
+		}
+	}
+	TEST_EXPECT(numFound == testAmount);
+	TEST_EXPECT(numCorrect == testAmount);
+
+	U32 numToRemove = testAmount / 2;
+	U32 removalOffset = testAmount / 4;
+	U32 numRemoved = 0;
+	for (U32 i = 1; i <= numToRemove; i++) {
+		numRemoved += map.remove(i + removalOffset);
+	}
+	TEST_EXPECT(numRemoved == numToRemove);
+	TEST_EXPECT(map.size == testAmount - numToRemove);
+
+	U32 numCorrectAfterRemovals = 0;
+	U32 numIncorrectAfterRemovals = 0;
+	U32 numFoundValuesCorrect = 0;
+	for (U32 i = 1; i <= testAmount; i++) {
+		B32 shouldBePresent = i <= removalOffset || i > removalOffset + numToRemove;
+		if (U32* found = map.find(i)) {
+			(shouldBePresent ? numCorrectAfterRemovals : numIncorrectAfterRemovals)++;
+			numFoundValuesCorrect += *found == i + testAmount * 2;
+		} else {
+			(shouldBePresent ? numIncorrectAfterRemovals : numCorrectAfterRemovals)++;
+		}
+	}
+	TEST_EXPECT(numCorrectAfterRemovals == testAmount);
+	TEST_EXPECT(numFoundValuesCorrect == testAmount - numToRemove);
+	TEST_EXPECT(numIncorrectAfterRemovals == 0);
+}
+
 void strafmt_basic() {
 	StrA fmtNone = strafmt(get_scratch_arena(), "A string with no formatting."a);
 	TEST_EXPECT(fmtNone == "A string with no formatting."a);

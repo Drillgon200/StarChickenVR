@@ -10,6 +10,10 @@ void run_all() {
 			TEST_GROUP("ArenaArrayList"a) {
 				DrillLibTests::ArenaArrayList_basic();
 			}
+			TEST_GROUP("ArenaHashMap"a) {
+				DrillLibTests::ArenaHashMap_basic();
+				DrillLibTests::ArenaHashMap_stress();
+			}
 			TEST_GROUP("strafmt"a) {
 				DrillLibTests::strafmt_basic();
 			}

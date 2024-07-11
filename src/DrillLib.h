@@ -392,59 +392,160 @@ struct Hasher;
 
 // https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
 template<>
-struct Hasher<U8> {
-	U32 operator()(U32 val) {
-		return 0;
-	}
-};
-template<>
-struct Hasher<U16> {
-	U32 operator()(U32 val) {
-		return 0;
-	}
-};
-template<>
 struct Hasher<U32> {
 	U32 operator()(U32 val) {
-		return 0;
+		val = (val >> 16 ^ val) * 0x45d9f3bu;
+		val = (val >> 16 ^ val) * 0x45d9f3bu;
+		val = val >> 16 ^ val;
+		return val;
 	}
 };
 template<>
 struct Hasher<U64> {
-	U32 operator()(U32 val) {
-		return 0;
+	U64 operator()(U64 val) {
+		val = (val >> 30 ^ val) * 0xbf58476d1ce4e5b9ull;
+		val = (val >> 27 ^ val) * 0x94d049bb133111ebull;
+		val = val >> 31 ^ val;
+		return val;
 	}
 };
 
-template<typename T, T emptyVal, typename THasher = Hasher<T>>
+template<typename From, typename To, From emptyKey, typename KeyHasher = Hasher<From>>
 struct ArenaHashMap {
 	MemoryArena* allocator;
-	T* data;
+	From* keys;
+	To* values;
 	U32 size;
 	U32 capacity;
 
 	void reserve(U32 newCapacity) {
 		if (newCapacity > capacity) {
-			newCapacity = next_power_of_two(newCapacity);
-			data = (allocator ? allocator : &globalArena)->realloc(data, capacity, newCapacity);
-			capacity = newCapacity;
+			U32 oldCapacity = capacity;
+			capacity = next_power_of_two(newCapacity);
+			From* oldKeys = keys;
+			To* oldValues = values;
+			keys = (allocator ? *allocator : globalArena).alloc<From>(capacity);
+			for (U32 i = 0; i < capacity; i++) {
+				keys[i] = emptyKey;
+			}
+			values = (allocator ? *allocator : globalArena).alloc<To>(capacity);
+			size = 0;
+			if (oldCapacity) {
+				for (U32 i = 0; i < oldCapacity; i++) {
+					if (oldKeys[i] != emptyKey) {
+						insert(oldKeys[i], oldValues[i]);
+					}
+				}
+			}
 		}
 	}
 
-	B32 remove(const T& val) {
-		U32 searchIndex = THasher{}(val);
+	void check_resize() {
+		U32 approxThreeFourthsCapacity = (capacity >> 1) + (capacity >> 2);
+		if (capacity && size < approxThreeFourthsCapacity) {
+			return;
+		}
+		reserve(capacity == 0 ? 64 : capacity + 1);
 	}
 
-	B32 insert(const T& val) {
-
+	B32 remove(const From& key) {
+#ifndef NDEBUG
+		if (key == emptyKey) {
+			print("Warning, tried to remove empty key");
+			__debugbreak();
+		}
+#endif
+		U32 mask = capacity - 1;
+		U32 searchIndex = (KeyHasher{}(key)) & mask;
+		for (U32 counter = 0; counter < capacity; counter++) {
+			From& foundKey = keys[searchIndex];
+			if (foundKey == emptyKey) {
+				return false;
+			} else if (foundKey == key) {
+				// Found our value, move other entries back until there are no holes in the map
+				U32 checkIdx = searchIndex;
+				while (true) {
+					checkIdx = (checkIdx + 1) & mask;
+					if (checkIdx == searchIndex) {
+						break;
+					}
+					From& checkKey = keys[checkIdx];
+					if (checkKey == emptyKey) {
+						break;
+					}
+					U32 checkDesiredIdx = (KeyHasher{}(checkKey)) & mask;
+					if ((checkIdx > searchIndex && (checkDesiredIdx <= searchIndex || checkDesiredIdx > checkIdx)) ||
+						(checkIdx < searchIndex && (checkDesiredIdx <= searchIndex && checkDesiredIdx > checkIdx))) {
+						keys[searchIndex] = checkKey;
+						values[searchIndex] = values[checkIdx];
+						searchIndex = checkIdx;
+					}
+				}
+				keys[searchIndex] = emptyKey;
+				size--;
+				return true;
+			}
+			searchIndex = (searchIndex + 1) & mask;
+		}
+		return false;
 	}
 
-	B32 contains(const T& val) {
+	B32 insert(const From& key, const To& val) {
+#ifndef NDEBUG
+		if (key == emptyKey) {
+			print("Warning, tried to insert empty key");
+			__debugbreak();
+		}
+#endif
+		check_resize();
+		U32 mask = capacity - 1;
+		U32 searchIndex = (KeyHasher{}(key)) & mask;
+		for (U32 counter = 0; counter < capacity; counter++) {
+			From& foundKey = keys[searchIndex];
+			if (foundKey == emptyKey) {
+				keys[searchIndex] = key;
+				values[searchIndex] = val;
+				size++;
+				return true;
+			} else if (foundKey == key) {
+				return false;
+			}
+			searchIndex = (searchIndex + 1) & mask;
+		}
+		// Should be unreachable
+		return false;
+	}
 
+	To* find(const From& key) {
+#ifndef NDEBUG
+		if (key == emptyKey) {
+			print("Warning, tried to find empty key");
+			__debugbreak();
+		}
+#endif
+		if (size == 0) {
+			return nullptr;
+		}
+		U32 mask = capacity - 1;
+		U32 searchIndex = (KeyHasher{}(key)) & mask;
+		for (U32 counter = 0; counter < capacity; counter++) {
+			From& foundKey = keys[searchIndex];
+			if (foundKey == emptyKey) {
+				break;
+			} else if (foundKey == key) {
+				return &values[searchIndex];
+			}
+			searchIndex = (searchIndex + 1) & mask;
+		}
+		return nullptr;
+	}
+
+	B32 contains(const From& val) {
+		return find(val) != nullptr;
 	}
 
 	B32 empty() {
-
+		return size == 0;
 	}
 };
 
