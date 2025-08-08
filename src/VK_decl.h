@@ -27,12 +27,21 @@ typedef VkBool32(VKAPI_PTR* PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR)(
 #define CHK_VK(cmd) { VkResult chkVK_Result = cmd; if(chkVK_Result != VK_SUCCESS){ ::VK::vulkan_failure(chkVK_Result, ""); } }
 #define CHK_VK_NOT_NULL(cmd, msg) if((cmd) == nullptr){ ::VK::vulkan_failure(VK_SUCCESS, msg); }
 #define VK_DEBUG 1
+#if VK_DEBUG != 0
+#define VK_NAME_OBJ(type, var) {\
+		VkDebugUtilsObjectNameInfoEXT nameInfo{ VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT };\
+		nameInfo.objectType = VK_OBJECT_TYPE_##type;\
+		nameInfo.objectHandle = (U64)(var);\
+		nameInfo.pObjectName = #var;\
+		vkSetDebugUtilsObjectNameEXT(logicalDevice, &nameInfo);\
+	}
+#else
+#define VK_NAME_OBJ(type, var)
+#endif
 namespace VK {
 // Preprocessor hack to make defining and loading functions easier (just add them to the end of this macro when needed)
 #define VK_INSTANCE_FUNCTIONS OP(vkGetDeviceProcAddr)\
 	OP(vkGetDeviceQueue)\
-	OP(vkCreateDebugUtilsMessengerEXT)\
-	OP(vkDestroyDebugUtilsMessengerEXT)\
 	OP(vkGetPhysicalDeviceQueueFamilyProperties)\
 	OP(vkGetPhysicalDeviceSurfaceSupportKHR)\
 	OP(vkDestroyInstance)\
@@ -44,7 +53,23 @@ namespace VK {
 	OP(vkGetPhysicalDeviceSurfacePresentModesKHR)\
 	OP(vkGetPhysicalDeviceSurfaceFormatsKHR)\
 	OP(vkCreateWin32SurfaceKHR)\
-	OP(vkDestroySurfaceKHR)
+	OP(vkDestroySurfaceKHR)\
+	OP(vkEnumeratePhysicalDevices)\
+	OP(vkGetPhysicalDeviceProperties2)\
+	OP(vkGetPhysicalDeviceFeatures2)\
+	OP(vkEnumerateDeviceExtensionProperties)\
+	OP(vkCreateDevice)
+
+#if VK_DEBUG != 0
+#define VK_DEBUG_INSTANCE_FUNCTIONS OP(vkCreateDebugUtilsMessengerEXT)\
+	OP(vkDestroyDebugUtilsMessengerEXT)\
+	OP(vkCmdBeginDebugUtilsLabelEXT)\
+	OP(vkCmdEndDebugUtilsLabelEXT)\
+	OP(vkCmdInsertDebugUtilsLabelEXT)\
+	OP(vkSetDebugUtilsObjectNameEXT)
+#else
+#define VK_DEBUG_INSTANCE_FUNCTIONS
+#endif
 
 #define VK_DEVICE_FUNCTIONS OP(vkCmdBeginRenderPass)\
 	OP(vkCmdEndRenderPass)\
@@ -117,13 +142,28 @@ namespace VK {
 	OP(vkDestroySwapchainKHR)\
 	OP(vkGetSwapchainImagesKHR)\
 	OP(vkDestroyFence)\
-	OP(vkDestroySemaphore)
+	OP(vkDestroySemaphore)\
+	OP(vkCreateSampler)\
+	OP(vkDestroySampler)\
+	OP(vkGetBufferDeviceAddress)\
+	OP(vkCmdUpdateBuffer)
 
+#if VK_DEBUG != 0
+#define VK_DEBUG_DEVICE_FUNCTIONS
+#else
+#define VK_DEBUG_DEVICE_FUNCTIONS
+#endif
 
 #define OP(name) extern PFN_##name name;
 VK_INSTANCE_FUNCTIONS
+VK_DEBUG_INSTANCE_FUNCTIONS
 VK_DEVICE_FUNCTIONS
+VK_DEBUG_DEVICE_FUNCTIONS
 #undef OP
+
+const U32 FRAMES_IN_FLIGHT = 2;
+
+extern U32 currentFrameInFlight;
 
 static constexpr U32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V2F32) + sizeof(V3F32) + sizeof(V3F32);
 static constexpr U32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(U8) * 4 + sizeof(U8) * 4;
@@ -140,21 +180,125 @@ struct XrSwapchainData {
 	U32 swapchainDepthImageIdx;
 };
 
-#pragma pack(push, 1)
-struct GPUModelInfo {
-	U32 transformIdx;
-};
-#pragma pack(pop)
-
 extern VkInstance vkInstance;
 extern VkPhysicalDevice physicalDevice;
 extern VkDevice logicalDevice;
+
+extern U32 hostMemoryTypeIndex;
+extern U32 deviceMemoryTypeIndex;
+extern VkMemoryPropertyFlags hostMemoryFlags;
+extern VkMemoryPropertyFlags deviceMemoryFlags;
+
+extern VkPhysicalDeviceProperties physicalDeviceProperties;
+
+extern U32 graphicsFamily;
+extern U32 transferFamily;
+extern U32 computeFamily;
+
+extern VkQueue graphicsQueue;
+extern VkQueue transferQueue;
+extern VkQueue computeQueue;
+
+extern VKStaging::GPUUploadStager graphicsStager;
+extern VKGeometry::GeometryHandler geometryHandler;
+extern VKGeometry::UniformMatricesHandler uniformMatricesHandler;
+
+void vulkan_failure(VkResult result, const char* msg);
+
+struct DedicatedBuffer {
+	VkDeviceMemory memory;
+	VkBuffer buffer;
+	void* mapping;
+	VkDeviceAddress gpuAddress;
+	U64 capacity;
+
+	void create(U64 size, VkBufferUsageFlags usage, U32 memoryTypeIndex) {
+		capacity = size;
+		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+		bufferInfo.flags = 0;
+		bufferInfo.size = size;
+		bufferInfo.usage = usage;
+		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		bufferInfo.queueFamilyIndexCount = 0;
+		bufferInfo.pQueueFamilyIndices = nullptr;
+		CHK_VK(vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &buffer));
+
+		VkMemoryRequirements memoryRequirements;
+		vkGetBufferMemoryRequirements(logicalDevice, buffer, &memoryRequirements);
+		if (!(memoryRequirements.memoryTypeBits & 1 << memoryTypeIndex)) {
+			abort("Could not create buffer in correct memory type");
+		}
+
+		VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		allocInfo.allocationSize = memoryRequirements.size;
+		allocInfo.memoryTypeIndex = memoryTypeIndex;
+		VkMemoryAllocateFlagsInfo allocFlags{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
+		if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+			allocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+		} else {
+			allocFlags.flags = 0;
+		}
+		allocFlags.deviceMask = 0;
+		allocInfo.pNext = &allocFlags;
+		VkMemoryDedicatedAllocateInfo dedicatedAllocInfo{ VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+		dedicatedAllocInfo.buffer = buffer;
+		allocFlags.pNext = &dedicatedAllocInfo;
+		CHK_VK(vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &memory));
+		CHK_VK(vkBindBufferMemory(logicalDevice, buffer, memory, 0));
+
+		if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+			VkBufferDeviceAddressInfo addressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+			addressInfo.buffer = buffer;
+			gpuAddress = vkGetBufferDeviceAddress(logicalDevice, &addressInfo);
+		} else {
+			gpuAddress = 0;
+		}
+
+		if (memoryTypeIndex == hostMemoryTypeIndex) {
+			CHK_VK(vkMapMemory(logicalDevice, memory, 0, capacity, 0, reinterpret_cast<void**>(&mapping)));
+		}
+	}
+	void destroy() {
+		if (memory != VK_NULL_HANDLE) {
+			if (mapping) {
+				vkUnmapMemory(logicalDevice, memory);
+			}
+			vkDestroyBuffer(logicalDevice, buffer, nullptr);
+			vkFreeMemory(logicalDevice, memory, nullptr);
+			memory = VK_NULL_HANDLE;
+			buffer = VK_NULL_HANDLE;
+			mapping = nullptr;
+			gpuAddress = 0;
+			capacity = 0;
+		}
+	}
+	void invalidate_mapped(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) {
+		if (mapping && !(VK::hostMemoryFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+			VkMappedMemoryRange memoryInvalidateRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
+			memoryInvalidateRange.memory = memory;
+			memoryInvalidateRange.offset = offset;
+			memoryInvalidateRange.size = size;
+			CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryInvalidateRange));
+		}
+	}
+};
+
+#pragma pack(push, 1)
+struct GPUModelInfo {
+	U32 transformIdx;
+	I32 verticesOffset;
+};
+#pragma pack(pop)
 
 struct FramebufferAttachment {
 	VkDeviceMemory memory;
 	VkImage image;
 	VkImageView imageView;
-	B32 ownsImageView;
+	VkFormat imageFormat;
+	VkImageUsageFlags imageUsage;
+	VkImageAspectFlags imageAspectMask;
+	U32 layerCount;
+	B32 ownsImage;
 };
 
 struct Framebuffer {
@@ -176,27 +320,38 @@ struct Framebuffer {
 	void destroy();
 };
 
+struct DescriptorSet {
+	// I'm just going to always create these together.
+	// I won't have that many descriptor sets because of the bindless architecture, and this simplifies a lot
+	VkDescriptorSetLayout setLayout;
+	VkDescriptorSet descriptorSet;
+	VkDescriptorPool descriptorPool;
+
+	static constexpr U32 MAX_LAYOUT_BINDINGS = 16;
+	VkDescriptorSetLayoutBinding bindings[MAX_LAYOUT_BINDINGS];
+	VkDescriptorBindingFlags bindingFlags[MAX_LAYOUT_BINDINGS];
+	U32 bindingCount;
+	U32 variableDescriptorCountMax;
+	B32 updateAfterBind;
+
+	DescriptorSet& init();
+
+	DescriptorSet& basic_binding(U32 bindingIndex, VkShaderStageFlags stageFlags, VkDescriptorType descriptorType, U32 descriptorCount, VkDescriptorBindingFlags flags);
+	DescriptorSet& storage_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
+	DescriptorSet& uniform_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
+	DescriptorSet& sampler(U32 bindingIndex, VkShaderStageFlags stageFlags);
+	DescriptorSet& texture_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize);
+
+	void build();
+
+	// Should only be called before rendering anything in the current frame
+	void change_dynamic_array_length(U32 newDescriptorCount);
+
+	U32 current_dynamic_array_length();
+};
+
 extern Framebuffer mainFramebuffer;
 
-extern U32 hostMemoryTypeIndex;
-extern U32 deviceMemoryTypeIndex;
-
-extern VkPhysicalDeviceProperties physicalDeviceProperties;
-
-extern U32 graphicsFamily;
-extern U32 transferFamily;
-extern U32 computeFamily;
-
-extern VkQueue graphicsQueue;
-extern VkQueue transferQueue;
-extern VkQueue computeQueue;
-
-extern VKStaging::GPUUploadStager graphicsStager;
-extern VKGeometry::GeometryHandler geometryHandler;
-extern VKGeometry::UniformMatricesHandler uniformMatricesHandler;
-
 extern XrSwapchainData xrSwapchainData;
-
-void vulkan_failure(VkResult result, const char* msg);
 
 }

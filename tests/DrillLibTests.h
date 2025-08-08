@@ -41,7 +41,7 @@ void ArenaArrayList_basic() {
 }
 
 void ArenaHashMap_basic() {
-	ArenaHashMap<U32, U32, 0> map{ &get_scratch_arena() };
+	ArenaHashMap<U32, U32> map{ &get_scratch_arena(), 0 };
 	TEST_EXPECT(map.empty());
 	map.insert(1, 0);
 	TEST_EXPECT(map.contains(1));
@@ -58,7 +58,7 @@ void ArenaHashMap_basic() {
 }
 
 void ArenaHashMap_stress() {
-	ArenaHashMap<U32, U32, 0> map{ &get_scratch_arena() };
+	ArenaHashMap<U32, U32> map{ &get_scratch_arena(), 0 };
 	U32 testAmount = 10000;
 	for (U32 i = 1; i <= testAmount; i++) {
 		map.insert(i, i + testAmount * 2);

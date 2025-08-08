@@ -74,16 +74,10 @@
     <ClInclude Include="src\VKStaging.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\VKTextures.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\VKGeometry_decl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\VKStaging_decl.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\VKTextures_decl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\Resources.h">
@@ -111,6 +105,39 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="tests\StarChickenTests.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\ShaderCompilerTests.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\RISCVLib.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\TextRenderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\DynamicVertexBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\DynamicVertexBuffer_decl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ResourceLoading.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ResourceLoading_decl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UI_decl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\EditorUI.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\physics\Physics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

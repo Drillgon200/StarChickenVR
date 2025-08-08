@@ -1,5 +1,7 @@
 #pragma once
 #include "DrillLib.h"
+#include "SerializeTools.h"
+
 namespace StarChicken {
 
 #define PROJECTION_NEAR_PLANE 0.05F
@@ -10,4 +12,6 @@ namespace StarChicken {
 
 	extern B32 shouldShutDown;
 	extern B32 shouldUseDesktopWindow;
+
+	extern B32 isInEditorMode;
 }

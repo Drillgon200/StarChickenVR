@@ -73,6 +73,7 @@ struct GeometryHandler {
 	VkDeviceMemory memory;
 	VkDeviceSize memorySize;
 	VkBuffer buffer;
+	VkDeviceAddress gpuAddress;
 	U64 indicesOffset;
 	U64 positionsOffset;
 	U64 texcoordsOffset;
@@ -137,7 +138,7 @@ struct GeometryHandler {
 		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 		bufferInfo.flags = 0;
 		bufferInfo.size = finalSizeRequired;
-		bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		bufferInfo.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		bufferInfo.queueFamilyIndexCount = 0;
 		bufferInfo.pQueueFamilyIndices = nullptr;
@@ -150,8 +151,15 @@ struct GeometryHandler {
 		VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 		allocInfo.allocationSize = memoryRequirements.size;
 		allocInfo.memoryTypeIndex = VK::deviceMemoryTypeIndex;
+		VkMemoryAllocateFlagsInfo allocFlags{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
+		allocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+		allocInfo.pNext = &allocFlags;
 		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
+
+		VkBufferDeviceAddressInfo addressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+		addressInfo.buffer = buffer;
+		gpuAddress = VK::vkGetBufferDeviceAddress(VK::logicalDevice, &addressInfo);
 	}
 
 	void alloc_static(U32* indicesOffsetOut, U32* verticesOffsetOut, U32 numIndices, U32 numVertices) {
@@ -221,21 +229,20 @@ struct UniformMatricesHandler {
 	VkDeviceMemory memory;
 	VkBuffer buffer;
 	M4x3F32* memoryMapping;
+	VkDeviceAddress gpuAddress;
 	U32 maxMatrices;
 	// Matrix is always at least 3. The first matrix is the identity matrix and the next two are eye matrices
 	U32 matrixOffset;
 
 	void init(U32 size) {
-		if (size < 4096) {
-			abort("Needs 4k of matrix data");
-		}
+		ASSERT(size >= 4096, "Needs at least 4k of matrix data"a);
 		maxMatrices = size / sizeof(M4x3F32);
 		matrixOffset = 3;
 
 		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 		bufferInfo.flags = 0;
 		bufferInfo.size = size;
-		bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufferInfo.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		bufferInfo.queueFamilyIndexCount = 0;
 		bufferInfo.pQueueFamilyIndices = nullptr;
@@ -248,9 +255,16 @@ struct UniformMatricesHandler {
 		VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 		allocInfo.allocationSize = memoryRequirements.size;
 		allocInfo.memoryTypeIndex = VK::hostMemoryTypeIndex;
+		VkMemoryAllocateFlagsInfo allocFlags{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
+		allocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+		allocInfo.pNext = &allocFlags;
 		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, size, 0, reinterpret_cast<void**>(&memoryMapping)));
+
+		VkBufferDeviceAddressInfo addressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+		addressInfo.buffer = buffer;
+		gpuAddress = VK::vkGetBufferDeviceAddress(VK::logicalDevice, &addressInfo);
 
 		memoryMapping[0] = M4x3F32{}.set_identity();
 	}
@@ -265,6 +279,7 @@ struct UniformMatricesHandler {
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
 			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
+			__debugbreak();
 			offset = 0;
 		} else {
 			for (U32 i = 0; i < numMatrices; i++) {
@@ -279,6 +294,7 @@ struct UniformMatricesHandler {
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
 			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
+			__debugbreak();
 			offset = 0;
 		}
 		return offset;

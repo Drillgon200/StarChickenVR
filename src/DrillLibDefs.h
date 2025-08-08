@@ -1,4 +1,5 @@
 #pragma once
+#include <immintrin.h>
 
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
@@ -8,8 +9,9 @@
 // For things I've tested with, this can result in an order of magnitude of speed improvement (though still not as good as release mode)
 #define FINLINE __inline __forceinline
 #ifndef NDEBUG
+//TODO forceinline inlines before optimization, which means we either get to inline or optimize in debug mode. Find out which is better.
 // t means optimize for speed
-#define DEBUG_OPTIMIZE_ON __pragma(optimize("t", on))
+#define DEBUG_OPTIMIZE_ON __pragma(optimize("gt", on))
 // pragma optimize with a blank string means default
 #define DEBUG_OPTIMIZE_OFF __pragma(optimize("", on))
 #else
@@ -23,12 +25,16 @@
 #define GIGABYTE (MEGABYTE * 1024)
 #define TERABYTE (U64(GIGABYTE) * 1024ull)
 
-// Standard 4k page
+#define COMMA ,
+
+// x86 4k page
 #define PAGE_SIZE 4096
 
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof(arr[0]))
 #define ALIGN_LOW(num, alignment) ((num) & ~((alignment) - 1))
 #define ALIGN_HIGH(num, alignment) (((num) + (static_cast<decltype(num)>(alignment) - 1)) & ~(static_cast<decltype(num)>(alignment) - 1))
+#define SIGN_EXTEND64(num, bits) (U64(I64(U64(num) << 64 - (bits)) >> 64 - (bits)))
+#define SIGN_EXTEND32(num, bits) (U32(I32(U32(num) << 32 - (bits)) >> 32 - (bits)))
 #define OFFSET_OF(type, member) __builtin_offsetof(type, member) //(reinterpret_cast<uptr>(&reinterpret_cast<type*>(uptr(0))->member))
 
 // Suppress "hides previous local declaration", intended behavior for this construct
@@ -68,9 +74,12 @@
 #define PX_TO_MILLIMETER(px) ((px) * 0.2645833333F)
 #define MILLIMETER_TO_PX(mm) ((mm) * 3.7795275591F)
 
+#define CM_TO_M(cm) (cm * 0.01F)
+#define M_TO_CM(m) (m * 100.0F)
+
 #define DRILL_LIB_MAKE_VERSION(major, minor, patch) ((((major) & 0b1111111111) << 20) | (((minor) & 0b1111111111) << 10) | ((patch) & 0b1111111111))
 
-#define DRILL_LIB_VERSION DRILL_LIB_MAKE_VERSION(1, 2, 0)
+#define DRILL_LIB_VERSION DRILL_LIB_MAKE_VERSION(1, 6, 0)
 
 typedef signed __int8 I8;
 typedef unsigned __int8 U8;
@@ -86,7 +95,10 @@ typedef float F32;
 typedef double F64;
 typedef U8 B8;
 typedef U32 B32;
+typedef U64 Flags64;
 typedef U32 Flags32;
+typedef U16 Flags16;
+typedef U8 Flags8;
 
 #define U8_MAX 0xFF
 #define U16_MAX 0xFFFF
@@ -110,6 +122,10 @@ typedef U32 Flags32;
 #define F64_INF (__builtin_bit_cast(F64, 0x7FF0000000000000ull))
 #define F64_QNAN (__builtin_bit_cast(F64, 0x7FFFFFFFFFFFFFFFull))
 #define F64_SNAN (__builtin_bit_cast(F64, 0x7FF7FFFFFFFFFFFFull))
+#define B32_TRUE 1
+#define B32_FALSE 0
+#define B8_TRUE 1
+#define B8_FALSE 0
 
 #define DRILL_LIB_REDECLARE_STDINT
 #ifdef DRILL_LIB_REDECLARE_STDINT

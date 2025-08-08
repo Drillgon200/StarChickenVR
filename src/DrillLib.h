@@ -12,19 +12,17 @@ extern "C" int _fltused = 0;
 
 U64 performanceCounterTimerFrequency;
 
-DEBUG_OPTIMIZE_ON
-
 FINLINE void zero_memory(void* mem, U64 bytes) {
 	__stosb(reinterpret_cast<Byte*>(mem), 0, bytes);
 }
 
-DEBUG_OPTIMIZE_OFF
-
 #pragma warning(disable:28251) // Inconsistent annotation for ''
 #pragma warning(disable:6001) // Using uninitialized memory. There appears to be a false positive for some functions here
+#pragma warning(disable:28183) // src/dst could be 0. Probably another false positive
+#pragma warning(disable:28182) // var contains same NULL as other var. Same here
 
 // For some reason these functions fail to link in release mode but not in debug mode?
-#ifdef NDEBUG
+//#ifdef NDEBUG
 
 #pragma intrinsic(memcpy, memset, strcmp, strlen, memcmp)
 
@@ -73,7 +71,7 @@ size_t __cdecl strlen(const char* str) {
 	}
 	return result;
 }
-#endif
+//#endif
 
 #pragma function(memcmp)
 int __cdecl memcmp(const void* m1, const void* m2, size_t n) {
@@ -89,8 +87,25 @@ int __cdecl memcmp(const void* m1, const void* m2, size_t n) {
 	return diff;
 }
 
+#pragma function(memmove)
+void* __cdecl memmove(void* dst, const void* src, size_t n) {
+	// Unsigned cmp, if dst is more than n bytes away from src or if dst is below src we can use memcpy
+	Byte* bDst = reinterpret_cast<Byte*>(dst);
+	const Byte* bSrc = reinterpret_cast<const Byte*>(src);
+	if (U64(reinterpret_cast<UPtr>(dst) - reinterpret_cast<const UPtr>(src)) >= U64(n)) {
+		__movsb(bDst, bSrc, n);
+	} else {
+		for (size_t i = n; i --> 0;) {
+			bDst[i] = bSrc[i];
+		}
+	}
+	return dst;
+}
+
 #pragma warning(default:6001)
 #pragma warning(default:28251)
+#pragma warning(default:28183)
+#pragma warning(default:28182)
 
 DEBUG_OPTIMIZE_ON
 
@@ -113,9 +128,14 @@ FINLINE U16 bswap16(U16 val) {
 FINLINE U32 lzcnt32(U32 val) {
 	return _lzcnt_u32(val);
 }
-
 FINLINE U64 lzcnt64(U64 val) {
 	return _lzcnt_u64(val);
+}
+FINLINE U32 tzcnt32(U32 val) {
+	return _tzcnt_u32(val);
+}
+FINLINE U64 tzcnt64(U64 val) {
+	return _tzcnt_u64(val);
 }
 
 template<typename To, typename From>
@@ -124,6 +144,11 @@ FINLINE constexpr To bitcast(const From& val) {
 }
 
 DEBUG_OPTIMIZE_OFF
+
+namespace SerializeTools {
+void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue);
+bool is_whitespace(char c);
+}
 
 #define MEMORY_ARENA_BYTES_TO_COMMIT_AT_A_TIME (32 * PAGE_SIZE)
 #define MEMORY_ARENA_FRAME(arena) for (U64 MEMORY_ARENA_FRAME_stackPtr = (arena).stackPtr; MEMORY_ARENA_FRAME_stackPtr != ~0ull; (arena).stackPtr = MEMORY_ARENA_FRAME_stackPtr, MEMORY_ARENA_FRAME_stackPtr = ~0ull)
@@ -237,8 +262,6 @@ MemoryArena scratchArena1{};
 MemoryArena frameArena{};
 // At the end of a frame, lastFrameArena is cleared and made the new frameArena
 MemoryArena lastFrameArena{};
-// Used to store temporary buffer values for audio nodes
-MemoryArena audioArena{};
 // Things allocated here exist for the duration of the program, it is never reset
 MemoryArena globalArena{};
 
@@ -264,12 +287,18 @@ struct ArenaArrayList {
 	}
 
 	FINLINE void resize(U32 newSize) {
-		if (newSize < size) {
-			size = newSize;
-		} else if (newSize > size) {
+		if (newSize > size) {
 			reserve(newSize);
 			zero_memory(data + size, (newSize - size) * sizeof(T));
 		}
+		size = newSize;
+	}
+
+	FINLINE void wrap(T* values, U32 count, U32 cap, MemoryArena& fallbackAllocator) {
+		allocator = &fallbackAllocator;
+		data = values;
+		size = count;
+		capacity = cap;
 	}
 
 	template<typename Val>
@@ -291,6 +320,39 @@ struct ArenaArrayList {
 			reserve(max<U32>(capacity * 2, 8));
 		}
 		return data[size++];
+	}
+
+	FINLINE T& push_back_zeroed() {
+		if (size == capacity) {
+			reserve(max<U32>(capacity * 2, 8));
+		}
+		data[size] = T{};
+		return data[size++];
+	}
+
+	template<typename Val>
+	void push_back_unique(Val value) {
+		for (U32 i = 0; i < size; i++) {
+			if (data[i] == value) {
+				return;
+			}
+		}
+		if (size == capacity) {
+			reserve(max<U32>(capacity * 2, 8));
+		}
+		data[size++] = T(value);
+	}
+
+	template<typename Val>
+	void insert(I64 index, Val value) {
+		if (size == capacity) {
+			reserve(max<U32>(capacity * 2, 8));
+		}
+		for (U32 i = size; i --> index;) {
+			data[i + 1] = data[i];
+		}
+		size++;
+		data[index] = T(value);
 	}
 
 	FINLINE T& pop_back() {
@@ -318,18 +380,27 @@ struct ArenaArrayList {
 		size -= numValues;
 	}
 
-	B32 contains(const T& value) {
+	void copy_from(ArenaArrayList& other) {
+		clear();
+		if (other.data) {
+			push_back_n(other.data, other.size);
+		}
+	}
+
+	I64 idx_of(const T& value) {
 		T* begin = data;
 		T* end = begin + size;
-		B32 returnVal = false;
 		while (begin != end) {
 			if (*begin == value) {
-				returnVal = true;
-				break;
+				return begin - data;
 			}
 			begin++;
 		}
-		return returnVal;
+		return -1;
+	}
+
+	bool contains(const T& value) {
+		return idx_of(value) != -1;
 	}
 
 	B32 subrange_contains(U32 rangeStart, U32 rangeEnd, const T& value) {
@@ -348,6 +419,10 @@ struct ArenaArrayList {
 			begin++;
 		}
 		return false;
+	}
+
+	FINLINE T& operator[](I64 pos) const {
+		return data[pos < 0 ? size + pos : pos];
 	}
 
 	FINLINE T& last() {
@@ -393,7 +468,7 @@ struct Hasher;
 // https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
 template<>
 struct Hasher<U32> {
-	U32 operator()(U32 val) {
+	FINLINE U32 operator()(U32 val) {
 		val = (val >> 16 ^ val) * 0x45d9f3bu;
 		val = (val >> 16 ^ val) * 0x45d9f3bu;
 		val = val >> 16 ^ val;
@@ -402,7 +477,7 @@ struct Hasher<U32> {
 };
 template<>
 struct Hasher<U64> {
-	U64 operator()(U64 val) {
+	FINLINE U64 operator()(U64 val) {
 		val = (val >> 30 ^ val) * 0xbf58476d1ce4e5b9ull;
 		val = (val >> 27 ^ val) * 0x94d049bb133111ebull;
 		val = val >> 31 ^ val;
@@ -410,9 +485,10 @@ struct Hasher<U64> {
 	}
 };
 
-template<typename From, typename To, From emptyKey, typename KeyHasher = Hasher<From>>
+template<typename From, typename To, typename KeyHasher = Hasher<From>>
 struct ArenaHashMap {
 	MemoryArena* allocator;
+	From emptyKey;
 	From* keys;
 	To* values;
 	U32 size;
@@ -432,14 +508,13 @@ struct ArenaHashMap {
 			size = 0;
 			if (oldCapacity) {
 				for (U32 i = 0; i < oldCapacity; i++) {
-					if (oldKeys[i] != emptyKey) {
+					if (!(oldKeys[i] == emptyKey)) {
 						insert(oldKeys[i], oldValues[i]);
 					}
 				}
 			}
 		}
 	}
-
 	void check_resize() {
 		U32 approxThreeFourthsCapacity = (capacity >> 1) + (capacity >> 2);
 		if (capacity && size < approxThreeFourthsCapacity) {
@@ -447,7 +522,6 @@ struct ArenaHashMap {
 		}
 		reserve(capacity == 0 ? 64 : capacity + 1);
 	}
-
 	B32 remove(const From& key) {
 #ifndef NDEBUG
 		if (key == emptyKey) {
@@ -489,8 +563,7 @@ struct ArenaHashMap {
 		}
 		return false;
 	}
-
-	B32 insert(const From& key, const To& val) {
+	To* insert(const From& key, const To& val) {
 #ifndef NDEBUG
 		if (key == emptyKey) {
 			print("Warning, tried to insert empty key");
@@ -506,16 +579,17 @@ struct ArenaHashMap {
 				keys[searchIndex] = key;
 				values[searchIndex] = val;
 				size++;
-				return true;
+				return &values[searchIndex];
 			} else if (foundKey == key) {
-				return false;
+				keys[searchIndex] = key;
+				values[searchIndex] = val;
+				return &values[searchIndex];
 			}
 			searchIndex = (searchIndex + 1) & mask;
 		}
 		// Should be unreachable
-		return false;
+		return nullptr;
 	}
-
 	To* find(const From& key) {
 #ifndef NDEBUG
 		if (key == emptyKey) {
@@ -539,13 +613,30 @@ struct ArenaHashMap {
 		}
 		return nullptr;
 	}
-
-	B32 contains(const From& val) {
-		return find(val) != nullptr;
+	To* find_or_default(const From& key, const To& val) {
+		if (To* result = find(key)) {
+			return result;
+		}
+		return insert(key, val);
 	}
-
+	void insert_all(const ArenaHashMap<From, To, KeyHasher>& other) {
+		for (U32 i = 0; i < other.capacity; i++) {
+			if (other.keys[i] != other.emptyKey) {
+				insert(other.keys[i], other.values[i]);
+			}
+		}
+	}
+	B32 contains(const From& key) {
+		return find(key) != nullptr;
+	}
 	B32 empty() {
 		return size == 0;
+	}
+	void clear() {
+		size = 0;
+		for (U32 i = 0; i < capacity; i++) {
+			keys[i] = emptyKey;
+		}
 	}
 };
 
@@ -564,13 +655,25 @@ struct StrA {
 			return result;
 		}
 	}
-	FINLINE B32 operator==(const StrA& other) const {
+	FINLINE bool operator==(const StrA& other) const {
 		return length == other.length && memcmp(str, other.str, length) == 0;
+	}
+	FINLINE bool operator!=(const StrA& other) const {
+		return length != other.length || memcmp(str, other.str, length) != 0;
 	}
 	FINLINE char operator[](I64 pos) const {
 		return str[pos < 0 ? length + pos : pos];
 	}
-	FINLINE B32 is_empty() const {
+	FINLINE StrA operator++(int) {
+		StrA prev = *this;
+		str++, length--;
+		return prev;
+	}
+	FINLINE StrA& operator++() {
+		str++, length--;
+		return *this;
+	}
+	FINLINE bool is_empty() const {
 		return length == 0;
 	}
 	FINLINE I64 find(StrA other) const {
@@ -592,6 +695,12 @@ struct StrA {
 		}
 		return -1;
 	}
+	FINLINE bool contains(StrA other) {
+		return find(other) != -1;
+	}
+	FINLINE bool contains(char c) {
+		return find(c) != -1;
+	}
 	FINLINE I64 rfind(StrA other) const {
 		if (other.length > length) {
 			return -1;
@@ -611,10 +720,10 @@ struct StrA {
 		}
 		return -1;
 	}
-	FINLINE B32 starts_with(StrA other) const {
+	FINLINE bool starts_with(StrA other) const {
 		return other.length <= length && memcmp(str, other.str, other.length) == 0;
 	}
-	FINLINE B32 ends_with(StrA other) const {
+	FINLINE bool ends_with(StrA other) const {
 		return other.length <= length && memcmp(str + (length - other.length), other.str, other.length) == 0;
 	}
 	FINLINE StrA slice(I64 begin, I64 end) const {
@@ -651,6 +760,68 @@ struct StrA {
 		}
 		return StrA{ result, n * length };
 	}
+	FINLINE StrA* split(MemoryArena& arena, U64* sizeOut, StrA splitOn) {
+		U64 size = 0;
+		arena.stackPtr = ALIGN_HIGH(arena.stackPtr, alignof(StrA));
+		StrA* data = reinterpret_cast<StrA*>(arena.stackBase + arena.stackPtr);
+		StrA current{ str, 0 };
+		for (U64 i = 0; i < length; i++) {
+			if (StrA{ str + i, length - i }.starts_with(splitOn)) {
+				i += splitOn.length;
+				data[size++] = current;
+				current = StrA{ str + i, 0 };
+				i--;
+			} else {
+				current.length++;
+			}
+		}
+		data[size++] = current;
+		arena.stackPtr += size * sizeof(StrA);
+		if (sizeOut) {
+			*sizeOut = size;
+		}
+		return data;
+	}
+	FINLINE StrA strip() {
+		StrA result = *this;
+		while (result.length && SerializeTools::is_whitespace(*result.str)) {
+			result.str++, result.length--;
+		}
+		while (result.length && SerializeTools::is_whitespace(result.str[result.length - 1])) {
+			result.length--;
+		}
+		return result;
+	}
+	FINLINE StrA lowercase(MemoryArena& arena) {
+		char* result = arena.alloc<char>(length);
+		for (U32 i = 0; i < length; i++) {
+			char c = str[i];
+			if (c >= 'A' && c <= 'Z') {
+				c += 'a' - 'A';
+			}
+			result[i] = c;
+		}
+		return StrA{ result, length };
+	}
+	FINLINE StrA uppercase(MemoryArena& arena) {
+		char* result = arena.alloc<char>(length);
+		for (U32 i = 0; i < length; i++) {
+			char c = str[i];
+			if (c >= 'a' && c <= 'z') {
+				c -= 'a' - 'A';
+			}
+			result[i] = c;
+		}
+		return StrA{ result, length };
+	}
+	bool consume(StrA beginning) {
+		if (starts_with(beginning)) {
+			str += beginning.length;
+			length -= beginning.length;
+			return true;
+		}
+		return false;
+	}
 	const char* begin() const {
 		return str;
 	}
@@ -668,7 +839,15 @@ struct StrA {
 template<>
 struct Hasher<StrA> {
 	FINLINE U32 operator()(StrA str) {
-		return 0;
+		// djb2
+		// http://www.cse.yorku.ca/~oz/hash.html
+		// It's unclear whether this is actually a good string hashing algorithm these days, but I don't care to research it right now.
+		// Having at least a 3 cycle latency chain on each byte can't be good for performance in any case
+		U32 hash = 5381;
+		for (U32 i = 0; i < str.length; i++) {
+			hash = ((hash << 5) + hash) ^ str[i]; // hash * 33 + c
+		}
+		return hash;
 	}
 };
 
@@ -714,6 +893,19 @@ StrA u2stra(MemoryArena& arena, U64 num) {
 	memcpy(result, bufferPtr, size);
 	return StrA{ result, size };
 }
+StrA u2stra_hex(MemoryArena& arena, U64 num) {
+	char buffer[16];
+	char* bufferPtr = &buffer[16];
+	while (num & 0xF) {
+		*--bufferPtr = "0123456789ABCDEF"[num & 0xF];
+		num >>= 4;
+	}
+	U64 size = U64(&buffer[16] - bufferPtr);
+	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+	arena.stackPtr += size;
+	memcpy(result, bufferPtr, size);
+	return StrA{ result, size };
+}
 StrA i2stra(MemoryArena& arena, I64 num) {
 	if (num == I64_MIN) {
 		// It is important that this string gets copied to the arena for string formatting purposes
@@ -740,15 +932,24 @@ StrA i2stra(MemoryArena& arena, I64 num) {
 	memcpy(result, bufferPtr, size);
 	return StrA{ result, size };
 }
-namespace SerializeTools {
-void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue);
-}
 StrA f2stra(MemoryArena& arena, F64 num) {
 	U32 bufferSize = 256;
 	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
 	SerializeTools::serialize_f64(result, &bufferSize, num);
 	arena.stackPtr += bufferSize;
 	return StrA{ result, bufferSize };
+}
+StrA b2stra(MemoryArena& arena, bool b) {
+	char* result = reinterpret_cast<char*>(arena.stackBase) + arena.stackPtr;
+	if (b) {
+		memcpy(result, "true", 4);
+		arena.stackPtr += 4;
+		return StrA{ result, 4 };
+	} else {
+		memcpy(result, "false", 5);
+		arena.stackPtr += 5;
+		return StrA{ result, 5 };
+	}
 }
 
 B32 strafmt_write_until_format_specifier(MemoryArena& arena, StrA* format) {
@@ -833,13 +1034,22 @@ template<typename... Values>
 StrA strafmt(MemoryArena& arena, StrA format, U64 val, Values... others) {
 	U64 prevStackPtr = arena.stackPtr;
 	if (strafmt_write_until_format_specifier(arena, &format)) {
-		u2stra(arena, val);
+		if (format.length && format.str[0] == 'x') {
+			format.str++, format.length--;
+			u2stra_hex(arena, val);
+		} else {
+			u2stra(arena, val);
+		}
 		strafmt(arena, format, others...);
 	}
 	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
 }
 template<typename... Values>
 StrA strafmt(MemoryArena& arena, StrA format, U32 val, Values... others) {
+	return strafmt(arena, format, U64(val), others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, DWORD val, Values... others) {
 	return strafmt(arena, format, U64(val), others...);
 }
 template<typename... Values>
@@ -902,6 +1112,29 @@ StrA strafmt(MemoryArena& arena, StrA format, const ArenaArrayList<T>& list, Val
 	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
 }
 
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, V2F32 val, Values... others) {
+	StrA formatted = stracat(arena, "("a, f2stra(arena, val.x), ", "a, f2stra(arena, val.y), ")"a);
+	return strafmt(arena, format, formatted, others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, V3F32 val, Values... others) {
+	StrA formatted = stracat(arena, "("a, f2stra(arena, val.x), ", "a, f2stra(arena, val.y), ", "a, f2stra(arena, val.z), ")"a);
+	return strafmt(arena, format, formatted, others...);
+}
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, V4F32 val, Values... others) {
+	StrA formatted = stracat(arena, "("a, f2stra(arena, val.x), ", "a, f2stra(arena, val.y), ", "a, f2stra(arena, val.z), ", "a, f2stra(arena, val.w), ")"a);
+	return strafmt(arena, format, formatted, others...);
+}
+
+template<typename... Args>
+void printf(StrA fmt, Args... args) {
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		print(strafmt(arena, fmt, args...));
+	}
+}
 
 struct RWSpinLock {
 	I32 lock;
@@ -1198,29 +1431,27 @@ T* read_full_file_to_arena(U32* count, MemoryArena& arena, StrA fileName) {
 		CloseHandle(file);
 		*count = numBytesRead / sizeof(T);
 	} else {
-		print("Failed to create file, code: ");
-		println_integer(GetLastError());
+		printf("Failed to create file, code: %\n"a, GetLastError());
 	}
 	return result;
 }
 
-B32 write_data_to_file(StrA fileName, void* data, U32 numBytes) {
+bool write_data_to_file(StrA fileName, void* data, U32 numBytes) {
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 oldArenaPtr = stackArena.stackPtr;
 	HANDLE file = CreateFileA(fileName.c_str(stackArena), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-	B32 success = false;
+	bool success = false;
 	if (file != INVALID_HANDLE_VALUE) {
 		success = !!WriteFile(file, data, numBytes, 0, NULL);
 		CloseHandle(file);
 	} else {
-		print("Failed to create file, code: ");
-		println_integer(GetLastError());
+		printf("Failed to create file, code: %\n"a, GetLastError());
 	}
 	stackArena.stackPtr = oldArenaPtr;
 	return success;
 }
 
-B32 run_program_and_wait(U32* exitCodeOut, StrA programName, StrA commandLine) {
+bool run_program_and_wait(U32* exitCodeOut, StrA programName, StrA commandLine) {
 	MemoryArena& stackArena = get_scratch_arena();
 	BOOL success = FALSE;
 	MEMORY_ARENA_FRAME(stackArena) {
@@ -1233,7 +1464,7 @@ B32 run_program_and_wait(U32* exitCodeOut, StrA programName, StrA commandLine) {
 		STARTUPINFOA startupInfo{};
 		startupInfo.cb = sizeof(STARTUPINFOA);
 		PROCESS_INFORMATION procInfo{};
-		success = CreateProcessA(programName.c_str(stackArena), commandLineCStr, NULL, NULL, FALSE, 0, NULL, NULL, &startupInfo, &procInfo);
+		success = CreateProcessA(NULL, commandLineCStr, NULL, NULL, FALSE, 0, NULL, NULL, &startupInfo, &procInfo);
 
 		if (success) {
 			WaitForSingleObject(procInfo.hProcess, INFINITE);
@@ -1247,7 +1478,7 @@ B32 run_program_and_wait(U32* exitCodeOut, StrA programName, StrA commandLine) {
 			CloseHandle(procInfo.hThread);
 		}
 	}
-	return B32(success != 0);
+	return success != 0;
 }
 
 F64 current_time_seconds() {
@@ -1257,6 +1488,15 @@ F64 current_time_seconds() {
 	}
 	return F64(perfCounter.QuadPart) / F64(performanceCounterTimerFrequency);
 }
+U32 current_unix_time() {
+	FILETIME time{};
+	GetSystemTimeAsFileTime(&time);
+	U64 timeIn100nsSince1601 = U64(time.dwHighDateTime) << 32 | time.dwLowDateTime;
+	U64 secondsBetween1601And1970 = 11644473600;
+	return U32(timeIn100nsSince1601 / 10000000 - secondsBetween1601And1970);
+}
+
+
 
 void (*previousPageFaultHandler)(int);
 
@@ -1274,7 +1514,6 @@ LONG WINAPI page_fault_handler(PEXCEPTION_POINTERS exceptionPointers) {
 			(address >= reinterpret_cast<UPtr>(scratchArena1.stackBase) && (address - reinterpret_cast<UPtr>(scratchArena1.stackBase)) < scratchArena1.stackMaxSize) ||
 			(address >= reinterpret_cast<UPtr>(frameArena.stackBase) && (address - reinterpret_cast<UPtr>(frameArena.stackBase)) < frameArena.stackMaxSize) ||
 			(address >= reinterpret_cast<UPtr>(lastFrameArena.stackBase) && (address - reinterpret_cast<UPtr>(lastFrameArena.stackBase)) < lastFrameArena.stackMaxSize) ||
-			(address >= reinterpret_cast<UPtr>(audioArena.stackBase) && (address - reinterpret_cast<UPtr>(audioArena.stackBase)) < audioArena.stackMaxSize) ||
 			(address >= reinterpret_cast<UPtr>(globalArena.stackBase) && (address - reinterpret_cast<UPtr>(globalArena.stackBase)) < globalArena.stackMaxSize)) {
 			allocatedAddress = VirtualAlloc(reinterpret_cast<void*>(address), MEMORY_ARENA_BYTES_TO_COMMIT_AT_A_TIME, MEM_COMMIT, PAGE_READWRITE);
 		}
@@ -1306,10 +1545,7 @@ B32 drill_lib_init() {
 	if (!lastFrameArena.init(1 * GIGABYTE)) {
 		return false;
 	}
-	if (!audioArena.init(1 * GIGABYTE)) {
-		return false;
-	}
-	if (!globalArena.init(1 * GIGABYTE)) {
+	if (!globalArena.init(64ull * GIGABYTE)) {
 		return false;
 	}
 	return true;

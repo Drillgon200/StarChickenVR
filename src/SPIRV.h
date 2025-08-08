@@ -2,7 +2,7 @@
 
 #include "DrillLib.h"
 
-#define SPV_NULL_ID 0
+#define SPV_NULL_ID 0u
 
 namespace SPIRV {
 
@@ -38,7 +38,8 @@ enum ExecutionModel {
 	EXECUTION_MODEL_MISS_NV = 5317,
 	EXECUTION_MODEL_MISS_KHR = EXECUTION_MODEL_MISS_NV,
 	EXECUTION_MODEL_CALLABLE_NV = 5318,
-	EXECUTION_MODEL_CALLABLE_KHR = EXECUTION_MODEL_CALLABLE_NV
+	EXECUTION_MODEL_CALLABLE_KHR = EXECUTION_MODEL_CALLABLE_NV,
+	EXECUTION_MODEL_Invalid = 0xFFFF
 };
 
 enum AddressingModel {
@@ -165,13 +166,17 @@ enum StorageClass {
 	STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER_EXT = STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER,
 	STORAGE_CLASS_CODE_SECTION_INTEL = 5605,
 	STORAGE_CLASS_DEVICE_ONLY_INTEL = 5936,
-	STORAGE_CLASS_HOST_ONLY_INTEL = 5937
+	STORAGE_CLASS_HOST_ONLY_INTEL = 5937,
+
+	STORAGE_CLASS_Invalid = 0xFFFF
 };
 
 enum AccessQualifier {
 	ACCESS_QUALIFIER_READ_ONLY = 0,
 	ACCESS_QUALIFIER_WRITE_ONLY = 1,
-	ACCESS_QUALIFIER_READ_WRITE = 2
+	ACCESS_QUALIFIER_READ_WRITE = 2,
+
+	ACCESS_QUALIFIER_Invalid = 0xFFFF
 };
 
 enum Capability {
@@ -248,12 +253,12 @@ enum Capability {
 	CAPABILITY_FRAGMENT_SHADING_RATE_KHR = 4422,
 	CAPABILITY_SUBGROUP_BALLOT_KHR = 4423,
 	CAPABILITY_DRAW_PARAMETERS = 4427,
-	//Got tired of typing all these out, so I just typed the ones I thought I might use with //... for the missing ones
-	//...
+	// Got tired of typing all these out, so I just typed the ones I thought I might use with //... for the missing ones
+	// ...
 	CAPABILITY_SUBGROUP_VOTE_KHR = 4431,
-	//...
+	// ...
 	CAPABILITY_MULTIVIEW = 4439,
-	//...
+	// ...
 	CAPABILITY_FRAGMENT_BARYCENTRIC_NV = 5284,
 	CAPABILITY_FRAGMENT_BARYCENTRIC_KHR = CAPABILITY_FRAGMENT_BARYCENTRIC_NV,
 	CAPABILITY_COMPUTE_DERIVATIVE_GROUP_QUADS_NV = 5288,
@@ -292,46 +297,47 @@ enum Capability {
 	CAPABILITY_VULKAN_MEMORY_MODEL_DEVICE_SCOPE_KHR = CAPABILITY_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
 	CAPABILITY_PHYSICAL_STORAGE_BUFFER_ADDRESSES = 5347,
 	CAPABILITY_PHYSICAL_STORAGE_BUFFER_ADDRESSES_EXT = CAPABILITY_PHYSICAL_STORAGE_BUFFER_ADDRESSES,
-	//...
+	// ...
 	CAPABILITY_DEMOTE_TO_HELPER_INVOCATION = 5379,
 	CAPABILITY_DEMOTE_TO_HELPER_INVOCATION_EXT = CAPABILITY_DEMOTE_TO_HELPER_INVOCATION,
-	//...
+	// ...
 	CAPABILITY_DOT_PRODUCT_INPUT_ALL = 6016,
 	CAPABILITY_DOT_PRODUCT_INPUT_ALL_KHR = CAPABILITY_DOT_PRODUCT_INPUT_ALL,
-	//...
+	// ...
 	CAPABILITY_DOT_PRODUCT = 6019,
 	CAPABILITY_DOT_PRODUCT_KHR = CAPABILITY_DOT_PRODUCT,
 	CAPABILITY_RAY_CULL_MASK_KHR = 6020,
 	CAPABILITY_BIT_INSTRUCTIONS = 6025,
 	CAPABILITY_GROUP_NON_UNIFORM_ROTATE_KHR = 6026,
-	//...
+	// ...
 	CAPABILITY_GROUP_UNIFORM_ARITHEMTIC_KHR = 6400
 };
 
 enum FunctionParameterAttribute {
-	//Zero extend
+	// Zero extend
 	FUNCTION_PARAMETER_ATTRIBUTE_ZEXT = 0,
-	//Sign extend
+	// Sign extend
 	FUNCTION_PARAMETER_ATTRIBUTE_SEXT = 1,
-	//Pass by value
+	// Pass by value
 	FUNCTION_PARAMETER_ATTRIBUTE_BY_VAL = 2,
-	//This parameter is the address of the return value for this function
+	// This parameter is the address of the return value for this function
 	FUNCTION_PARAMETER_ATTRIBUTE_SRET = 3,
-	//Pointer parameter does not alias through pointers not derived from it
+	// Pointer parameter does not alias through pointers not derived from it
 	FUNCTION_PARAMETER_ATTRIBUTE_NO_ALIAS = 4,
-	//Parameter is not copied into a location accessible after returning
+	// Parameter is not copied into a location accessible after returning
 	FUNCTION_PARAMETER_ATTRIBUTE_NO_CAPTURE = 5,
-	//Memory pointed to by the pointer parameter is not written to
+	// Memory pointed to by the pointer parameter is not written to
 	FUNCTION_PARAMETER_ATTRIBUTE_NO_WRITE = 6,
-	//Pointer parameter is not dereferenced, either to read or write the memory pointed to
-	FUNCTION_PARAMETER_ATTRIBUTE_NO_READ_WRITE = 7,
+	// Pointer parameter is not dereferenced, either to read or write the memory pointed to
+	FUNCTION_PARAMETER_ATTRIBUTE_NO_READ_WRITE = 7
 };
+typedef Flags32 FunctionParameterAttributes;
 
 enum Decoration {
 	DECORATION_RELAXED_PRECISION = 0,
 	DECORATION_SPEC_ID = 1,
 	DECORATION_BLOCK = 2,
-	//Deprecated
+	// Deprecated
 	DECORATION_BUFFER_BLOCK = 3,
 	DECORATION_ROW_MAJOR = 4,
 	DECORATION_COL_MAJOR = 5,
@@ -444,7 +450,7 @@ enum Decoration {
 	DECORATION_MEDIA_BLOCK_IO_INTEL = 6140
 };
 
-enum BuiltIn {
+enum BuiltIn : U32 {
 	BUILTIN_POSITION = 0,
 	BUILTIN_POINT_SIZE = 1,
 	BUILTIN_CLIP_DISTANCE = 3,
@@ -453,9 +459,9 @@ enum BuiltIn {
 	BUILTIN_INSTANCE_ID = 6,
 	BUILTIN_PRIMITIVE_ID = 7,
 	BUILTIN_INVOCATION_ID = 8,
-	//Layer selection for multi layer framebuffer
+	// Layer selection for multi layer framebuffer
 	BUILTIN_LAYER = 9,
-	//Viewport selection for viewport transform when using multiple viewports
+	// Viewport selection for viewport transform when using multiple viewports
 	BUILTIN_VIEWPORT_INDEX = 10,
 	BUILTIN_TESS_LEVEL_OUTER = 11,
 	BUILTIN_TESS_LEVEL_INNER = 12,
@@ -568,16 +574,20 @@ enum BuiltIn {
 	BUILTIN_SM_COUNT_NV = 5375,
 	BUILTIN_WARP_ID_NV = 5376,
 	BUILDIN_SM_ID_NV = 5377,
-	BUILTIN_CULL_MASK_KHR = 6021
+	BUILTIN_CULL_MASK_KHR = 6021,
+
+	BUILTIN_Invalid = 0xFFFF
 };
 
 enum SelectionControl {
 	SELECTION_CONTROL_NONE = 0,
 	SELECTION_CONTROL_FLATTEN = 1,
-	SELECTION_CONTROL_DONT_FLATTEN = 2
+	SELECTION_CONTROL_DONT_FLATTEN = 2,
+
+	SELECTION_CONTROL_Invalid = 0xFFFF
 };
 
-enum LoopControl {
+enum LoopControlFlag : Flags32 {
 	LOOP_CONTROL_NONE = 0x0,
 	LOOP_CONTROL_UNROLL = 0x1,
 	LOOP_CONTROL_DONT_UNROLL = 0x2,
@@ -597,12 +607,13 @@ enum LoopControl {
 	LOOP_CONTROL_SPECULATED_ITERATIONS_INTEL = 0x400000,
 	LOOP_CONTROL_NO_FUSION_INTEL = 0x800000
 };
+typedef Flags32 LoopControl;
 
-//I'm ignoring the INTEL ones. They're most likely irrelevant to me.
-const uint32_t NUM_LOOP_CONTROLS = 9;
-const uint32_t NUM_LOOP_CONTROLS_WITH_ARGUMENT = 6;
+// I'm ignoring the INTEL ones. They're most likely irrelevant to me.
+const U32 NUM_LOOP_CONTROLS = 9;
+const U32 NUM_LOOP_CONTROLS_WITH_ARGUMENT = 6;
 
-enum FunctionControl {
+enum FunctionControlFlag {
 	FUNCTION_CONTROL_NONE = 0x0,
 	FUNCTION_CONTROL_INLINE = 0x1,
 	FUNCTION_CONTROL_DONT_INLINE = 0x2,
@@ -610,8 +621,9 @@ enum FunctionControl {
 	FUNCTION_CONTROL_CONST = 0x8,
 	FUNCTION_CONTROL_OPT_NONE_INTEL = 0x10000
 };
+typedef Flags32 FunctionControl;
 
-enum MemoryOperand {
+enum MemoryOperandFlag {
 	MEMORY_OPERAND_NONE = 0x0,
 	MEMORY_OPERAND_VOLATILE = 0x1,
 	MEMORY_OPERAND_ALIGNED = 0x2,
@@ -625,6 +637,63 @@ enum MemoryOperand {
 	MEMORY_OPERAND_ALIAS_SCOPE_INTEL_MASK = 0x10000,
 	MEMORY_OPERAND_NO_ALIAS_INTEL_MASK = 0x20000
 };
+typedef Flags32 MemoryOperands;
+
+enum Dimensionality {
+	DIMENSIONALITY_1D = 0,
+	DIMENSIONALITY_2D = 1,
+	DIMENSIONALITY_3D = 2,
+	DIMENSIONALITY_CUBE = 3,
+	DIMENSIONALITY_RECT = 4,
+	DIMENSIONALITY_BUFFER = 5,
+	DIMENSIONALITY_SUBPASS_DATA = 6,
+	DIMENSIONALITY_Invalid = 0xFFFF
+};
+
+enum ImageFormat {
+	IMAGE_FORMAT_UNKNOWN,
+	IMAGE_FORMAT_RGBA32F,
+	IMAGE_FORMAT_RGBA16F,
+	IMAGE_FORMAT_R32F,
+	IMAGE_FORMAT_RGBA8,
+	IMAGE_FORMAT_RGBA8SNORM,
+	IMAGE_FORMAT_RG32F,
+	IMAGE_FORMAT_RG16F,
+	IMAGE_FORMAT_R11FG11FB10F,
+	IMAGE_FORMAT_R16F,
+	IMAGE_FORMAT_RGBA16,
+	IMAGE_FORMAT_RGB10A2,
+	IMAGE_FORMAT_RG16,
+	IMAGE_FORMAT_RG8,
+	IMAGE_FORMAT_R16,
+	IMAGE_FORMAT_R8,
+	IMAGE_FORMAT_RGBA16SNORM,
+	IMAGE_FORMAT_RG16SNORM,
+	IMAGE_FORMAT_RG8SNORM,
+	IMAGE_FORMAT_R16SNORM,
+	IMAGE_FORMAT_R8SNORM,
+	IMAGE_FORMAT_RGBA32I,
+	IMAGE_FORMAT_RGBA16I,
+	IMAGE_FORMAT_RGBA8I,
+	IMAGE_FORMAT_R32I,
+	IMAGE_FORMAT_RG32I,
+	IMAGE_FORMAT_RG16I,
+	IMAGE_FORMAT_RG8I,
+	IMAGE_FORMAT_R16I,
+	IMAGE_FORMAT_R8I,
+	IMAGE_FORMAT_RGBA32UI,
+	IMAGE_FORMAT_RGBA16UI,
+	IMAGE_FORMAT_RGBA8UI,
+	IMAGE_FORMAT_R32UI,
+	IMAGE_FORMAT_RGB10A2UI,
+	IMAGE_FORMAT_RG32UI,
+	IMAGE_FORMAT_RG16UI,
+	IMAGE_FORMAT_RG8UI,
+	IMAGE_FORMAT_R16UI,
+	IMAGE_FORMAT_R8UI,
+	IMAGE_FORMAT_R64UI,
+	IMAGE_FORMAT_R64I
+};
 
 // Again ignoring the INTEL ones
 const U32 NUM_MEMORY_OPERANDS = 6;
@@ -633,8 +702,541 @@ const U32 NUM_MEMORY_OPERANDS_WITH_ARGUMENT = 3;
 typedef U32 SpvId;
 typedef U32 SpvDword;
 
-struct Identifier;
 
+#define SPV_BINARY_OP(name, insnId) SpvId name##(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId operand1, SpvId operand2) {\
+	const U32 wordCount = 5;\
+	output.push_back(wordCount << 16 | insnId, resultType, resultId, operand1, operand2);\
+	return resultId;\
+}
+#define SPV_UNARY_OP(name, insnId) SpvId name##(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId operand1) {\
+	const U32 wordCount = 4;\
+	SpvDword insn[]{ wordCount << 16 | insnId, resultType, resultId, operand1 };\
+	output.push_back_n(insn, wordCount);\
+	return resultId;\
+}
 
+void op_capability(ArenaArrayList<SpvDword>& output, Capability cap) {
+	const U32 opcode = 17, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode);
+	output.push_back(cap);
+}
+void op_extension(ArenaArrayList<SpvDword>& output, StrA name) {
+	const U32 opcode = 10, wordCount = 1;
+	U32 nameLengthInDwords = U32((name.length + 4) / 4);
+	output.push_back(wordCount + nameLengthInDwords << 16 | opcode);
+	output.resize(output.size + nameLengthInDwords);
+	memcpy(output.data + output.size - nameLengthInDwords, name.str, name.length);
+}
+void op_ext_inst_import(ArenaArrayList<SpvDword>& output, SpvId resultId, StrA name) {
+	const U32 opcode = 11, wordCount = 2;
+	U32 nameLengthInDwords = U32((name.length + 4) / 4);
+	output.push_back(wordCount + nameLengthInDwords << 16 | opcode, resultId);
+	output.resize(output.size + nameLengthInDwords);
+	memcpy(output.data + output.size - nameLengthInDwords, name.str, name.length);
+}
+SpvId op_ext_inst(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId set, SpvDword instruction, SpvDword* operands, U32 operandsLength) {
+	const U32 opcode = 12, wordCount = 5;
+	output.push_back(wordCount + operandsLength << 16 | opcode, resultType, resultId, set, instruction);
+	output.push_back_n(operands, operandsLength);
+	return resultId;
+}
+void op_memory_model(ArenaArrayList<SpvDword>& output, AddressingModel addressingModel, MemoryModel memoryModel) {
+	const U32 opcode = 14, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode);
+	output.push_back(addressingModel);
+	output.push_back(memoryModel);
+}
+void op_entry_point(ArenaArrayList<SpvDword>& output, ExecutionModel executionModel, SpvId entryPoint, StrA name, SpvId* references, U32 referenceCount) {
+	const U32 opcode = 15, wordCount = 3;
+	U32 nameLengthInDwords = U32((name.length + 4) / 4);
+	output.push_back(wordCount + nameLengthInDwords + referenceCount << 16 | opcode);
+	output.push_back(executionModel);
+	output.push_back(entryPoint);
+	output.resize(output.size + nameLengthInDwords);
+	memcpy(output.data + output.size - nameLengthInDwords, name.str, name.length);
+	output.push_back_n(references, referenceCount);
+}
+void op_execution_mode(ArenaArrayList<SpvDword>& output, SpvId entrypoint, ExecutionMode executionMode, SpvDword* literals, U32 literalCount) {
+	const U32 opcode = 16, wordCount = 3;
+	output.push_back(wordCount + literalCount << 16 | opcode);
+	output.push_back(entrypoint);
+	output.push_back(executionMode);
+	output.push_back_n(literals, literalCount);
+}
+
+SpvId op_type_void(ArenaArrayList<SpvDword>& output, SpvId resultId) {
+	const U32 opcode = 19, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode, resultId);
+	return resultId;
+}
+SpvId op_type_bool(ArenaArrayList<SpvDword>& output, SpvId resultId) {
+	const U32 opcode = 20, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode, resultId);
+	return resultId;
+}
+//For signedness, 0 is unsigned/no sign and 1 is signed
+SpvId op_type_int(ArenaArrayList<SpvDword>& output, SpvId resultId, U32 width, U32 signedness) {
+	const U32 opcode = 21, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultId, width, signedness);
+	return resultId;
+}
+SpvId op_type_float(ArenaArrayList<SpvDword>& output, SpvId resultId, U32 width) {
+	const U32 opcode = 22, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, resultId, width);
+	return resultId;
+}
+SpvId op_type_vector(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId componentType, U32 componentCount) {
+	const U32 opcode = 23, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultId, componentType, componentCount);
+	return resultId;
+}
+SpvId op_type_matrix(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId columnType, U32 columnCount) {
+	const U32 opcode = 24, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultId, columnType, columnCount);
+	return resultId;
+}
+SpvId op_type_array(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId elementType, SpvId length) {
+	const U32 opcode = 28, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultId, elementType, length);
+	return resultId;
+}
+SpvId op_type_runtime_array(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId elementType) {
+	const U32 opcode = 29, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, resultId, elementType);
+	return resultId;
+}
+SpvId op_type_struct(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId* members, U32 memberCount) {
+	const U32 opcode = 30, wordCount = 2;
+	output.push_back(wordCount + memberCount << 16 | opcode, resultId);
+	output.push_back_n(members, memberCount);
+	return resultId;
+}
+SpvId op_type_pointer(ArenaArrayList<SpvDword>& output, SpvId resultId, StorageClass storageClass, SpvId type) {
+	const U32 opcode = 32, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultId, storageClass, type);
+	return resultId;
+}
+SpvId op_type_image(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId sampledType, Dimensionality dim, U32 depth, U32 arrayed, U32 multisample, U32 sampled, ImageFormat format, AccessQualifier accessQualifier = ACCESS_QUALIFIER_Invalid) {
+	const U32 opcode = 25, wordCount = 9u + (accessQualifier != ACCESS_QUALIFIER_Invalid ? 1u : 0u);
+	output.push_back(wordCount << 16 | opcode, resultId, sampledType, dim, depth, arrayed, multisample, sampled, format);
+	if (accessQualifier != ACCESS_QUALIFIER_Invalid) {
+		output.push_back(accessQualifier);
+	}
+	return resultId;
+}
+SpvId op_type_sampler(ArenaArrayList<SpvDword>& output, SpvId resultId) {
+	const U32 opcode = 26, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode, resultId);
+	return resultId;
+}
+SpvId op_type_sampled_image(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId imageType) {
+	const U32 opcode = 27, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, resultId, imageType);
+	return resultId;
+}
+SpvId op_type_function(ArenaArrayList<SpvDword>& output, SpvId resultId, SpvId returnType, SpvId* params, U32 paramCount) {
+	const U32 opcode = 33, wordCount = 3;
+	output.push_back(wordCount + paramCount << 16 | opcode, resultId, returnType);
+	output.push_back_n(params, paramCount);
+	return resultId;
+}
+SpvId op_constant_true(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId) {
+	const U32 opcode = 41, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId);
+	return resultId;
+}
+SpvId op_constant_false(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId) {
+	const U32 opcode = 42, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId);
+	return resultId;
+}
+SpvId op_constant(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, U32 value) {
+	const U32 opcode = 43, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, value);
+	return resultId;
+}
+SpvId op_constant(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, U64 value) {
+	const U32 opcode = 43, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, U32(value), U32(value >> 32));
+	return resultId;
+}
+SpvId op_constant_composite(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvDword* resultConstituents, U32 constituentCount) {
+	const U32 opcode = 44, wordCount = 3;
+	output.push_back(wordCount + constituentCount << 16 | opcode, resultType, resultId);
+	output.push_back_n(resultConstituents, constituentCount);
+	return resultId;
+}
+SpvId op_constant_null(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId) {
+	const U32 opcode = 46, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId);
+	return resultId;
+}
+
+SpvId op_variable(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, StorageClass storageClass) {
+	const U32 opcode = 59, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, storageClass);
+	return resultId;
+}
+SpvId op_variable(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, StorageClass storageClass, SpvId initializer) {
+	const U32 opcode = 59, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, storageClass, initializer);
+	return resultId;
+}
+SpvId op_load(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId pointer, SpvDword* memoryOperands, U32 memoryOperandCount) {
+	const U32 opcode = 61, wordCount = 4;
+	output.push_back(wordCount + memoryOperandCount << 16 | opcode, resultType, resultId, pointer);
+	output.push_back_n(memoryOperands, memoryOperandCount);
+	return resultId;
+}
+void op_store(ArenaArrayList<SpvDword>& output, SpvId pointer, SpvId object, SpvDword* memoryOperands, U32 memoryOperandCount) {
+	const U32 opcode = 62, wordCount = 3;
+	output.push_back(wordCount + memoryOperandCount << 16 | opcode, pointer, object);
+	output.push_back_n(memoryOperands, memoryOperandCount);
+}
+
+SpvId op_access_chain(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, U32* indices, U32 numIndices) {
+	const U32 opcode = 65, wordCount = 4;
+	output.push_back(wordCount + numIndices << 16 | opcode, resultType, resultId, base);
+	output.push_back_n(indices, numIndices);
+	return resultId;
+}
+SpvId op_in_bounds_access_chain(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, U32* indices, U32 numIndices) {
+	const U32 opcode = 66, wordCount = 4;
+	output.push_back(wordCount + numIndices << 16 | opcode, resultType, resultId, base);
+	output.push_back_n(indices, numIndices);
+	return resultId;
+}
+SpvId op_ptr_access_chain(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, SpvId element, U32* indices, U32 numIndices) {
+	const U32 opcode = 67, wordCount = 5;
+	output.push_back(wordCount + numIndices << 16 | opcode, resultType, resultId, base, element);
+	output.push_back_n(indices, numIndices);
+	return resultId;
+}
+
+SpvId op_array_length(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId structure, U32 arrayMember) {
+	const U32 opcode = 68, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, structure, arrayMember);
+	return resultId;
+}
+
+SpvId op_function(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, U32 functionControl, SpvId functionType) {
+	const U32 opcode = 54, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, functionControl, functionType);
+	return resultId;
+}
+SpvId op_function_parameter(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId) {
+	const U32 opcode = 55, wordCount = 3;
+	SpvDword insn[]{ wordCount << 16 | opcode, resultType, resultId };
+	output.push_back_n(insn, ARRAY_COUNT(insn));
+	return resultId;
+}
+void op_function_end(ArenaArrayList<SpvDword>& output) {
+	const U32 opcode = 56, wordCount = 1;
+	output.push_back(wordCount << 16 | opcode);
+}
+SpvId op_function_call(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId function, SpvId* args, U32 argCount) {
+	const U32 opcode = 57, wordCount = 4;
+	SpvDword insn[]{ wordCount + argCount << 16 | opcode, resultType, resultId, function };
+	output.push_back_n(insn, ARRAY_COUNT(insn));
+	output.push_back_n(args, argCount);
+	return resultId;
+}
+void op_return(ArenaArrayList<SpvDword>& output) {
+	const U32 opcode = 253, wordCount = 1;
+	output.push_back(wordCount << 16 | opcode);
+}
+void op_return_value(ArenaArrayList<SpvDword>& output, SpvId value) {
+	const U32 opcode = 254, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode);
+	output.push_back(value);
+}
+void op_unreachable(ArenaArrayList<SpvDword>& output) {
+	const U32 opcode = 255, wordCount = 1;
+	output.push_back(wordCount << 16 | opcode);
+}
+
+SPV_UNARY_OP(op_i_negate, 126)
+SPV_UNARY_OP(op_u_negate, 126)
+SPV_UNARY_OP(op_s_negate, 126)
+SPV_UNARY_OP(op_f_negate, 127)
+SPV_BINARY_OP(op_i_add, 128)
+SPV_BINARY_OP(op_u_add, 128)
+SPV_BINARY_OP(op_s_add, 128)
+SPV_BINARY_OP(op_f_add, 129)
+SPV_BINARY_OP(op_i_sub, 130)
+SPV_BINARY_OP(op_u_sub, 130)
+SPV_BINARY_OP(op_s_sub, 130)
+SPV_BINARY_OP(op_f_sub, 131)
+SPV_BINARY_OP(op_i_mul, 132)
+SPV_BINARY_OP(op_u_mul, 132)
+SPV_BINARY_OP(op_s_mul, 132)
+SPV_BINARY_OP(op_f_mul, 133)
+SPV_BINARY_OP(op_u_div, 134)
+SPV_BINARY_OP(op_s_div, 135)
+SPV_BINARY_OP(op_f_div, 136)
+SPV_BINARY_OP(op_u_mod, 137)
+SPV_BINARY_OP(op_s_mod, 139)
+SPV_BINARY_OP(op_f_mod, 141)
+SPV_BINARY_OP(op_u_rem, 137)
+SPV_BINARY_OP(op_s_rem, 138)
+SPV_BINARY_OP(op_f_rem, 140)
+SPV_BINARY_OP(op_dot, 148)
+SPV_BINARY_OP(op_shift_right_logical, 194)
+SPV_BINARY_OP(op_shift_right_arithmetic, 195)
+SPV_BINARY_OP(op_shift_left_logical, 196)
+SPV_BINARY_OP(op_bit_or, 197)
+SPV_BINARY_OP(op_bit_xor, 198)
+SPV_BINARY_OP(op_bit_and, 199)
+SPV_BINARY_OP(op_i_add_carry, 149)
+SPV_UNARY_OP(op_bit_not, 200)
+SPV_UNARY_OP(op_logical_not, 168)
+SpvId op_bitfield_insert(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, SpvId insert, SpvId offset, SpvId count) {
+	const U32 opcode = 201, wordCount = 7;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, base, insert, offset, count);
+	return resultId;
+}
+SpvId op_bitfield_s_extract(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, SpvId offset, SpvId count) {
+	const U32 opcode = 202, wordCount = 6;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, base, offset, count);
+	return resultId;
+}
+SpvId op_bitfield_u_extract(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, SpvId offset, SpvId count) {
+	const U32 opcode = 203, wordCount = 6;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, base, offset, count);
+	return resultId;
+}
+SPV_UNARY_OP(op_bit_reverse, 204)
+SPV_UNARY_OP(op_bit_count, 205)
+
+SPV_BINARY_OP(op_i_equal, 170)
+SPV_BINARY_OP(op_u_equal, 170)
+SPV_BINARY_OP(op_s_equal, 170)
+SPV_BINARY_OP(op_i_not_equal, 171)
+SPV_BINARY_OP(op_u_not_equal, 171)
+SPV_BINARY_OP(op_s_not_equal, 171)
+SPV_BINARY_OP(op_u_greater_than, 172)
+SPV_BINARY_OP(op_s_greater_than, 173)
+SPV_BINARY_OP(op_u_greater_than_or_equal, 174)
+SPV_BINARY_OP(op_s_greater_than_or_equal, 175)
+SPV_BINARY_OP(op_u_less_than, 176)
+SPV_BINARY_OP(op_s_less_than, 177)
+SPV_BINARY_OP(op_u_less_than_or_equal, 178)
+SPV_BINARY_OP(op_s_less_than_or_equal, 179)
+SPV_BINARY_OP(op_f_equal, 180)
+SPV_BINARY_OP(op_f_equal_unordered, 181)
+SPV_BINARY_OP(op_f_not_equal, 182)
+SPV_BINARY_OP(op_f_not_equal_unordered, 183)
+SPV_BINARY_OP(op_f_less_than, 184)
+SPV_BINARY_OP(op_f_less_than_unordered, 185)
+SPV_BINARY_OP(op_f_greater_than, 186)
+SPV_BINARY_OP(op_f_greater_than_unordered, 187)
+SPV_BINARY_OP(op_f_less_than_or_equal, 188)
+SPV_BINARY_OP(op_f_less_than_or_equal_unordered, 189)
+SPV_BINARY_OP(op_f_greater_than_or_equal, 190)
+SPV_BINARY_OP(op_f_greater_than_or_equal_unordered, 191)
+SPV_UNARY_OP(op_any, 154)
+SPV_UNARY_OP(op_all, 155)
+
+SPV_UNARY_OP(op_convert_f_to_u, 109)
+SPV_UNARY_OP(op_convert_f_to_s, 110)
+SPV_UNARY_OP(op_convert_s_to_f, 111)
+SPV_UNARY_OP(op_convert_u_to_f, 112)
+SPV_UNARY_OP(op_u_convert, 113)
+SPV_UNARY_OP(op_s_convert, 114)
+SPV_UNARY_OP(op_f_convert, 115)
+
+SPV_UNARY_OP(op_bitcast, 124);
+SpvId op_vector_extract_dynamic(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId vector, SpvId index) {
+	const U32 opcode = 77, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, vector, index);
+	return resultId;
+}
+SpvId op_vector_insert_dynamic(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId vector, SpvId component, SpvId index) {
+	const U32 opcode = 78, wordCount = 6;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, vector, component, index);
+	return resultId;
+}
+SpvId op_vector_shuffle(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId vector1, SpvId vector2, U32* indices, U32 numIndices) {
+	const U32 opcode = 79, wordCount = 5;
+	output.push_back(wordCount + numIndices << 16 | opcode, resultType, resultId, vector1, vector2);
+	output.push_back_n(indices, numIndices);
+	return resultId;
+}
+SpvId op_composite_construct(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId* constituents, U32 numConstituents) {
+	const U32 opcode = 80, wordCount = 3;
+	output.push_back(wordCount + numConstituents << 16 | opcode, resultType, resultId);
+	output.push_back_n(constituents, numConstituents);
+	return resultId;
+}
+SpvId op_composite_extract(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId composite, U32* indices, U32 numIndices) {
+	const U32 opcode = 81, wordCount = 4;
+	output.push_back(wordCount + numIndices << 16 | opcode, resultType, resultId, composite);
+	output.push_back_n(indices, numIndices);
+	return resultId;
+}
+SpvId op_composite_insert(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId object, SpvId composite, U32* indices, U32 numIndices) {
+	const U32 opcode = 82, wordCount = 5;
+	output.push_back(wordCount + numIndices << 16 | opcode, resultType, resultId, object, composite);
+	output.push_back_n(indices, numIndices);
+	return resultId;
+}
+// What is the point of this op? Since SPIR-V is SSA shouldn't this be completely pointless?
+SPV_UNARY_OP(op_copy_object, 83);
+
+SpvId op_sampled_image(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId image, SpvId sampler) {
+	const U32 opcode = 86, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, image, sampler);
+	return resultId;
+}
+// TODO image operands
+SpvId op_image_sample_implicit_lod(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId sampledImage, SpvId coordinate) {
+	const U32 opcode = 87, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, sampledImage, coordinate);
+	return resultId;
+}
+
+SpvId op_phi(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId* variablesAndParents, U32 parentBlockCount) {
+	const U32 opcode = 245, wordCount = 3 + parentBlockCount * 2;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId);
+	output.push_back_n(variablesAndParents, parentBlockCount * 2);
+	return resultId;
+}
+void patch_phi(ArenaArrayList<SpvDword>& output, U32 offset, SpvId* variablesAndParents, U32 parentBlockCount) {
+	memcpy(&output.data[offset + 3], variablesAndParents, parentBlockCount * 2 * sizeof(SpvId));
+}
+void op_loop_merge(ArenaArrayList<SpvDword>& output, SpvId mergeBlock, SpvId continueTarget, LoopControl loopControl, U32* loopControlParams, U32 loopControlParamCount) {
+	const U32 opcode = 246, wordCount = 4 + loopControlParamCount;
+	output.push_back(wordCount << 16 | opcode, mergeBlock, continueTarget, loopControl);
+	output.push_back_n(loopControlParams, loopControlParamCount);
+}
+void op_selection_merge(ArenaArrayList<SpvDword>& output, SpvId mergeBlock, SelectionControl selectionControl) {
+	const U32 opcode = 247, wordCount = 3;
+	output.push_back(wordCount << 16 | opcode, mergeBlock, selectionControl);
+}
+SpvId op_label(ArenaArrayList<SpvDword>& output, SpvId resultId) {
+	const U32 opcode = 248, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode, resultId);
+	return resultId;
+}
+void op_branch(ArenaArrayList<SpvDword>& output, SpvId branchTarget) {
+	const U32 opcode = 249, wordCount = 2;
+	output.push_back(wordCount << 16 | opcode, branchTarget);
+}
+void op_branch_conditional(ArenaArrayList<SpvDword>& output, SpvId condition, SpvId trueTarget, SpvId falseTarget, U32 trueWeight = 0, U32 falseWeight = 0) {
+	const U32 opcode = 250, wordCount = trueWeight > 0 && falseWeight > 0 ? 6u : 4u;
+	output.push_back(wordCount << 16 | opcode, condition, trueTarget, falseTarget);
+	if (trueWeight > 0 && falseWeight > 0) {
+		output.push_back(trueWeight, falseWeight);
+	}
+}
+void op_kill(ArenaArrayList<SpvDword>& output) {
+	const U32 opcode = 252, wordCount = 1;
+	output.push_back(wordCount << 16 | opcode);
+}
+void op_terminate_invocation(ArenaArrayList<SpvDword>& output) {
+	const U32 opcode = 4416, wordCount = 1;
+	output.push_back(wordCount << 16 | opcode);
+}
+void op_demote_to_helper_invocation(ArenaArrayList<SpvDword>& output) {
+	const U32 opcode = 5380, wordCount = 1;
+	output.push_back(wordCount << 16 | opcode);
+}
+
+void op_decorate(ArenaArrayList<SpvDword>& output, SpvId target, Decoration decoration, U32* literals, U32 literalCount) {
+	const U32 opcode = 71, wordCount = 3 + literalCount;
+	output.push_back(wordCount << 16 | opcode, target, decoration);
+	output.push_back_n(literals, literalCount);
+}
+void op_member_decorate(ArenaArrayList<SpvDword>& output, SpvId structureType, U32 member, Decoration decoration, U32* literals, U32 literalCount) {
+	const U32 opcode = 72, wordCount = 4 + literalCount;
+	output.push_back(wordCount << 16 | opcode, structureType, member, decoration);
+	output.push_back_n(literals, literalCount);
+}
+
+SpvId op_dpdx(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId p) {
+	const U32 opcode = 207, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, p);
+	return resultId;
+}
+SpvId op_dpdy(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId p) {
+	const U32 opcode = 208, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, p);
+	return resultId;
+}
+SpvId op_fwidth(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId p) {
+	const U32 opcode = 209, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, p);
+	return resultId;
+}
+
+SpvId op_unpack_unorm4x8(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId p) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 64, &p, 1);
+}
+SpvId op_length(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 66, &x, 1);
+}
+SpvId op_distance(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId p0, SpvId p1) {
+	SpvId args[2]{ p0, p1 };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 67, args, 2);
+}
+SpvId op_cross(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 68, args, 2);
+}
+SpvId op_normalize(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 69, &x, 1);
+}
+SpvId op_f_min(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 37, args, 2);
+}
+SpvId op_u_min(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 38, args, 2);
+}
+SpvId op_s_min(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 39, args, 2);
+}
+SpvId op_f_max(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 40, args, 2);
+}
+SpvId op_u_max(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 41, args, 2);
+}
+SpvId op_s_max(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 42, args, 2);
+}
+SpvId op_f_clamp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId minVal, SpvId maxVal) {
+	SpvId args[3]{ x, minVal, maxVal };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 43, args, 3);
+}
+SpvId op_u_clamp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId minVal, SpvId maxVal) {
+	SpvId args[3]{ x, minVal, maxVal };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 44, args, 3);
+}
+SpvId op_s_clamp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId minVal, SpvId maxVal) {
+	SpvId args[3]{ x, minVal, maxVal };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 45, args, 3);
+}
+SpvId op_f_mix(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y, SpvId a) {
+	SpvId args[3]{ x, y, a };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 46, args, 3);
+}
+SpvId op_f_step(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId edge, SpvId x) {
+	SpvId args[2]{ edge, x };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 48, args, 2);
+}
+SpvId op_f_smoothstep(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId edge0, SpvId edge1, SpvId x) {
+	SpvId args[3]{ edge0, edge1, x };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 49, args, 3);
+}
+SpvId op_f_fma(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId a, SpvId b, SpvId c) {
+	SpvId args[3]{ a, b, c };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 50, args, 3);
+}
 
 }

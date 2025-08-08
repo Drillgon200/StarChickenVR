@@ -185,6 +185,9 @@ FINLINE F64 roundf64(F64 f) {
 FINLINE F64 fractf64(F64 f) {
 	return f - _mm_cvtsd_f64(_mm_round_pd(_mm_set_sd(f), _MM_ROUND_MODE_TOWARD_ZERO));
 }
+FINLINE F64 absf64(F64 f) {
+	return _mm_cvtsd_f64(_mm_and_pd(_mm_set_sd(f), _mm_castsi128_pd(_mm_set1_epi64x(0x7FFFFFFFFFFFFFFFULL))));
+}
 
 template<typename T>
 FINLINE T max(T a, T b) {
@@ -192,7 +195,7 @@ FINLINE T max(T a, T b) {
 }
 template<typename T, typename... C>
 FINLINE T max(T a, T b, C... c) {
-	return max(a > b ? a : b, c...);
+	return max(max(a, b), c...);
 }
 template<typename T>
 FINLINE T min(T a, T b) {
@@ -200,7 +203,7 @@ FINLINE T min(T a, T b) {
 }
 template<typename T, typename... C>
 FINLINE T min(T a, T b, C... c) {
-	return min(a < b ? a : b, c...);
+	return min(min(a, b), c...);
 }
 
 template<typename T>
@@ -209,16 +212,19 @@ FINLINE T clamp(T val, T low, T high) {
 }
 template<typename T>
 FINLINE T clamp01(T val) {
-	return clamp(val, static_cast<T>(0.0), static_cast<T>(1.0));
+	return clamp(val, T(0), T(1));
 }
 
 template<typename T>
 FINLINE T abs(T val) {
-	return val < T(0) ? -val : val;
+	return val < T{} ? -val : val;
 }
 
-FINLINE B32 epsilon_eq(F32 a, F32 b, F32 eps) {
+FINLINE bool epsilon_eq(F32 a, F32 b, F32 eps) {
 	return absf32(a - b) <= max(a, b) * eps;
+}
+FINLINE bool epsilon_eq(F64 a, F64 b, F64 eps) {
+	return absf64(a - b) <= max(a, b) * eps;
 }
 
 FINLINE U16 next_power_of_two(U16 x) {
@@ -232,12 +238,10 @@ FINLINE U64 next_power_of_two(U64 x) {
 }
 
 #pragma pack(push, 1)
-union V2F32 {
-	struct {
-		F32 x, y;
-	};
-	F32 v[2];
+struct V2F32 {
+	F32 x, y;
 };
+typedef V2F32 V2F;
 #pragma pack(pop)
 
 FINLINE V2F32 operator+(V2F32 a, V2F32 b) {
@@ -351,11 +355,19 @@ FINLINE V2F32 normalize(V2F32 v) {
 	F32 invLen = 1.0F / sqrtf32(v.x * v.x + v.y * v.y);
 	return V2F32{ v.x * invLen, v.y * invLen };
 }
-FINLINE B32 epsilon_eq(V2F32 a, V2F32 b, F32 epsilon) {
+FINLINE bool epsilon_eq(V2F32 a, V2F32 b, F32 epsilon) {
 	return epsilon_eq(a.x, b.x, epsilon) && epsilon_eq(a.y, b.y, epsilon);
 }
 FINLINE V2F32 get_orthogonal(V2F32 v) {
 	return V2F32{ -v.y, v.x };
+}
+template<>
+FINLINE V2F32 min<V2F32>(V2F32 a, V2F32 b) {
+	return V2F32{ a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y };
+}
+template<>
+FINLINE V2F32 max<V2F32>(V2F32 a, V2F32 b) {
+	return V2F32{ a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y };
 }
 
 void println_v2f32(V2F32 vec) {
@@ -367,11 +379,8 @@ void println_v2f32(V2F32 vec) {
 }
 
 #pragma pack(push, 1)
-union V3F32 {
-	struct {
-		F32 x, y, z;
-	};
-	F32 v[3];
+struct V3F32 {
+	F32 x, y, z;
 
 	FINLINE F32 length_sq() {
 		return x * x + y * y + z * z;
@@ -400,6 +409,7 @@ union V3F32 {
 	}
 };
 #pragma pack(pop)
+typedef V3F32 V3F;
 
 static constexpr V3F32 V3F32_UP{ 0.0F, 1.0F, 0.0F };
 static constexpr V3F32 V3F32_DOWN{ 0.0F, -1.0F, 0.0F };
@@ -452,6 +462,56 @@ FINLINE V3F32 operator/(F32 a, V3F32 b) {
 	return V3F32{ a / b.x, a / b.y, a / b.z };
 }
 
+FINLINE V3F32 operator+=(V3F32& a, V3F32 b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+	return a;
+}
+FINLINE V3F32 operator+=(V3F32& a, F32 b) {
+	a.x += b;
+	a.y += b;
+	a.z += b;
+	return a;
+}
+FINLINE V3F32 operator-=(V3F32& a, V3F32 b) {
+	a.x -= b.x;
+	a.y -= b.y;
+	a.z -= b.z;
+	return a;
+}
+FINLINE V3F32 operator-=(V3F32& a, F32 b) {
+	a.x -= b;
+	a.y -= b;
+	a.z -= b;
+	return a;
+}
+FINLINE V3F32 operator*=(V3F32& a, V3F32 b) {
+	a.x *= b.x;
+	a.y *= b.y;
+	a.z *= b.z;
+	return a;
+}
+FINLINE V3F32 operator*=(V3F32& a, F32 b) {
+	a.x *= b;
+	a.y *= b;
+	a.z *= b;
+	return a;
+}
+FINLINE V3F32 operator/=(V3F32& a, V3F32 b) {
+	a.x /= b.x;
+	a.y /= b.y;
+	a.z /= b.z;
+	return a;
+}
+FINLINE V3F32 operator/=(V3F32& a, F32 b) {
+	F32 invB = 1.0F / b;
+	a.x *= b;
+	a.y *= b;
+	a.z *= b;
+	return a;
+}
+
 
 FINLINE F32 dot(V3F32 a, V3F32 b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -463,54 +523,52 @@ FINLINE F32 length_sq(V3F32 v) {
 	return v.x * v.x + v.y * v.y + v.z * v.z;
 }
 FINLINE F32 distance_sq(V3F32 a, V3F32 b) {
-	return (a.x - b.x) * (a.y - b.y) * (a.z - b.z);
+	F32 dx = a.x - b.x;
+	F32 dy = a.y - b.y;
+	F32 dz = a.z - b.z;
+	return dx * dx + dy * dy + dz * dz;
 }
 FINLINE F32 length(V3F32 v) {
 	return sqrtf32(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 FINLINE F32 distance(V3F32 a, V3F32 b) {
-	return sqrtf32((a.x - b.x) * (a.y - b.y) * (a.z - b.z));
+	F32 dx = a.x - b.x;
+	F32 dy = a.y - b.y;
+	F32 dz = a.z - b.z;
+	return sqrtf32(dx * dx + dy * dy + dz * dz);
 }
 FINLINE V3F32 normalize(V3F32 v) {
 	F32 invLen = 1.0F / sqrtf32(v.x * v.x + v.y * v.y + v.z * v.z);
 	return V3F32{ v.x * invLen, v.y * invLen, v.z * invLen };
 }
+FINLINE V3F32 normalize_safe(V3F32 v, F32 epsilon) {
+	F32 lenSq = v.x * v.x + v.y * v.y + v.z * v.z;
+	if (lenSq < epsilon) {
+		return V3F{};
+	}
+	F32 invLen = 1.0F / sqrtf32(lenSq);
+	return V3F32{ v.x * invLen, v.y * invLen, v.z * invLen };
+}
+template<>
+FINLINE V3F32 min<V3F32>(V3F32 a, V3F32 b) {
+	return V3F32{ a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y, a.z < b.z ? a.z : b.z };
+}
+template<>
+FINLINE V3F32 max<V3F32>(V3F32 a, V3F32 b) {
+	return V3F32{ a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z };
+}
 
 DEBUG_OPTIMIZE_OFF
 
-void println_v3f32(V3F32 vec) {
-	print("(");
-	print_float(vec.x);
-	print(", ");
-	print_float(vec.y);
-	print(", ");
-	print_float(vec.z);
-	print(")\n");
-}
-
 struct RGBA8;
 #pragma pack(push, 1)
-union V4F32 {
-	struct {
-		F32 x, y, z, w;
-	};
-	F32 v[4];
+struct V4F32 {
+	F32 x, y, z, w;
 
 	RGBA8 to_rgba8();
 };
 #pragma pack(pop)
-
-void println_v4f32(V4F32 vec) {
-	print("(");
-	print_float(vec.x);
-	print(", ");
-	print_float(vec.y);
-	print(", ");
-	print_float(vec.z);
-	print(", ");
-	print_float(vec.w);
-	print(")\n");
-}
+typedef V4F32 V4F;
 
 // Not optimized, might be worth coming back to
 template<typename Vec>
@@ -549,6 +607,10 @@ F32 signed_distance_to_segment(V2F32 pos, V2F32 linePointA, V2F32 linePointB) {
 	return distance(pos, linePointA + clamp01(t) * lineDirection) * F32(signumf32(cross(lineDirection, pos - linePointA)));
 }
 
+F32 ray_intersection_2d(V2F32 posA, V2F32 dirA, V2F32 posB, V2F32 dirB) {
+	return cross(dirB, posB - posA) / cross(dirB, dirA);
+}
+
 DEBUG_OPTIMIZE_ON
 
 template<typename Vec>
@@ -574,11 +636,20 @@ FINLINE F32 vec2_angle(V2F32 a, V2F32 b) {
 struct QF32;
 
 struct AxisAngleF32 {
+	// axis assumed to be normalized
 	V3F32 axis;
 	F32 angle;
 
-	FINLINE QF32 to_quaternion();
+	FINLINE QF32 to_qf32();
+
+	FINLINE V3F32 transform(V3F32 v) {
+		F32 sinAngle;
+		F32 cosAngle = sincosf32(&sinAngle, angle);
+		// Rodrigues' formula. Construct a basis, rotate, then add back any distance lost along the axis.
+		return v * cosAngle + cross(axis, v) * sinAngle + axis * dot(axis, v) * (1.0F - cosAngle);
+	}
 };
+typedef AxisAngleF32 AxisAngleF;
 
 struct QF32 {
 	F32 x, y, z, w;
@@ -640,12 +711,16 @@ FINLINE QF32 operator*(QF32 a, QF32 b) {
 	return QF32{
 		a.w * b.x + b.w * a.x + (a.y * b.z - a.z * b.y),
 		a.w * b.y + b.w * a.y + (a.z * b.x - a.x * b.z),
-		a.w * b.z + b.w * a.y + (a.x * b.y - a.y * b.x),
+		a.w * b.z + b.w * a.z + (a.x * b.y - a.y * b.x),
 		a.w * b.w - (a.x * b.x + a.y * b.y + a.z * b.z)
 	};
 }
 
-FINLINE QF32 AxisAngleF32::to_quaternion() {
+FINLINE V3F32 operator*(QF32 a, V3F32 b) {
+	return a.transform(b);
+}
+
+FINLINE QF32 AxisAngleF32::to_qf32() {
 	// A quaternion is { v * sin(theta/2), cos(theta/2) }, where v is the axis and theta is the angle
 	F32 sinHalfAngle;
 	F32 cosHalfAngle = sincosf32(&sinHalfAngle, angle * 0.5F);
@@ -704,9 +779,9 @@ struct M2F32 {
 		return transform(vec);
 	}
 };
+typedef M2F32 M2F;
 
-// I don't think this counts as a 4x3 matrix, it's really a 4x4 matrix with the 4th row assumed to be 0, 0, 0, 1
-// I should come up with a better name for this
+// Not really a 4x3 matrix, it's a 4x4 matrix with the 4th row assumed to be 0, 0, 0, 1
 #pragma pack(push, 1)
 struct M4x3F32 {
 	F32 m00, m01, m02, x,
@@ -860,7 +935,7 @@ struct M4x3F32 {
 		return m00 * (m11 * m22 - m12 * m21) - m01 * (m10 * m22 - m12 * m20) + m02 * (m10 * m21 - m11 * m20);
 	}
 
-	FINLINE M4x3F32& invert() {
+	M4x3F32& invert() {
 		// 22 mul, 17 fma, 3 add, 1 div
 		// Calculate the minor for each element in the 3x3 upper left corner, multiplied by the cofactor
 		F32 t00 = m11 * m22 - m12 * m21;
@@ -894,41 +969,6 @@ struct M4x3F32 {
 		y = -m10 * tx - m11 * ty - m12 * tz;
 		z = -m20 * tx - m21 * ty - m22 * tz;
 
-		return *this;
-	}
-
-	// This function is untested, and I'm not actually sure if I did the math right
-	FINLINE M4x3F32& invert_orthogonal() {
-		// 12 mul, 6 fma, 3 add, 3 rsqrt
-		F32 invXScale = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(m00 * m00 + m01 * m01 + m02 * m02)));
-		F32 invYScale = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(m10 * m10 + m11 * m11 + m12 * m12)));
-		F32 invZScale = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(m20 * m20 + m21 * m21 + m22 * m22)));
-		invXScale *= invXScale;
-		invYScale *= invYScale;
-		invZScale *= invZScale;
-
-		F32 t01 = m01;
-		F32 t02 = m02;
-		F32 t12 = m12;
-
-		// Multiply by inverse scale squared and transpose
-		m00 = m00 * invXScale;
-		m01 = m10 * invYScale;
-		m02 = m20 * invZScale;
-		m10 = t01 * invXScale;
-		m11 = m11 * invYScale;
-		m12 = m21 * invZScale;
-		m20 = t02 * invXScale;
-		m21 = t12 * invYScale;
-		m22 = m22 * invZScale;
-
-		F32 tx = x;
-		F32 ty = y;
-		F32 tz = z;
-		// Inverse translation part
-		x = -m00 * tx - m01 * ty - m02 * tz;
-		y = -m10 * tx - m11 * ty - m12 * tz;
-		z = -m20 * tx - m21 * ty - m22 * tz;
 		return *this;
 	}
 
@@ -980,6 +1020,7 @@ struct M4x3F32 {
 	}
 };
 #pragma pack(pop)
+typedef M4x3F32 M4x3F;
 
 FINLINE M4x3F32 operator*(const M4x3F32& a, const M4x3F32& b) {
 	M4x3F32 dst;
@@ -1032,6 +1073,57 @@ void println_m4x3f32(M4x3F32 m) {
 	print(", ");
 	print_float(m.z);
 	print("]\n\n");
+}
+
+struct M3x3FSymmetric {
+	F32 m00, m01, m02,
+		     m11, m12,
+		          m22;
+
+	// Solves for x in m * x = v using an LDLT decomposition. Matrix must be positive definite.
+	V3F solve_ldlt(V3F v) const {
+		// Compute LDLT using row reductions. Always valid (no divide by 0) if positive definite
+		F32 d00 = m00;
+		F32 d00Inv = 1.0F / d00;
+		F32 l01 = m01 * d00Inv;
+		F32 l02 = m02 * d00Inv;
+		F32 d11 = m11 - l01 * m01;
+		F32 d11Inv = 1.0F / d11;
+		F32 l12 = (m12 - l02 * m01) * d11Inv;
+		F32 d22 = m22 - l02 * m02 - l12 * (m12 - m02 * l01);
+		F32 d22Inv = 1.0F / d22;
+
+		// Solve for q in v = L * q
+		F32 x = v.x;
+		F32 y = v.y - l01 * x;
+		F32 z = v.z - l02 * x - l12 * y;
+		// Solve for r in q = D * r
+		x *= d00Inv;
+		y *= d11Inv;
+		z *= d22Inv;
+		// Solve for x in r = LT * x
+		z = z;
+		y = y - l12 * z;
+		x = x - l01 * y - l02 * z;
+		return V3F{ x, y, z };
+	}
+
+	M3x3FSymmetric& operator+=(const M3x3FSymmetric& other) {
+		m00 += other.m00;
+		m01 += other.m01;
+		m02 += other.m02;
+		m11 += other.m11;
+		m12 += other.m12;
+		m22 += other.m22;
+		return *this;
+	}
+};
+
+M3x3FSymmetric operator+(const M3x3FSymmetric& a, const M3x3FSymmetric& b) {
+	return M3x3FSymmetric{ a.m00 + b.m00, a.m01 + b.m01, a.m02 + b.m02, a.m11 + b.m11, a.m12 + b.m12, a.m22 + b.m22 };
+}
+M3x3FSymmetric operator*(F32 a, const M3x3FSymmetric& b) {
+	return M3x3FSymmetric{ a * b.m00, a * b.m01, a * b.m02, a * b.m11, a * b.m12, a * b.m22 };
 }
 
 struct PerspectiveProjection {
@@ -1096,6 +1188,20 @@ struct PerspectiveProjection {
 		F32 sinDown;
 		F32 cosDown = sincosf32(&sinDown, fovDown);
 		F32 downY = sinDown / cosDown;
+		xScale = 1.0F / ((rightX - leftX) * 0.5F);
+		xZBias = (rightX + leftX) / (rightX - leftX);
+		yScale = 1.0F / ((upY - downY) * 0.5F);
+		yZBias = (upY + downY) / (upY - downY);
+		nearPlane = nearZ;
+	}
+
+	FINLINE void project_perspective(F32 nearZ, F32 fovX, F32 yToXRatio) {
+		F32 sinRight;
+		F32 cosRight = sincosf32(&sinRight, fovX * 0.5F);
+		F32 rightX = sinRight / cosRight;
+		F32 leftX = -rightX;
+		F32 upY = rightX * yToXRatio;
+		F32 downY = -upY;
 		xScale = 1.0F / ((rightX - leftX) * 0.5F);
 		xZBias = (rightX + leftX) / (rightX - leftX);
 		yScale = 1.0F / ((upY - downY) * 0.5F);
@@ -1291,7 +1397,7 @@ FINLINE Rng2F32 rng_intersect(Rng2F32 a, Rng2F32 b) {
 FINLINE F32 rng_area(Rng2F32 rng) {
 	return (rng.maxX - rng.minX) * (rng.maxY - rng.minY);
 }
-FINLINE B32 rng_contains_point(Rng2F32 rng, V2F32 v) {
+FINLINE bool rng_contains_point(Rng2F32 rng, V2F32 v) {
 	return v.x >= rng.minX && v.x <= rng.maxX && v.y >= rng.minY && v.y <= rng.maxY;
 }
 

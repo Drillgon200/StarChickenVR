@@ -233,7 +233,7 @@ SignedDistance numerical_distance_solve(V2F32 pos, const T& producer, F32 eps) {
 	const U32 NUM_ITERATIONS = 32;
 
 	// Check a bunch of points along the curve, find the closest one.
-	SignedDistance minDist{ &producer.header, 0.0F, F32_LARGE, 0};
+	SignedDistance minDist{ &producer.header, 0.0F, F32_LARGE, 0 };
 	F32 iteration = 0.0F;
 	for (U32 i = 0; i < NUM_ITERATIONS; i++) {
 		F32 iN = F32(i) / F32(NUM_ITERATIONS - 1);

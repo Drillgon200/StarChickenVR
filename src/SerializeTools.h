@@ -4,22 +4,30 @@
 
 namespace SerializeTools {
 
-FINLINE B32 is_whitespace(char c) {
+FINLINE bool is_whitespace(char c) {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
 }
-FINLINE B32 is_digit(char c) {
+FINLINE bool is_digit(char c) {
 	return c >= '0' && c <= '9';
 }
-FINLINE B32 is_hex_digit(char c) {
+FINLINE bool is_hex_digit(char c) {
 	return c >= '0' && c <= '9' || c >= 'A' && c <= 'F' || c >= 'a' && c <= 'f';
 }
-FINLINE B32 is_alpha(char c) {
+FINLINE U32 hex_digit_to_u32(char c) {
+	return U32(c >= '0' && c <= '9' ? c - '0' :
+		   c >= 'A' && c <= 'F' ? c - 'A' + 10 :
+		   c >= 'a' && c <= 'f' ? c - 'a' + 10 : 0);
+}
+FINLINE bool is_alpha(char c) {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
 }
-FINLINE B32 is_upper_alpha(char c) {
+FINLINE bool is_alphadigit(char c) {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
+}
+FINLINE bool is_upper_alpha(char c) {
 	return c >= 'A' && c <= 'Z';
 }
-FINLINE B32 is_lower_alpha(char c) {
+FINLINE bool is_lower_alpha(char c) {
 	return c >= 'a' && c <= 'z';
 }
 
@@ -28,6 +36,122 @@ FINLINE StrA& skip_whitespace(StrA* str) {
 		str->str++, str->length--;
 	}
 	return *str;
+}
+
+enum IntParseError : U32 {
+	INT_PARSE_SUCCESS,
+	INT_PARSE_BAD_INPUT,
+	INT_PARSE_OVERFLOW
+};
+
+U64 POWER_OF_10_TABLE[20] {
+	1ULL,
+	10ULL,
+	100ULL,
+	1000ULL,
+	10000ULL,
+	100000ULL,
+	1000000ULL,
+	10000000ULL,
+	100000000ULL,
+	1000000000ULL,
+	10000000000ULL,
+	100000000000ULL,
+	1000000000000ULL,
+	10000000000000ULL,
+	100000000000000ULL,
+	1000000000000000ULL,
+	10000000000000000ULL,
+	100000000000000000ULL,
+	1000000000000000000ULL,
+	10000000000000000000ULL,
+};
+
+IntParseError parse_u64(U64* out, StrA* str, U32 baseIn = 0) {
+	const char* src = str->str;
+	U64 srcLen = str->length;
+	if (srcLen == 0) {
+		return INT_PARSE_BAD_INPUT;
+	}
+	U32 base = 10;
+	U64 firstOverflow = U64_MAX / 10ull + 1;
+	if (srcLen >= 2 && src[0] == '0' && src[1] == 'x') {
+		base = 16;
+		firstOverflow = 1ull << 60;
+		src += 2, srcLen -= 2;
+	} else if (srcLen >= 2 && src[0] == '0' && src[1] == 'b') {
+		base = 2;
+		firstOverflow = 1ull << 63;
+		src += 2, srcLen -= 2;
+	} else if (baseIn != 0) {
+		base = baseIn;
+	}
+	if (srcLen == 0) {
+		return INT_PARSE_BAD_INPUT;
+	}
+	U64 num = 0;
+	while (srcLen && is_hex_digit(src[0])) {
+		if (num >= firstOverflow) {
+			return INT_PARSE_OVERFLOW;
+		}
+		U64 digit = U64(hex_digit_to_u32(src[0]));
+		if (digit >= base) {
+			break;
+		}
+		U64 shifted = num * base;
+		num = shifted + digit;
+		if (num < shifted) {
+			return INT_PARSE_OVERFLOW;
+		}
+		src++, srcLen--;
+	}
+	I32 exponent = 0;
+	if (srcLen && src[0] == 'e') {
+		src++, srcLen--;
+		B32 exponentNegative = false;
+		if (srcLen && src[0] == '-' || src[0] == '+') {
+			exponentNegative = src[0] == '-';
+			src++, srcLen--;
+		}
+		if (!srcLen || !is_digit(src[0])) {
+			return INT_PARSE_BAD_INPUT;
+		}
+		while (srcLen && is_digit(src[0])) {
+			exponent = exponent * 10 + (src[0] - '0');
+			if (exponent > 19) {
+				return INT_PARSE_OVERFLOW;
+			}
+			src++, srcLen--;
+		}
+		if (exponentNegative) {
+			num /= POWER_OF_10_TABLE[exponent];
+		} else {
+			U64 exponentiatedNum = num * POWER_OF_10_TABLE[exponent];
+			if (exponentiatedNum / POWER_OF_10_TABLE[exponent] != num) {
+				return INT_PARSE_OVERFLOW;
+			}
+			num = exponentiatedNum;
+		}
+	}
+	*out = num;
+	str->str = src;
+	str->length = srcLen;
+	return INT_PARSE_SUCCESS;
+}
+
+
+IntParseError parse_u64(U64* out, StrA str, U32 baseIn = 0) {
+	return parse_u64(out, &str, baseIn);
+}
+
+IntParseError parse_i64(I64* out, StrA* str) {
+	//TODO implement
+	__debugbreak();
+	return INT_PARSE_SUCCESS;
+}
+
+void serialize_i64(char* dstBuffer, U32* dstBufferSize, I64 startValue) {
+	__debugbreak();
 }
 
 const I32 POWER_OF_5_TABLE_OFFSET = 342;
@@ -39,7 +163,7 @@ const U64 POWER_OF_5_TABLE[]{
 // Slightly modified to make implementation easier, trading off a small amount of accuracy
 // I don't care very much if we sometimes round the wrong way
 // https://arxiv.org/pdf/2101.11408.pdf
-B32 parse_f64(F64* f64Out, StrA* str) {
+bool parse_f64(F64* f64Out, StrA* str) {
 	skip_whitespace(str);
 	if (str->length == 0) {
 		return false;
@@ -218,11 +342,17 @@ B32 parse_f64(F64* f64Out, StrA* str) {
 	*f64Out = bitcast<F64>(U64(isNegative) << 63ull | U64(expectedBinaryExponent + 1023) << 52ull | (mostSignificantBits & ~(1ull << 52ull)));
 	return true;
 }
-B32 parse_f32(F32* f32Out, StrA* str) {
+bool parse_f64(F64* f64Out, StrA str) {
+	return parse_f64(f64Out, &str);
+}
+bool parse_f32(F32* f32Out, StrA* str) {
 	F64 f64;
-	B32 result = parse_f64(&f64, str);
+	bool result = parse_f64(&f64, str);
 	*f32Out = F32(f64);
 	return result;
+}
+bool parse_f32(F32* f32Out, StrA str) {
+	return parse_f32(f32Out, &str);
 }
 
 void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue) {

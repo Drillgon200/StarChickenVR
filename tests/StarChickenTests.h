@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DrillLibTests.h"
+#include "ShaderCompilerTests.h"
 
 namespace StarChickenTests {
 
@@ -17,6 +18,10 @@ void run_all() {
 			TEST_GROUP("strafmt"a) {
 				DrillLibTests::strafmt_basic();
 			}
+		}
+		TEST_GROUP("Shader Compiler"a) {
+			ShaderCompilerTests::solo_test();
+			//ShaderCompilerTests::general_tests();
 		}
 	}
 }

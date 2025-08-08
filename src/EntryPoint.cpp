@@ -8,16 +8,16 @@
 #include "../tests/StarChickenTests.h"
 #endif
 
-
 // It is actually possible to initialize with no import libraries (see link)
 // However, it requires going through a lot of undocumented windows stuff that could change at any time
-// and I don't want my program to break on some future version of windows just because I didn't want to link to windows at compile time
+// and I don't want my program to break on some future version of windows just because I didn't want to link to kernel32.dll at compile time
 // https://hero.handmade.network/forums/code-discussion/t/129-howto_-_building_without_import_libraries
 extern "C" void __stdcall mainCRTStartup() {
 	const U32 failToInitializeDrillLib = 2;
 	U32 result = failToInitializeDrillLib;
 	if (drill_lib_init()) {
 		PNG::init_loader();
+
 #ifdef TESTING_ENABLE
 		StarChickenTests::run_all();
 #else
