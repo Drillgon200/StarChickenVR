@@ -108,6 +108,7 @@ void do_timestep(F32 dt, U32 iterations, F32 alpha, F32 beta, F32 gamma) {
 	F32 lambdaMin = 0.0F;
 	F32 lambdaMax = 1000000.0F;
 	F32 stiffnessStart = 1.0F;
+	F32 stiffnessMax = 1000000.0F;
 	
 	F64 dt64 = F64(dt);
 	F32 dtSq = F32(dt64 * dt64);
@@ -192,10 +193,10 @@ void do_timestep(F32 dt, U32 iterations, F32 alpha, F32 beta, F32 gamma) {
 			if (hardConstraint) {
 				c.lambda = clamp(c.stiffness * energy + c.lambda, lambdaMin, lambdaMax);
 				if (c.lambda > lambdaMin && c.lambda < lambdaMax) {
-					c.stiffness += beta * absf32(energy);
+					c.stiffness = min(stiffnessMax, c.stiffness + beta * absf32(energy));
 				}
 			} else {
-				c.stiffness = min(c.finiteStiffness, c.stiffness + beta * absf32(energy));
+				c.stiffness = min(stiffnessMax, c.finiteStiffness, c.stiffness + beta * absf32(energy));
 			}
 		}
 	}

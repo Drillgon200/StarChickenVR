@@ -315,6 +315,7 @@ struct Tessellator {
 		return *this;
 	}
 	
+	// Unfinished, will not work
 	Tessellator& debug_line(V3F start, V3F end, V4F color = V4F{ 1.0F, 0.0F, 0.0F, 1.0F }) {
 		V3F v = end - start;
 		F32 dist = length(v);

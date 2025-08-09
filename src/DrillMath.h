@@ -654,6 +654,14 @@ typedef AxisAngleF32 AxisAngleF;
 struct QF32 {
 	F32 x, y, z, w;
 
+	FINLINE QF32& set_identity() {
+		x = 0.0F;
+		y = 0.0F;
+		z = 0.0F;
+		w = 1.0F;
+		return *this;
+	}
+
 	FINLINE QF32& from_axis_angle(AxisAngleF32 axisAngle) {
 		F32 sinHalfAngle;
 		F32 cosHalfAngle = sincosf32(&sinHalfAngle, axisAngle.angle * 0.5F);
@@ -666,7 +674,7 @@ struct QF32 {
 
 	// https://www.3dgep.com/understanding-quaternions/
 	// https://fgiesen.wordpress.com/2019/02/09/rotating-a-single-vector-using-a-quaternion/
-	FINLINE V3F32 transform(V3F32 v) {
+	FINLINE V3F32 transform(V3F32 v) const {
 		F32 x2 = x + x;
 		F32 y2 = y + y;
 		F32 z2 = z + z;
@@ -680,24 +688,24 @@ struct QF32 {
 		};
 	}
 
-	FINLINE QF32 conjugate() {
+	FINLINE QF32 conjugate() const {
 		return QF32{ -x, -y, -z, w };
 	}
 
-	FINLINE F32 magnitude_sq() {
+	FINLINE F32 magnitude_sq() const {
 		return x * x + y * y + z * z + w * w;
 	}
 
-	FINLINE F32 magnitude() {
+	FINLINE F32 magnitude() const {
 		return sqrtf32(x * x + y * y + z * z + w * w);
 	}
 
-	FINLINE QF32 normalize() {
+	FINLINE QF32 normalize() const {
 		F32 invMagnitude = 1.0F / magnitude();
 		return QF32{ x * invMagnitude, y * invMagnitude, z * invMagnitude, w * invMagnitude };
 	}
 
-	FINLINE QF32 inverse() {
+	FINLINE QF32 inverse() const {
 		F32 invMagSq = 1.0F / magnitude_sq();
 		return QF32{ -x * invMagSq, -y * invMagSq, -z * invMagSq, w * invMagSq };
 	}
@@ -984,11 +992,19 @@ struct M4x3F32 {
 		return *this;
 	}
 
-	FINLINE V3F32 transform(V3F32 vec) const {
+	FINLINE V3F32 transform_pos(V3F32 pos) const {
 		return V3F32{
-			x + m00 * vec.x + m01 * vec.y + m02 * vec.z,
-			y + m10 * vec.x + m11 * vec.y + m12 * vec.z,
-			z + m20 * vec.x + m21 * vec.y + m22 * vec.z
+			x + m00 * pos.x + m01 * pos.y + m02 * pos.z,
+			y + m10 * pos.x + m11 * pos.y + m12 * pos.z,
+			z + m20 * pos.x + m21 * pos.y + m22 * pos.z
+		};
+	}
+
+	FINLINE V3F32 transform_vec(V3F32 vec) const {
+		return V3F32{
+			m00 * vec.x + m01 * vec.y + m02 * vec.z,
+			m10 * vec.x + m11 * vec.y + m12 * vec.z,
+			m20 * vec.x + m21 * vec.y + m22 * vec.z
 		};
 	}
 
@@ -1040,7 +1056,7 @@ FINLINE M4x3F32 operator*(const M4x3F32& a, const M4x3F32& b) {
 }
 
 FINLINE V3F32 operator*(const M4x3F32& a, const V3F32& b) {
-	return a.transform(b);
+	return a.transform_pos(b);
 }
 
 DEBUG_OPTIMIZE_OFF

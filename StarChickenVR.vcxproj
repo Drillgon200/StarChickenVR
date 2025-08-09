@@ -354,6 +354,8 @@
     <ClInclude Include="src\EditorUI.h" />
     <ClInclude Include="src\MSDFGenerator.h" />
     <ClInclude Include="src\physics\Physics.h" />
+    <ClInclude Include="src\physics\RigidBody.h" />
+    <ClInclude Include="src\physics\SAT.h" />
     <ClInclude Include="src\ResourceLoading.h" />
     <ClInclude Include="src\ResourceLoading_decl.h" />
     <ClInclude Include="src\RISCVLib.h" />

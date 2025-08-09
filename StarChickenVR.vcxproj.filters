@@ -140,6 +140,12 @@
     <ClInclude Include="src\physics\Physics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\physics\SAT.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\physics\RigidBody.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />

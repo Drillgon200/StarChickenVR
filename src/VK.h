@@ -1582,6 +1582,10 @@ struct UIVertex {
 	U32 texIdx;
 	U32 flags;
 };
+struct DebugVertex {
+	V3F pos;
+	U32 color;
+};
 #pragma pack(pop)
 
 void load_pipelines_and_descriptors() {
