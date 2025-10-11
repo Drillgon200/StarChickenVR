@@ -346,6 +346,8 @@
     <ClInclude Include="external\vulkan\vk_platform.h" />
     <ClInclude Include="external\vulkan\vulkan.h" />
     <ClInclude Include="external\vulkan\vulkan_core.h" />
+    <ClInclude Include="resources\shaders\cubemap_convolve.dsl" />
+    <ClInclude Include="src\CubemapGen.h" />
     <ClInclude Include="src\DrillLib.h" />
     <ClInclude Include="src\DrillLibDefs.h" />
     <ClInclude Include="src\DrillMath.h" />

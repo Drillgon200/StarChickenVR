@@ -288,6 +288,10 @@ struct GPUModelInfo {
 	U32 transformIdx;
 	I32 verticesOffset;
 };
+struct CubemapConvolveInfo {
+	V2U inputDim;
+	V2U outputDim;
+};
 #pragma pack(pop)
 
 struct FramebufferAttachment {
@@ -341,6 +345,7 @@ struct DescriptorSet {
 	DescriptorSet& uniform_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
 	DescriptorSet& sampler(U32 bindingIndex, VkShaderStageFlags stageFlags);
 	DescriptorSet& texture_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize);
+	DescriptorSet& storage_image(U32 bindingIdx, VkShaderStageFlags stageFlags);
 
 	void build();
 

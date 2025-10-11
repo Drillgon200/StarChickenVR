@@ -1434,8 +1434,8 @@ struct DSLCompiler {
 					TCId jumpOverRunAfterLoop = tc_unary(TC_OP_TC_JMP, 0, Token{});
 					runAfterLoop = tcCode.size;
 					parse_expression(I32_MAX);
-					tcCode.data[jumpOverRunAfterLoop].operands[0] = tcCode.size;
 					runAfterLoopJmpBack = tc_unary(TC_OP_TC_JMP, 0, Token{});
+					tcCode.data[jumpOverRunAfterLoop].operands[0] = tcCode.size;
 				} else {
 					TCId loopStatement = tc_unary(TC_OP_CONDITIONAL_LOOP, 0, Token{});
 					begin_scope(); // Unclear if this scope is necessary
@@ -1443,11 +1443,12 @@ struct DSLCompiler {
 					tcCode.data[loopStatement].operands[0] = condition;
 				}
 				tc_nullary(TC_OP_BLOCK_END, Token{});
-				parse_block();
+				parse_scoped_block();
 				end_scope();
 				tc_nullary(TC_OP_BLOCK_END, Token{});
 				if (runAfterLoop != TC_INVALID_ID) {
 					tc_unary(TC_OP_TC_JMP, runAfterLoop, Token{});
+					tcCode.data[runAfterLoopJmpBack].operands[0] = tcCode.size;
 				}
 				tc_nullary(TC_OP_BLOCK_END, Token{});
 
@@ -1911,7 +1912,10 @@ struct DSLCompiler {
 	);\
 	ADD_SINGLE_OP_UNARY_OPERATOR("dpdx"a, type, typeId, op_dpdx);\
 	ADD_SINGLE_OP_UNARY_OPERATOR("dpdy"a, type, typeId, op_dpdy);\
-	ADD_SINGLE_OP_UNARY_OPERATOR("fwidth"a, type, typeId, op_fwidth);
+	ADD_SINGLE_OP_UNARY_OPERATOR("fwidth"a, type, typeId, op_fwidth);\
+	ADD_MULTI_OP_BINARY_OPERATOR("atan2"a, type, typeId, typeId, \
+		return (op_f_atan2(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1])); \
+	);
 	
 
 		ScopeContext& scope = allScopes.data[currentScope];
@@ -2007,14 +2011,19 @@ struct DSLCompiler {
 		ADD_DEFAULT_FLOAT_OPS(f32Type, f32Id);
 
 		ADD_MULTI_OP_UNARY_OPERATOR("I32.<init>"a, i32Type, i32Id, return params[0];);
-		ADD_SINGLE_OP_UNARY_OPERATOR("I32.<init>"a, i32Type, u32Id, op_bitcast);
-		ADD_SINGLE_OP_UNARY_OPERATOR("I32.<init>"a, i32Type, f32Id, op_convert_f_to_s);
-		ADD_SINGLE_OP_UNARY_OPERATOR("U32.<init>"a, u32Type, i32Id, op_bitcast);
 		ADD_MULTI_OP_UNARY_OPERATOR("U32.<init>"a, u32Type, u32Id, return params[0];);
-		ADD_SINGLE_OP_UNARY_OPERATOR("U32.<init>"a, u32Type, f32Id, op_convert_f_to_u);
-		ADD_SINGLE_OP_UNARY_OPERATOR("F32.<init>"a, f32Type, i32Id, op_convert_s_to_f);
-		ADD_SINGLE_OP_UNARY_OPERATOR("F32.<init>"a, f32Type, u32Id, op_convert_u_to_f);
 		ADD_MULTI_OP_UNARY_OPERATOR("F32.<init>"a, f32Type, f32Id, return params[0];);
+
+
+#define ADD_UNARY_CASTS(i32GenType, u32GenType, f32GenType, i32GenTypeId, u32GenTypeId, f32GenTypeId, i32Name, u32Name, f32Name)\
+		ADD_SINGLE_OP_UNARY_OPERATOR(i32Name ".<init>"a, i32GenType, u32GenTypeId, op_bitcast);\
+		ADD_SINGLE_OP_UNARY_OPERATOR(i32Name ".<init>"a, i32GenType, f32GenTypeId, op_convert_f_to_s);\
+		ADD_SINGLE_OP_UNARY_OPERATOR(u32Name ".<init>"a, u32GenType, i32GenTypeId, op_bitcast);\
+		ADD_SINGLE_OP_UNARY_OPERATOR(u32Name ".<init>"a, u32GenType, f32GenTypeId, op_convert_f_to_u);\
+		ADD_SINGLE_OP_UNARY_OPERATOR(f32Name ".<init>"a, f32GenType, i32GenTypeId, op_convert_s_to_f);\
+		ADD_SINGLE_OP_UNARY_OPERATOR(f32Name ".<init>"a, f32GenType, u32GenTypeId, op_convert_u_to_f);
+
+		ADD_UNARY_CASTS(i32Type, u32Type, f32Type, i32Id, u32Id, f32Id, "I32", "U32", "F32");
 
 #define ADD_BINARY_VEC_SPLAT_OP(opName, vecType, numElements, scalarTypeId, opFunc)\
 	ADD_MULTI_OP_BINARY_OPERATOR(opName, vecType, scalarTypeId, (vecType)->id,\
@@ -2138,6 +2147,10 @@ struct DSLCompiler {
 		ADD_V3_CTORS(V3F32, v3f32Type, f32Id);
 		ADD_V4_CTORS(V4F32, v4f32Type, f32Id);
 
+		ADD_UNARY_CASTS(&v2i32Type->type, &v2u32Type->type, &v2f32Type->type, v2i32Id, v2u32Id, v2f32Id, "V2I32", "V2U32", "V2F32");
+		ADD_UNARY_CASTS(&v3i32Type->type, &v3u32Type->type, &v3f32Type->type, v3i32Id, v3u32Id, v3f32Id, "V3I32", "V3U32", "V3F32");
+		ADD_UNARY_CASTS(&v4i32Type->type, &v4u32Type->type, &v4f32Type->type, v4i32Id, v4u32Id, v4f32Id, "V4I32", "V4U32", "V4F32");
+
 		scope.typeNameToType.insert("V2F"a, &v2f32Type->type);
 		scope.typeNameToType.insert("V3F"a, &v3f32Type->type);
 		scope.typeNameToType.insert("V4F"a, &v4f32Type->type);
@@ -2184,6 +2197,7 @@ struct DSLCompiler {
 #undef ADD_VECTOR_INT_TYPE
 #undef ADD_VECTOR_TYPE
 #undef ADD_BINARY_VEC_SPLAT_OP
+#undef ADD_UNARY_CASTS
 #undef ADD_DEFAULT_FLOAT_OPS
 #undef ADD_DEFAULT_BIT_OPS
 #undef ADD_DEFAULT_OPS
@@ -2541,7 +2555,7 @@ struct DSLCompiler {
 				else if (cfg.consume("2D"a)) { imageType.dimension = DIMENSIONALITY_2D; }
 				else if (cfg.consume("3D"a)) { imageType.dimension = DIMENSIONALITY_3D; }
 				else if (cfg.consume("Cube"a)) { imageType.dimension = DIMENSIONALITY_CUBE; }
-				else if (cfg.consume("Rect"a)) { imageType.dimension = DIMENSIONALITY_RECT; }
+				//else if (cfg.consume("Rect"a)) { imageType.dimension = DIMENSIONALITY_RECT; } // rect appears to be some legacy OpenGL cruft we don't need
 				else if (cfg.consume("Buffer"a)) { imageType.dimension = DIMENSIONALITY_BUFFER; }
 				else if (cfg.consume("SubpassData"a)) { imageType.dimension = DIMENSIONALITY_SUBPASS_DATA; }
 				else { imageType.dimension = DIMENSIONALITY_Invalid; }
@@ -2606,41 +2620,75 @@ struct DSLCompiler {
 					imageType.type.typeName = name;
 					imageType.type.id = nextSpvId++;
 					if (imageType.dimension != DIMENSIONALITY_BUFFER && imageType.dimension != DIMENSIONALITY_SUBPASS_DATA) {
-						imageType.sampledImageType = arena->zalloc<Type>(1);
-						imageType.sampledImageType->typeClass = TYPE_CLASS_SAMPLED_IMAGE;
-						imageType.sampledImageType->id = nextSpvId++;
+						if (imageType.sampled == 2) { // Storage image
+							SpvId coordTypeId = imageType.dimension == DIMENSIONALITY_1D ? defaultTypeU32->id :
+								imageType.dimension == DIMENSIONALITY_2D ? reinterpret_cast<ScalarType*>(defaultTypeU32)->v2Type->type.id :
+								imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? reinterpret_cast<ScalarType*>(defaultTypeU32)->v3Type->type.id :
+								reinterpret_cast<ScalarType*>(defaultTypeU32)->v4Type->type.id;
 
-						SpvId* argTypes = arena->alloc<SpvId>(2);
-						argTypes[0] = imageType.type.id;
-						argTypes[1] = defaultTypeSampler->id;
-						ProcedureType signature{ ProcedureIdentifier{ "SampledImage"a, argTypes, 2 }, imageType.sampledImageType };
-						allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
-							return op_sampled_image(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
-						} }));
+							SpvId* argTypes = arena->alloc<SpvId>(2);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = coordTypeId;
+							ProcedureType signature{ ProcedureIdentifier{ "read_image"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_image_read(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
 
-						SpvId coordTypeId = imageType.dimension == DIMENSIONALITY_1D ? defaultTypeF32->id :
-							imageType.dimension == DIMENSIONALITY_2D ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v2Type->type.id :
-							imageType.dimension == DIMENSIONALITY_3D ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v3Type->type.id :
-							reinterpret_cast<ScalarType*>(defaultTypeF32)->v4Type->type.id;
+							argTypes = arena->alloc<SpvId>(3);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = coordTypeId;
+							argTypes[2] = reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type.id;
+							signature = ProcedureType{ ProcedureIdentifier{ "write_image"a, argTypes, 3 }, defaultTypeVoid };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								op_image_write(codeOutput, params[0], params[1], params[2]);
+								return SPV_NULL_ID;
+							} }));
 
-						argTypes = arena->alloc<SpvId>(2);
-						argTypes[0] = imageType.sampledImageType->id;
-						argTypes[1] = coordTypeId;
-						signature = ProcedureType{ ProcedureIdentifier{ "sample_image"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
-						allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
-							return op_image_sample_implicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
-						} }));
+							argTypes = arena->alloc<SpvId>(2);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = coordTypeId;
+							signature = ProcedureType{ ProcedureIdentifier{ "operator[]"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_image_read(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
+						} else { // Sampled image
+							imageType.sampledImageType = arena->zalloc<Type>(1);
+							imageType.sampledImageType->typeClass = TYPE_CLASS_SAMPLED_IMAGE;
+							imageType.sampledImageType->id = nextSpvId++;
+
+							SpvId* argTypes = arena->alloc<SpvId>(2);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = defaultTypeSampler->id;
+							ProcedureType signature{ ProcedureIdentifier{ "SampledImage"a, argTypes, 2 }, imageType.sampledImageType };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_sampled_image(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
+
+							SpvId coordTypeId = imageType.dimension == DIMENSIONALITY_1D ? defaultTypeF32->id :
+								imageType.dimension == DIMENSIONALITY_2D ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v2Type->type.id :
+								imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v3Type->type.id :
+								reinterpret_cast<ScalarType*>(defaultTypeF32)->v4Type->type.id;
+
+							argTypes = arena->alloc<SpvId>(2);
+							argTypes[0] = imageType.sampledImageType->id;
+							argTypes[1] = coordTypeId;
+							signature = ProcedureType{ ProcedureIdentifier{ "sample_image"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_image_sample_implicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
+
+							argTypes = arena->alloc<SpvId>(3);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = defaultTypeSampler->id;
+							argTypes[2] = coordTypeId;
+							signature = ProcedureType{ ProcedureIdentifier{ "operator[]"a, argTypes, 3 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								SpvId sampledImageType = SpvId(proc.userData);
+								SpvId sampledImage = op_sampled_image(codeOutput, sampledImageType, compiler.nextSpvId++, params[0], params[1]);
+								return op_image_sample_implicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, sampledImage, params[2]);
+							}, imageType.sampledImageType->id }));
+						}
 						
-						argTypes = arena->alloc<SpvId>(3);
-						argTypes[0] = imageType.type.id;
-						argTypes[1] = defaultTypeSampler->id;
-						argTypes[2] = coordTypeId;
-						signature = ProcedureType{ ProcedureIdentifier{ "operator[]"a, argTypes, 3 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
-						allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
-							SpvId sampledImageType = SpvId(proc.userData);
-							SpvId sampledImage = op_sampled_image(codeOutput, sampledImageType, compiler.nextSpvId++, params[0], params[1]);
-							return op_image_sample_implicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, sampledImage, params[2]);
-						}, imageType.sampledImageType->id }));
 					}
 					ImageType* resultType = arena->alloc<ImageType>(1);
 					*resultType = imageType;
@@ -2878,6 +2926,11 @@ struct DSLCompiler {
 		callTypes.reserve(64);
 		memoryOperandArgs.reserve(64);
 		varDeclarations.reserve(64);
+
+		// This is a massive hack. There are a few instructions that may need extra literals (like 0 for comparisons or 0/1/2/3 for swizzle indices)
+		// tcCode must not be moved while interpreting it, so reserve an extra 128 spaces
+		// Fix this!
+		tcCode.reserve(tcCode.size + 128);
 
 		// Resolve types
 		for (Type* type : allTypes) {
@@ -3135,13 +3188,18 @@ struct DSLCompiler {
 					}
 				}
 				void patch_loop_header_phis(DSLCompiler& compiler) {
+					U32 phiWordCount = 3 + numIncomingEdges * 2;
 					U32 currentVar = 0;
 					for (U32 i = 0; i < phisNeeded.capacity; i++) {
 						ScopedName varName = phisNeeded.keys[i];
 						if (varName == phisNeeded.emptyKey) {
 							continue;
 						}
-						patch_phi(compiler.procedureSpvCode, loopHeaderPhiOffset, &phiData[currentVar * numIncomingEdges * 2], numIncomingEdges);
+						Variable** var = compiler.allScopes.data[varName.scopeIndex].varNameToVar.find(varName.name);
+						if (!var) {
+							continue;
+						}
+						(*var)->id = patch_phi(compiler.procedureSpvCode, loopHeaderPhiOffset + phiWordCount * currentVar, &phiData[currentVar * numIncomingEdges * 2], numIncomingEdges);
 						currentVar++;
 					}
 				}
@@ -3232,6 +3290,8 @@ struct DSLCompiler {
 					newConstruct->controlFlowHeader = op;
 					lastLoopConstruct = lastControlFlowConstruct = newConstruct;
 					allControlFlowConstructs.push_back(newConstruct);
+
+					currentBasicBlock->add_to_merge_context(lastControlFlowConstruct->loopHeaderCtx, lastControlFlowConstruct->loopHeaderCtx->dominatorContext);
 
 					currentBasicBlock = arena->zalloc<BasicBlock>(1);
 					currentBasicBlock->init(arena, newConstruct->loopHeaderCtx, nextSpvId++);
@@ -4002,12 +4062,17 @@ struct DSLCompiler {
 					if (loopCtrl & LOOP_CONTROL_ITERATION_MULTIPLE) loopControlArgs[numLoopControlArgs++] = mod.loopControlArgs[31 - lzcnt32(LOOP_CONTROL_ITERATION_MULTIPLE)];
 					if (loopCtrl & LOOP_CONTROL_PEEL_COUNT) loopControlArgs[numLoopControlArgs++] = mod.loopControlArgs[31 - lzcnt32(LOOP_CONTROL_PEEL_COUNT)];
 					if (loopCtrl & LOOP_CONTROL_PARTIAL_COUNT) loopControlArgs[numLoopControlArgs++] = mod.loopControlArgs[31 - lzcnt32(LOOP_CONTROL_PARTIAL_COUNT)];
-					op_loop_merge(procedureSpvCode, lastLoopConstruct->mergeCtx->blockId, lastLoopConstruct->loopContinueCtx->blockId, loopCtrl, loopControlArgs, numLoopControlArgs);
+					
 					currentBasicBlock->terminationInsn = TERMINATION_INSN_BRANCH;
+					lastControlFlowConstruct->loopHeaderCtx->add_context_to_phi_data(*this, currentBasicBlock->blockId);
 					op_branch(procedureSpvCode, lastLoopConstruct->loopHeaderCtx->blockId);
 					op_label(procedureSpvCode, lastLoopConstruct->loopHeaderCtx->blockId);
 					currentBasicBlock = lastLoopConstruct->loopHeaderCtx;
 					lastLoopConstruct->loopHeaderCtx->generate_loop_header_phis(*this);
+					op_loop_merge(procedureSpvCode, lastLoopConstruct->mergeCtx->blockId, lastLoopConstruct->loopContinueCtx->blockId, loopCtrl, loopControlArgs, numLoopControlArgs);
+					SpvId loopStartId = nextSpvId++;
+					op_branch(procedureSpvCode, loopStartId);
+					op_label(procedureSpvCode, loopStartId);
 				} break;
 				case TC_OP_BLOCK_END: {
 					if (lastControlFlowConstruct->is_loop()) {

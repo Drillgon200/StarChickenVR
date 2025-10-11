@@ -12,6 +12,10 @@ enum DMFObjectID : U32 {
 	DMF_OBJECT_ID_Count = 3
 };
 
+struct Entity {
+	V3F pos;
+};
+
 static constexpr U32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
 static constexpr U32 LAST_KNOWN_DAF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
 

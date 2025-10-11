@@ -1094,6 +1094,15 @@ SpvId op_image_sample_implicit_lod(ArenaArrayList<SpvDword>& output, SpvId resul
 	output.push_back(wordCount << 16 | opcode, resultType, resultId, sampledImage, coordinate);
 	return resultId;
 }
+SpvId op_image_read(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId image, SpvId coordinate) {
+	const U32 opcode = 98, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, image, coordinate);
+	return resultId;
+}
+void op_image_write(ArenaArrayList<SpvDword>& output, SpvId image, SpvId coordinate, SpvId texel) {
+	const U32 opcode = 99, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, image, coordinate, texel);
+}
 
 SpvId op_phi(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId* variablesAndParents, U32 parentBlockCount) {
 	const U32 opcode = 245, wordCount = 3 + parentBlockCount * 2;
@@ -1101,8 +1110,10 @@ SpvId op_phi(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId,
 	output.push_back_n(variablesAndParents, parentBlockCount * 2);
 	return resultId;
 }
-void patch_phi(ArenaArrayList<SpvDword>& output, U32 offset, SpvId* variablesAndParents, U32 parentBlockCount) {
+SpvId patch_phi(ArenaArrayList<SpvDword>& output, U32 offset, SpvId* variablesAndParents, U32 parentBlockCount) {
 	memcpy(&output.data[offset + 3], variablesAndParents, parentBlockCount * 2 * sizeof(SpvId));
+	SpvId resultId = output.data[offset + 2];
+	return resultId;
 }
 void op_loop_merge(ArenaArrayList<SpvDword>& output, SpvId mergeBlock, SpvId continueTarget, LoopControl loopControl, U32* loopControlParams, U32 loopControlParamCount) {
 	const U32 opcode = 246, wordCount = 4 + loopControlParamCount;
@@ -1237,6 +1248,10 @@ SpvId op_f_smoothstep(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId 
 SpvId op_f_fma(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId a, SpvId b, SpvId c) {
 	SpvId args[3]{ a, b, c };
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 50, args, 3);
+}
+SpvId op_f_atan2(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId y, SpvId x) {
+	SpvId args[3]{ y, x };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 25, args, 2);
 }
 
 }

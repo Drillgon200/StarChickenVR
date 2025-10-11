@@ -558,6 +558,13 @@ FINLINE V3F32 max<V3F32>(V3F32 a, V3F32 b) {
 	return V3F32{ a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z };
 }
 
+#pragma pack(push, 1)
+struct V2U32 {
+	U32 x, y;
+};
+typedef V2U32 V2U;
+#pragma pack(pop)
+
 DEBUG_OPTIMIZE_OFF
 
 struct RGBA8;

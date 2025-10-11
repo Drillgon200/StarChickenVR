@@ -3,6 +3,7 @@
 #include "physics/Physics.h"
 #include "physics/RigidBody.h"
 #include "physics/SAT.h"
+#include "CubemapGen.h"
 
 namespace EditorUI {
 
@@ -127,7 +128,7 @@ void update() {
 		b7->size.x = max(1.0F, Win32::get_mouse().x);
 		b7->size.y = max(1.0F, Win32::get_mouse().y);
 	}
-	Physics::do_timestep(StarChicken::deltaTime, 20, 0.95F, 300.0F, 0.98F);
+	Physics::do_timestep(StarChicken::deltaTime, 8, 0.95F, 300.0F, 0.98F);
 }
 
 void init_physics() {
@@ -135,7 +136,7 @@ void init_physics() {
 	I32 indices[width * height];
 	for (U32 y = 0; y < height; y++) {
 		for (U32 z = 0; z < width; z++) {
-			indices[y * width + z] = Physics::add_point(V3F{ 0.0F, 15.0F - F32(y), F32(z) }, 1.0F);
+			indices[y * width + z] = Physics::add_point(V3F{ 0.0F, 15.0F - F32(y), F32(z) }, 0.5F);
 		}
 	}
 	middlePoint = indices[(height / 2) * width + width / 2];
@@ -185,7 +186,8 @@ void init() {
 	editor.pos = playerEye;
 	editor.yaw = 0.25F;
 	init_physics();
-	return;
+	//return;
+
 	using namespace UI;
 	Box* b1 = generic_box().unsafeBox;
 	b1->size = V2F{ 100.0F, 100.0F };
@@ -204,6 +206,12 @@ void init() {
 		b5->backgroundColor = RGBA8{ 255, 255, 0, 255 };
 		Box* b6 = generic_box().unsafeBox;
 		b6->backgroundColor = RGBA8{ 255, 255, 0, 255 };
+		Box* bi = text_button("Something"a, [](Box* box) {
+			print("Convolving...");
+			CubemapGen::equirectangular2convolved_cubemap(get_user_selected_file(globalArena));
+			print(" complete\n");
+		}).unsafeBox;
+		bi->padding = 2.0F;
 	}
 	Box* b7 = generic_box().unsafeBox;
 	b7->layoutDirection = LAYOUT_DIRECTION_RIGHT;

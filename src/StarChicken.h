@@ -354,6 +354,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 }
 
 void keyboard_callback(Win32::Key key, Win32::ButtonState state) {
+	if (UI::inDialog) {
+		return;
+	}
 	V2F32 mousePos = Win32::get_mouse();
 	UI::handle_keyboard_action(mousePos, key, state);
 	if (key == Win32::KEY_ESC && state == Win32::BUTTON_STATE_DOWN) {
@@ -363,16 +366,19 @@ void keyboard_callback(Win32::Key key, Win32::ButtonState state) {
 	EditorUI::key_input(key, state);
 }
 void mouse_callback(Win32::MouseButton button, Win32::MouseValue state) {
-	V2F32 mousePos = Win32::get_mouse();
-	UI::handle_mouse_action(mousePos, button, state);
-
-	EditorUI::mouse_input(button, state, mousePos);
-
-	if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_DOWN) {
-		Win32::set_mouse_captured(true);
-		EditorUI::editorFocused = true;
+	if (UI::inDialog) {
+		return;
 	}
-	
+	V2F32 mousePos = Win32::get_mouse();
+	if (!EditorUI::editorFocused) {
+		if (!UI::handle_mouse_action(mousePos, button, state)) {
+			if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_DOWN) {
+				Win32::set_mouse_captured(true);
+				EditorUI::editorFocused = true;
+			}
+		}
+	}
+	EditorUI::mouse_input(button, state, mousePos);
 }
 
 void do_frame() {
@@ -423,6 +429,7 @@ U32 run_star_chicken() {
 			isInEditorMode = true;
 		}
 	}
+
 	//MSDFGenerator::generate_msdf_image("..\\art\\test_smiley.svg"a, "..\\art\\output"a, 64, 64, 16.0F, 16.0F, 12.0F);
 	//MSDFGenerator::generate_msdf_font("..\\art\\font.svg"a, "..\\art\\debug\\font_output"a, 64, 64, PX_TO_MILLIMETER(5.0F), PX_TO_MILLIMETER(12.0F), 12.0F);
 	//return 0;
@@ -458,6 +465,7 @@ U32 run_star_chicken() {
 
 	UI::init_ui();
 	if (isInEditorMode) {
+		CubemapGen::init();
 		EditorUI::init();
 	}
 	Win32::show_window();
@@ -480,6 +488,9 @@ U32 run_star_chicken() {
 	if (!isInEditorMode) {
 		print("Shutting down OpenXR...\n");
 		XR::end_openxr();
+	}
+	if (isInEditorMode) {
+		CubemapGen::destroy();
 	}
 	UI::destroy_ui();
 	print("Shutting down Vulkan...\n");

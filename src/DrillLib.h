@@ -1436,7 +1436,7 @@ T* read_full_file_to_arena(U32* count, MemoryArena& arena, StrA fileName) {
 	return result;
 }
 
-bool write_data_to_file(StrA fileName, void* data, U32 numBytes) {
+bool write_data_to_file(StrA fileName, const void* data, U32 numBytes) {
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 oldArenaPtr = stackArena.stackPtr;
 	HANDLE file = CreateFileA(fileName.c_str(stackArena), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);

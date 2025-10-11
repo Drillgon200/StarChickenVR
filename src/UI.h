@@ -783,7 +783,7 @@ B32 mouse_input_for_box_recurse(B32* anyContained, Box* box, V2F32 pos, Win32::M
 	if (mouseOutside && box->flags & BOX_FLAG_CLIP_CHILDREN) {
 		return false;
 	}
-	if (anyContained && !mouseOutside) {
+	if (anyContained && !mouseOutside && box != root) {
 		*anyContained = true;
 	}
 	for (Box* child = box->childFirst; child; child = child->next) {
@@ -837,12 +837,12 @@ B32 mouse_input_for_box_recurse(B32* anyContained, Box* box, V2F32 pos, Win32::M
 	return result == ACTION_HANDLED;
 }
 bool inDialog = false;
-void handle_mouse_action(V2F32 pos, Win32::MouseButton button, Win32::MouseValue state) {
-	if (inDialog) return;
+bool handle_mouse_action(V2F32 pos, Win32::MouseButton button, Win32::MouseValue state) {
+	if (inDialog) return false;
 	modificationLock.lock_write();
+	B32 anyContained = false;
 	for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
 		if (Box* contextMenuBox = contextMenuStack.data[i].get()) {
-			B32 anyContained = false;
 			mouse_input_for_box_recurse(&anyContained, contextMenuBox, pos, button, state, root->computedPos, 1.0F);
 			if (anyContained) {
 				goto contextMenuClicked;
@@ -852,12 +852,13 @@ void handle_mouse_action(V2F32 pos, Win32::MouseButton button, Win32::MouseValue
 	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_DOWN) {
 		context_menu(BoxHandle{}, BoxHandle{}, V2F32{});
 	}
-	mouse_input_for_box_recurse(nullptr, root, pos, button, state, root->computedPos, 1.0F);
+	mouse_input_for_box_recurse(&anyContained, root, pos, button, state, root->computedPos, 1.0F);
 contextMenuClicked:;
 	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_UP) {
 		activeBox = BoxHandle{};
 	}
 	modificationLock.unlock_write();
+	return anyContained;
 }
 B32 mouse_update_for_box_recurse(B32* anyContains, Box* box, V2F32 pos, V2F32 delta, V2F32 parentPos, F32 scale) {
 	if (box->flags & BOX_FLAG_DISABLED) {
@@ -982,6 +983,13 @@ void handle_keyboard_action(V2F32 mousePos, Win32::Key key, Win32::ButtonState s
 	modificationLock.unlock_write();
 }
 
+StrA get_user_selected_file(MemoryArena& arena) {
+	inDialog = true;
+	StrA result = Win32::open_filename(arena);
+	inDialog = false;
+	return result;
+}
+
 
 
 BoxHandle generic_box() {
@@ -1038,6 +1046,23 @@ BoxHandle text(StrA str, BoxActionCallback actionCallback = nullptr) {
 	box.unsafeBox->actionCallback = actionCallback;
 	return box;
 }
+// onClick of type BoxConsumer
+template<typename Callback>
+BoxHandle text_button(StrA text, Callback&& onClick) {
+	BoxHandle box = generic_box();
+	box.unsafeBox->flags |= BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
+	box.unsafeBox->text = text;
+	box.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
+	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
+	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
+		if (com.leftClicked) {
+			reinterpret_cast<BoxConsumer>(box->callbackAltData[0])(box);
+			return ACTION_HANDLED;
+		}
+		return ACTION_PASS;
+		};
+	return box;
+}
 /*
 // onTextUpdated of type BoxConsumer
 template<typename Callback>
@@ -1084,24 +1109,7 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
-	};
-	return box;
-}
-// onClick of type BoxConsumer
-template<typename Callback>
-BoxHandle text_button(StrA text, Callback&& onClick) {
-	BoxHandle box = generic_box();
-	box.unsafeBox->flags |= BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
-	box.unsafeBox->text = text;
-	box.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
-	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
-	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
-		if (com.leftClicked) {
-			reinterpret_cast<BoxConsumer>(box->callbackAltData[0])(box);
-			return ACTION_HANDLED;
-		}
-		return ACTION_PASS;
-	};
+		};
 	return box;
 }
 // onClick of type BoxConsumer

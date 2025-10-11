@@ -6,6 +6,7 @@
 #include <Windows.h>
 #include <timeapi.h>
 #include <hidusage.h>
+#include <commdlg.h>;
 #undef near
 #undef far
 #pragma warning(pop)
@@ -190,8 +191,11 @@ USER32_FUNCTIONS
 decltype(timeBeginPeriod)* timeBeginPeriod_ptr;
 decltype(timeEndPeriod)* timeEndPeriod_ptr;
 
+decltype(GetOpenFileNameA)* pGetOpenFileNameA;
+
 HMODULE user32DLL;
 HMODULE winmmDLL;
+HMODULE comdlg32DLL;
 HINSTANCE instance;
 HWND window;
 U32 windowWidth;
@@ -492,6 +496,28 @@ void show_window() {
 	pShowWindow(window, SW_SHOWDEFAULT);
 }
 
+StrA open_filename(MemoryArena& arena) {
+	if (!pGetOpenFileNameA) {
+		return StrA{};
+	}
+	OPENFILENAMEA options{};
+	options.lStructSize = sizeof(options);
+	options.hwndOwner = window;
+	options.hInstance = instance;
+	options.lpstrFile = (LPSTR)(arena.stackBase + arena.stackPtr);
+	options.lpstrFile[0] = 0;
+	options.nMaxFile = 1024 * 1024;
+	options.Flags = OFN_NOCHANGEDIR;
+	bool success = pGetOpenFileNameA(&options);
+	if (success) {
+		StrA result{ options.lpstrFile, strlen(options.lpstrFile) };
+		arena.stackPtr += result.length;
+		return result;
+	} else {
+		return StrA{};
+	}
+}
+
 void get_program_args(ArenaArrayList<StrA>& argOut) {
 	using namespace SerializeTools;
 	LPSTR argStr = GetCommandLineA();
@@ -542,6 +568,7 @@ bool init(U32 width, U32 height, void (*resizeDrawCallbackIn)(void), void (*keyb
 	instance = GetModuleHandleA(nullptr);
 	user32DLL = LoadLibraryA("User32.dll");
 	winmmDLL = LoadLibraryA("Winmm.dll");
+	comdlg32DLL = LoadLibraryA("comdlg32.dll");
 	if (user32DLL) {
 #define X(name) (p##name = reinterpret_cast<decltype(p##name)>(reinterpret_cast<void*>(GetProcAddress(user32DLL, #name))));
 		USER32_FUNCTIONS
@@ -608,6 +635,9 @@ bool init(U32 width, U32 height, void (*resizeDrawCallbackIn)(void), void (*keyb
 	if (winmmDLL) {
 		timeBeginPeriod_ptr = reinterpret_cast<decltype(timeBeginPeriod_ptr)>(reinterpret_cast<void*>(GetProcAddress(winmmDLL, "timeBeginPeriod")));
 		timeEndPeriod_ptr = reinterpret_cast<decltype(timeEndPeriod_ptr)>(reinterpret_cast<void*>(GetProcAddress(winmmDLL, "timeEndPeriod")));
+	}
+	if (comdlg32DLL) {
+		pGetOpenFileNameA = (decltype(pGetOpenFileNameA))(void*)GetProcAddress(comdlg32DLL, "GetOpenFileNameA");
 	}
 	return success;
 }

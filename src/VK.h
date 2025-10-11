@@ -95,6 +95,7 @@ VkRenderPass mainRenderPass;
 VkSampler linearSampler;
 
 DescriptorSet drawDataDescriptorSet;
+DescriptorSet cubemapConvolveDescriptorSet;
 
 VkPipelineLayout drawPipelineLayout;
 VkPipeline drawPipeline;
@@ -105,6 +106,8 @@ VkPipeline debugLinesPipeline;
 VkPipeline debugPointsPipeline;
 VkPipelineLayout skinningPipelineLayout;
 VkPipeline skinningPipeline;
+VkPipelineLayout cubemapConvolvePipelineLayout;
+VkPipeline cubemapConvolvePipeline;
 
 
 XrSwapchainData xrSwapchainData;
@@ -1154,6 +1157,9 @@ DescriptorSet& DescriptorSet::texture_array(U32 bindingIndex, VkShaderStageFlags
 	variableDescriptorCountMax = maxArraySize;
 	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, arraySize, VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT);
 }
+DescriptorSet& DescriptorSet::storage_image(U32 bindingIndex, VkShaderStageFlags stageFlags) {
+	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, 0);
+}
 
 void DescriptorSet::build() {
 	if (setLayout == VK_NULL_HANDLE) {
@@ -1481,72 +1487,51 @@ struct GraphicsPipelineBuilder {
 	}
 };
 
-struct ComputePipelineBuilder {
-	VkPipelineLayout pipelineLayout;
-	StrA shaderFileName;
-
-	ComputePipelineBuilder& set_default() {
-		pipelineLayout = VK_NULL_HANDLE;
-		shaderFileName = StrA{};
-		return *this;
+VkPipeline build_compute_pipeline(StrA shaderFileName, VkPipelineLayout pipelineLayout) {
+	if (pipelineLayout == VK_NULL_HANDLE) {
+		abort("Must set pipeline layout to build VkPipeline");
+	}
+	if (shaderFileName.is_empty()) {
+		abort("Must set shader file name to build VkPipeline");
 	}
 
-	ComputePipelineBuilder& shader_name(StrA fileName) {
-		shaderFileName = fileName;
-		return *this;
+	MemoryArena& stackArena = get_scratch_arena();
+	U64 stackArenaFrame0 = stackArena.stackPtr;
+	U32 spirvDwordCount;
+	U32* spirv = read_full_file_to_arena<U32>(&spirvDwordCount, stackArena, shaderFileName);
+	if (spirv == nullptr) {
+		print("File read failed: ");
+		println(shaderFileName);
+		abort("Failed reading spv file");
 	}
+	VkShaderModuleCreateInfo moduleInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	moduleInfo.flags = 0;
+	moduleInfo.codeSize = spirvDwordCount * sizeof(U32);
+	moduleInfo.pCode = spirv;
+	VkShaderModule shaderModule;
+	CHK_VK(vkCreateShaderModule(logicalDevice, &moduleInfo, nullptr, &shaderModule));
+	stackArena.stackPtr = stackArenaFrame0;
 
-	ComputePipelineBuilder& layout(VkPipelineLayout layout) {
-		pipelineLayout = layout;
-		return *this;
-	}
+	VkComputePipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	pipelineInfo.flags = 0;
+	pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipelineInfo.stage.flags = 0;
+	pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipelineInfo.stage.module = shaderModule;
+	pipelineInfo.stage.pName = "compute_main";
+	pipelineInfo.stage.pSpecializationInfo = nullptr;
+	pipelineInfo.layout = pipelineLayout;
+	pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+	pipelineInfo.basePipelineIndex = -1;
+	VkPipeline pipeline;
+	CHK_VK(vkCreateComputePipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, VK_NULL_HANDLE, &pipeline));
 
-	VkPipeline build() {
-		if (pipelineLayout == VK_NULL_HANDLE) {
-			abort("Must set pipeline layout to build VkPipeline");
-		}
-		if (shaderFileName.is_empty()) {
-			abort("Must set shader file name to build VkPipeline");
-		}
+	vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
 
-		MemoryArena& stackArena = get_scratch_arena();
-		U64 stackArenaFrame0 = stackArena.stackPtr;
-		U32 spirvDwordCount;
-		U32* spirv = read_full_file_to_arena<U32>(&spirvDwordCount, stackArena, shaderFileName);
-		if (spirv == nullptr) {
-			print("File read failed: ");
-			println(shaderFileName);
-			abort("Failed reading spv file");
-		}
-		VkShaderModuleCreateInfo moduleInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-		moduleInfo.flags = 0;
-		moduleInfo.codeSize = spirvDwordCount * sizeof(U32);
-		moduleInfo.pCode = spirv;
-		VkShaderModule shaderModule;
-		CHK_VK(vkCreateShaderModule(logicalDevice, &moduleInfo, nullptr, &shaderModule));
-		stackArena.stackPtr = stackArenaFrame0;
+	destroyLists.pipelines.push_back(pipeline);
 
-		VkComputePipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-		pipelineInfo.flags = 0;
-		pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		pipelineInfo.stage.flags = 0;
-		pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		pipelineInfo.stage.module = shaderModule;
-		pipelineInfo.stage.pName = "compute_main";
-		pipelineInfo.stage.pSpecializationInfo = nullptr;
-		pipelineInfo.layout = pipelineLayout;
-		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-		pipelineInfo.basePipelineIndex = -1;
-		VkPipeline pipeline;
-		CHK_VK(vkCreateComputePipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, VK_NULL_HANDLE, &pipeline));
-
-		vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
-
-		destroyLists.pipelines.push_back(pipeline);
-
-		return pipeline;
-	}
-};
+	return pipeline;
+}
 
 VkSampler make_sampler(VkFilter filter, VkSamplerMipmapMode mipmapMode, VkSamplerAddressMode addressMode, F32 anisotropy) {
 	VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
@@ -1597,6 +1582,10 @@ void load_pipelines_and_descriptors() {
 		.uniform_buffer(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT) // draw data
 		.texture_array(2, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
 		.build();
+	cubemapConvolveDescriptorSet.init()
+		.storage_image(0, VK_SHADER_STAGE_COMPUTE_BIT) // input image
+		.storage_image(1, VK_SHADER_STAGE_COMPUTE_BIT)
+		.build(); // output image
 
 	VkWriteDescriptorSet drawDataDescriptorWrites[2]{};
 	VkWriteDescriptorSet& samplerDesc = drawDataDescriptorWrites[0];
@@ -1644,10 +1633,13 @@ void load_pipelines_and_descriptors() {
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel))
 		.set_layout(drawDataDescriptorSet.setLayout)
 		.build();
-	skinningPipeline = ComputePipelineBuilder{}.set_default()
-		.layout(skinningPipelineLayout)
-		.shader_name("./resources/shaders/skinning.spv"a)
+	skinningPipeline = build_compute_pipeline("./resources/shaders/skinning.spv"a, skinningPipelineLayout);
+
+	cubemapConvolvePipelineLayout = PipelineLayoutBuilder{}.set_default()
+		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapConvolveInfo))
+		.set_layout(cubemapConvolveDescriptorSet.setLayout)
 		.build();
+	cubemapConvolvePipeline = build_compute_pipeline("./resources/shaders/cubemap_convolve.spv"a, cubemapConvolvePipelineLayout);
 }
 
 void finish_startup() {
@@ -1714,7 +1706,7 @@ FrameBeginResult begin_frame() {
 	CHK_VK(vkResetCommandPool(logicalDevice, graphicsCommandPools[0], 0));
 
 	VkCommandBufferBeginInfo cmdBufInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-	cmdBufInfo.flags = 0;
+	cmdBufInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	cmdBufInfo.pInheritanceInfo = nullptr;
 	CHK_VK(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
 	
