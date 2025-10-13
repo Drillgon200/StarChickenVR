@@ -1249,9 +1249,43 @@ SpvId op_f_fma(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultI
 	SpvId args[3]{ a, b, c };
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 50, args, 3);
 }
+SpvId op_f_sin(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 13, &x, 1);
+}
+SpvId op_f_cos(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 14, &x, 1);
+}
+SpvId op_f_tan(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 15, &x, 1);
+}
+SpvId op_f_asin(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 16, &x, 1);
+}
+SpvId op_f_acos(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 17, &x, 1);
+}
+SpvId op_f_atan(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 18, &x, 1);
+}
 SpvId op_f_atan2(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId y, SpvId x) {
 	SpvId args[3]{ y, x };
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 25, args, 2);
 }
+SpvId op_f_pow(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 26, &x, 1);
+}
+SpvId op_f_exp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 27, &x, 1);
+}
+SpvId op_f_log(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 28, &x, 1);
+}
+SpvId op_f_sqrt(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 31, &x, 1);
+}
+SpvId op_f_invsqrt(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 32, &x, 1);
+}
+
 
 }

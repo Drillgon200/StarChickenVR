@@ -3,6 +3,7 @@
 #include "DrillLib.h"
 #include "VK.h"
 #include "ResourceLoading.h"
+#include "PNG.h"
 
 namespace CubemapGen {
 
@@ -22,7 +23,7 @@ VkImageView equirectImageView;
 const U32 CUBEMAP_RES = 512;
 
 void init() {
-	imageCPUBuffer.create(2048 * 2048 * 4 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostMemoryTypeIndex);
+	imageCPUBuffer.create(max<U32>(CUBEMAP_RES * CUBEMAP_RES * 4 * 4 * 6, 2048 * 2048 * 4 * 4), VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostMemoryTypeIndex);
 
 	{ // Create cubemap image
 		VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -87,8 +88,8 @@ void equirectangular2convolved_cubemap(StrA name) {
 		F32* data = read_full_file_to_arena<F32>(&count, arena, name);
 		if (data) {
 			using namespace VK;
-			U32 width = 2048;
-			U32 height = 1024;
+			U32 width = 1024;
+			U32 height = 512;
 			if (width * height * 4 * 4 >= imageCPUBuffer.capacity) {
 				imageCPUBuffer.destroy();
 				imageCPUBuffer.create(width * height * 4 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostMemoryTypeIndex);
@@ -101,7 +102,7 @@ void equirectangular2convolved_cubemap(StrA name) {
 				imgInfo.mipLevels = 1;
 				imgInfo.arrayLayers = 1;
 				imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-				imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+				imgInfo.tiling = VK_IMAGE_TILING_LINEAR; // Linear tiling is actually slightly faster here, since the convolution accesses the image linearly instead of space locally
 				imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 				imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 				imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -161,7 +162,7 @@ void equirectangular2convolved_cubemap(StrA name) {
 				barrier.srcAccessMask = VK_ACCESS_NONE_KHR;
 				barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 				barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-				barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; // General for compute shader loads
+				barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 				barrier.srcQueueFamilyIndex = graphicsFamily;
 				barrier.dstQueueFamilyIndex = graphicsFamily;
 				barrier.image = equirectImage;
@@ -238,7 +239,7 @@ void equirectangular2convolved_cubemap(StrA name) {
 				cubeRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 				cubeRegion.imageSubresource.mipLevel = 0;
 				cubeRegion.imageSubresource.baseArrayLayer = 0;
-				cubeRegion.imageSubresource.layerCount = 1;
+				cubeRegion.imageSubresource.layerCount = 6;
 				cubeRegion.imageOffset = VkOffset3D{ 0, 0, 0 };
 				cubeRegion.imageExtent = VkExtent3D{ CUBEMAP_RES, CUBEMAP_RES, 1 };
 				vkCmdCopyImageToBuffer(convolveCmdBuf, cubeImg, VK_IMAGE_LAYOUT_GENERAL, imageCPUBuffer.buffer, 1, &cubeRegion);
@@ -250,9 +251,12 @@ void equirectangular2convolved_cubemap(StrA name) {
 			submitInfo.commandBufferCount = 1;
 			submitInfo.pCommandBuffers = &convolveCmdBuf;
 			CHK_VK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, convolveCompleteFence));
+			F64 t0 = current_time_seconds();
+
 			// I should probably be doing this async, but whatever. A cubemap convolution will never happen during gameplay.
 			CHK_VK(vkWaitForFences(logicalDevice, 1, &convolveCompleteFence, VK_TRUE, U64_MAX));
 			CHK_VK(vkResetCommandPool(logicalDevice, convolveCommandPool, 0));
+			printf("Time taken: %\n"a, current_time_seconds() - t0);
 
 			{ // Destroy source image
 				vkDestroyImageView(logicalDevice, equirectImageView, nullptr);
@@ -260,6 +264,20 @@ void equirectangular2convolved_cubemap(StrA name) {
 				vkFreeMemory(logicalDevice, equirectImageMemory, nullptr);
 			}
 			write_data_to_file("test_convolve.dat"a, imageCPUBuffer.mapping, CUBEMAP_RES * CUBEMAP_RES * 4 * sizeof(F32));
+			RGBA8* pixels = arena.alloc<RGBA8>(CUBEMAP_RES * CUBEMAP_RES);
+			StrA fileNames[]{ "cubemap_test/cube_x_pos.png"a, "cubemap_test/cube_x_neg.png"a, "cubemap_test/cube_y_pos.png"a, "cubemap_test/cube_y_neg.png"a, "cubemap_test/cube_z_pos.png"a, "cubemap_test/cube_z_neg.png"a };
+			for (U32 i = 0; i < 6; i++) {
+				V4F* data = (V4F*)imageCPUBuffer.mapping + CUBEMAP_RES * CUBEMAP_RES * i;
+				for (U32 p = 0; p < CUBEMAP_RES * CUBEMAP_RES; p++) {
+					V4F in = data[p];
+					RGBA8& out = pixels[p];
+					out.r = U8(clamp01(in.x) * 255.0F);
+					out.g = U8(clamp01(in.y) * 255.0F);
+					out.b = U8(clamp01(in.z) * 255.0F);
+					out.a = 255;
+				}
+				PNG::write_image(fileNames[i], pixels, CUBEMAP_RES, CUBEMAP_RES);
+			}
 		}
 	}
 }

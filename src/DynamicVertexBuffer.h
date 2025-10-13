@@ -102,6 +102,7 @@ struct Tessellator {
 			if (drawCmd.pipeline != prevPipeline) {
 				VK::vkCmdBindPipeline(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawCmd.pipeline);
 				VK::vkCmdBindDescriptorSets(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawCmd.pipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+				prevPipeline = drawCmd.pipeline;
 			}
 			renderData.verticesOffset = I32(drawCmd.vertexBufferOffset);
 			VK::vkCmdPushConstants(VK::graphicsCommandBuffer, drawCmd.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::GPUModelInfo), &renderData);

@@ -1913,9 +1913,46 @@ struct DSLCompiler {
 	ADD_SINGLE_OP_UNARY_OPERATOR("dpdx"a, type, typeId, op_dpdx);\
 	ADD_SINGLE_OP_UNARY_OPERATOR("dpdy"a, type, typeId, op_dpdy);\
 	ADD_SINGLE_OP_UNARY_OPERATOR("fwidth"a, type, typeId, op_fwidth);\
+	ADD_MULTI_OP_UNARY_OPERATOR("sin"a, type, typeId, \
+		return (op_f_sin(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("sin"a, type, typeId, \
+		return (op_f_sin(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("cos"a, type, typeId, \
+		return (op_f_cos(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("tan"a, type, typeId, \
+		return (op_f_tan(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("asin"a, type, typeId, \
+		return (op_f_asin(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("acos"a, type, typeId, \
+		return (op_f_acos(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("atan"a, type, typeId, \
+		return (op_f_atan(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
 	ADD_MULTI_OP_BINARY_OPERATOR("atan2"a, type, typeId, typeId, \
 		return (op_f_atan2(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("pow"a, type, typeId, \
+		return (op_f_pow(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("exp"a, type, typeId, \
+		return (op_f_exp(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("log"a, type, typeId, \
+		return (op_f_log(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("sqrt"a, type, typeId, \
+		return (op_f_sqrt(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("invsqrt"a, type, typeId, \
+		return (op_f_invsqrt(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
 	);
+	
 	
 
 		ScopeContext& scope = allScopes.data[currentScope];
