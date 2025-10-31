@@ -137,6 +137,18 @@ FINLINE U32 tzcnt32(U32 val) {
 FINLINE U64 tzcnt64(U64 val) {
 	return _tzcnt_u64(val);
 }
+FINLINE U64 log2ceil32(U32 val) {
+	return 32 - _lzcnt_u32(val - 1);
+}
+FINLINE U64 log2floor32(U32 val) {
+	return 31 - _lzcnt_u32(val);
+}
+FINLINE U64 log2ceil64(U64 val) {
+	return 64 - _lzcnt_u64(val - 1);
+}
+FINLINE U64 log2floor64(U64 val) {
+	return 63 - _lzcnt_u64(val);
+}
 
 template<typename To, typename From>
 FINLINE constexpr To bitcast(const From& val) {

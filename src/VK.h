@@ -65,6 +65,7 @@ U32 currentFrameInFlight;
 VKStaging::GPUUploadStager graphicsStager;
 VKGeometry::GeometryHandler geometryHandler;
 VKGeometry::UniformMatricesHandler uniformMatricesHandler;
+#pragma pack(push, 1)
 struct DrawDataUniforms {
 	V2F screenDimensions;
 	UPtr uiClipBoxes;
@@ -79,6 +80,7 @@ struct DrawDataUniforms {
 	UPtr skinnedNormals;
 	UPtr skinnedTangents;
 };
+#pragma pack(pop)
 DedicatedBuffer drawDataUniformBuffer;
 
 Framebuffer mainFramebuffer;
@@ -104,10 +106,14 @@ VkPipeline uiPipeline;
 VkPipeline debugPipeline;
 VkPipeline debugLinesPipeline;
 VkPipeline debugPointsPipeline;
+VkPipeline tmpBackgroundPipeline;
 VkPipelineLayout skinningPipelineLayout;
 VkPipeline skinningPipeline;
-VkPipelineLayout cubemapConvolvePipelineLayout;
+VkPipelineLayout cubemapComputePipelineLayout;
 VkPipeline cubemapConvolvePipeline;
+VkPipeline cubemapFromEquirectPipeline;
+VkPipeline cubemapMipgenPipeline;
+VkPipeline brdfLutPipeline;
 
 
 XrSwapchainData xrSwapchainData;
@@ -1153,12 +1159,21 @@ DescriptorSet& DescriptorSet::uniform_buffer(U32 bindingIndex, VkShaderStageFlag
 DescriptorSet& DescriptorSet::sampler(U32 bindingIndex, VkShaderStageFlags stageFlags) {
 	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_SAMPLER, 1, 0);
 }
-DescriptorSet& DescriptorSet::texture_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize) {
+DescriptorSet& DescriptorSet::sampled_image_array_dynamic(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize) {
 	variableDescriptorCountMax = maxArraySize;
 	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, arraySize, VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT);
 }
+DescriptorSet& DescriptorSet::sampled_image_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 arraySize) {
+	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, arraySize, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+}
+DescriptorSet& DescriptorSet::storage_image_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 arraySize) {
+	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, arraySize, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+}
 DescriptorSet& DescriptorSet::storage_image(U32 bindingIndex, VkShaderStageFlags stageFlags) {
 	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, 0);
+}
+DescriptorSet& DescriptorSet::sampled_image(U32 bindingIndex, VkShaderStageFlags stageFlags) {
+	return basic_binding(bindingIndex, stageFlags, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, 0);
 }
 
 void DescriptorSet::build() {
@@ -1268,6 +1283,8 @@ struct GraphicsPipelineBuilder {
 	U32 attributeDescriptionCount;
 	U32 bindingDescriptionCount;
 	VkBool32 blendEnabled;
+	VkBool32 depthWriteEnabled;
+	VkBool32 depthTestEnabled;
 	VkBlendFactor srcBlendFactor;
 	VkBlendFactor dstBlendFactor;
 	VkPrimitiveTopology topology;
@@ -1278,6 +1295,8 @@ struct GraphicsPipelineBuilder {
 		attributeDescriptionCount = 0;
 		bindingDescriptionCount = 0;
 		blendEnabled = VK_FALSE;
+		depthWriteEnabled = VK_TRUE;
+		depthTestEnabled = VK_TRUE;
 		srcBlendFactor = VK_BLEND_FACTOR_ONE;
 		dstBlendFactor = VK_BLEND_FACTOR_ZERO;
 		topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -1291,6 +1310,14 @@ struct GraphicsPipelineBuilder {
 		blendEnabled = VK_TRUE;
 		srcBlendFactor = srcFactor;
 		dstBlendFactor = dstFactor;
+		return *this;
+	}
+	GraphicsPipelineBuilder& depth_test(bool test) {
+		depthTestEnabled = test;
+		return *this;
+	}
+	GraphicsPipelineBuilder& depth_write(bool write) {
+		depthWriteEnabled = write;
 		return *this;
 	}
 	GraphicsPipelineBuilder& layout(VkPipelineLayout layout) {
@@ -1422,8 +1449,8 @@ struct GraphicsPipelineBuilder {
 
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateInfo{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 		depthStencilStateInfo.flags = 0;
-		depthStencilStateInfo.depthTestEnable = VK_TRUE;
-		depthStencilStateInfo.depthWriteEnable = VK_TRUE;
+		depthStencilStateInfo.depthTestEnable = depthTestEnabled;
+		depthStencilStateInfo.depthWriteEnable = depthWriteEnabled;
 		depthStencilStateInfo.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 		depthStencilStateInfo.depthBoundsTestEnable = VK_FALSE;
 		depthStencilStateInfo.stencilTestEnable = VK_FALSE;
@@ -1580,12 +1607,17 @@ void load_pipelines_and_descriptors() {
 	drawDataDescriptorSet.init()
 		.sampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
 		.uniform_buffer(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT) // draw data
-		.texture_array(2, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
+		.sampled_image(2, VK_SHADER_STAGE_FRAGMENT_BIT) // cubemap
+		.sampled_image_array_dynamic(3, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
 		.build();
 	cubemapConvolveDescriptorSet.init()
-		.storage_image(0, VK_SHADER_STAGE_COMPUTE_BIT) // input image
-		.storage_image(1, VK_SHADER_STAGE_COMPUTE_BIT)
-		.build(); // output image
+		.sampler(0, VK_SHADER_STAGE_COMPUTE_BIT) // bilinear sampler
+		.storage_image_array(1, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output mip
+		.sampled_image(2, VK_SHADER_STAGE_COMPUTE_BIT) // input cube
+		.sampled_image(3, VK_SHADER_STAGE_COMPUTE_BIT) // input equirect
+		.sampled_image(4, VK_SHADER_STAGE_COMPUTE_BIT) // input cube array layers
+		.storage_image_array(5, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output convolve
+		.build();
 
 	VkWriteDescriptorSet drawDataDescriptorWrites[2]{};
 	VkWriteDescriptorSet& samplerDesc = drawDataDescriptorWrites[0];
@@ -1628,6 +1660,7 @@ void load_pipelines_and_descriptors() {
 	debugPipeline = GraphicsPipelineBuilder{}.set_default().layout(drawPipelineLayout).shader_name("./resources/shaders/debug.spv"a).build();
 	debugLinesPipeline = GraphicsPipelineBuilder{}.set_default().primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).layout(drawPipelineLayout).shader_name("./resources/shaders/debug.spv"a).build();
 	debugPointsPipeline = GraphicsPipelineBuilder{}.set_default().primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).layout(drawPipelineLayout).shader_name("./resources/shaders/debug.spv"a).build();
+	tmpBackgroundPipeline = GraphicsPipelineBuilder{}.set_default().depth_test(false).depth_write(false).layout(drawPipelineLayout).shader_name("./resources/shaders/background.spv"a).build();
 
 	skinningPipelineLayout = PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel))
@@ -1635,11 +1668,14 @@ void load_pipelines_and_descriptors() {
 		.build();
 	skinningPipeline = build_compute_pipeline("./resources/shaders/skinning.spv"a, skinningPipelineLayout);
 
-	cubemapConvolvePipelineLayout = PipelineLayoutBuilder{}.set_default()
-		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapConvolveInfo))
+	cubemapComputePipelineLayout = PipelineLayoutBuilder{}.set_default()
+		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo))
 		.set_layout(cubemapConvolveDescriptorSet.setLayout)
 		.build();
-	cubemapConvolvePipeline = build_compute_pipeline("./resources/shaders/cubemap_convolve.spv"a, cubemapConvolvePipelineLayout);
+	cubemapConvolvePipeline = build_compute_pipeline("./resources/shaders/cubemap_convolve.spv"a, cubemapComputePipelineLayout);
+	cubemapFromEquirectPipeline = build_compute_pipeline("./resources/shaders/cubemap_from_equirect.spv"a, cubemapComputePipelineLayout);
+	cubemapMipgenPipeline = build_compute_pipeline("./resources/shaders/cubemap_mipgen.spv"a, cubemapComputePipelineLayout);
+	brdfLutPipeline = build_compute_pipeline("./resources/shaders/brdf_lut.spv"a, cubemapComputePipelineLayout);
 }
 
 void finish_startup() {
@@ -1711,8 +1747,6 @@ FrameBeginResult begin_frame() {
 	CHK_VK(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
 	
 	{ // Update frame uniforms
-		
-
 		DrawDataUniforms drawData;
 		drawData.screenDimensions = V2F{ F32(mainFramebuffer.framebufferWidth), F32(mainFramebuffer.framebufferHeight) };
 		drawData.uiClipBoxes = UI::clipBoxBuffers[currentFrameInFlight].gpuAddress;
@@ -1914,7 +1948,6 @@ void end_frame(bool shouldRender) {
 }
 
 void end_vulkan() {
-	vkDeviceWaitIdle(logicalDevice);
 	desktopSwapchainData.destroy();
 	uniformMatricesHandler.destroy();
 	geometryHandler.destroy();

@@ -41,8 +41,8 @@ struct EditorPlayer {
 		V2F deltaMouse = Win32::get_raw_delta_mouse();
 		F32 sensitivity = 0.0005F;
 		yaw += deltaMouse.x * sensitivity;
-		//pitch = clamp(pitch + deltaMouse.y * sensitivity, -0.24999F, 0.24999F);
-		pitch += deltaMouse.y * sensitivity;
+		pitch = clamp(pitch + deltaMouse.y * sensitivity, -0.24999F, 0.24999F);
+		//pitch += deltaMouse.y * sensitivity;
 
 		QF32 localToWorld = AxisAngleF{ { 0.0F, 1.0F, 0.0F }, -yaw }.to_qf32() * AxisAngleF { { 1.0F, 0.0F, 0.0F }, -pitch }.to_qf32();
 		forward = localToWorld * V3F{ 0.0F, 0.0F, -1.0F };

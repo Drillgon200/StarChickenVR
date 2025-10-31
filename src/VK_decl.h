@@ -165,9 +165,11 @@ const U32 FRAMES_IN_FLIGHT = 2;
 
 extern U32 currentFrameInFlight;
 
-static constexpr U32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V2F32) + sizeof(V3F32) + sizeof(V3F32);
-static constexpr U32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(U8) * 4 + sizeof(U8) * 4;
-static constexpr U32 VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V3F32) + sizeof(V3F32);
+const U32 VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V2F32) + sizeof(V3F32) + sizeof(V3F32);
+const U32 VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE = sizeof(U8) * 4 + sizeof(U8) * 4;
+const U32 VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE = sizeof(V3F32) + sizeof(V3F32) + sizeof(V3F32);
+
+const U32 MAX_MIP_LEVEL = 17; // We will never have a texture bigger than 16k
 
 struct XrSwapchainData {
 	// Set at init time when the swapchain is created
@@ -288,9 +290,12 @@ struct GPUModelInfo {
 	U32 transformIdx;
 	I32 verticesOffset;
 };
-struct CubemapConvolveInfo {
+struct CubemapPipelineInfo {
 	V2U inputDim;
 	V2U outputDim;
+	F32 roughness;
+	U32 outputIdx;
+	U32 inputIdx;
 };
 #pragma pack(pop)
 
@@ -344,8 +349,11 @@ struct DescriptorSet {
 	DescriptorSet& storage_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
 	DescriptorSet& uniform_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
 	DescriptorSet& sampler(U32 bindingIndex, VkShaderStageFlags stageFlags);
-	DescriptorSet& texture_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize);
+	DescriptorSet& sampled_image_array_dynamic(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize);
+	DescriptorSet& sampled_image_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 arraySize);
+	DescriptorSet& storage_image_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 arraySize);
 	DescriptorSet& storage_image(U32 bindingIdx, VkShaderStageFlags stageFlags);
+	DescriptorSet& sampled_image(U32 bindingIdx, VkShaderStageFlags stageFlags);
 
 	void build();
 

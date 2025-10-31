@@ -743,7 +743,9 @@ struct DSLCompiler {
 
 	EnabledExtensions enabledExtensions;
 	Type* defaultTypeVoid, * defaultTypeBool, * defaultTypeI32, * defaultTypeU32, * defaultTypeF32, * defaultTypeSampler;
-	SpvId addCarryStructTypeId;
+	// Used for instructions that return structs, such as AddCarry, UMulExtended, and FrexpStruct
+	SpvId twoU32StructTypeId;
+	SpvId oneF32OneI32StructTypeId;
 	SpvId glsl450InstructionSet;
 
 	DLSCompileErrorCallback errorCallback;
@@ -1937,8 +1939,8 @@ struct DSLCompiler {
 	ADD_MULTI_OP_BINARY_OPERATOR("atan2"a, type, typeId, typeId, \
 		return (op_f_atan2(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1])); \
 	);\
-	ADD_MULTI_OP_UNARY_OPERATOR("pow"a, type, typeId, \
-		return (op_f_pow(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	ADD_MULTI_OP_BINARY_OPERATOR("pow"a, type, typeId, typeId, \
+		return (op_f_pow(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1])); \
 	);\
 	ADD_MULTI_OP_UNARY_OPERATOR("exp"a, type, typeId, \
 		return (op_f_exp(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
@@ -1946,12 +1948,39 @@ struct DSLCompiler {
 	ADD_MULTI_OP_UNARY_OPERATOR("log"a, type, typeId, \
 		return (op_f_log(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
 	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("exp2"a, type, typeId, \
+		return (op_f_exp2(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("log2"a, type, typeId, \
+		return (op_f_log2(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
 	ADD_MULTI_OP_UNARY_OPERATOR("sqrt"a, type, typeId, \
 		return (op_f_sqrt(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
 	);\
 	ADD_MULTI_OP_UNARY_OPERATOR("invsqrt"a, type, typeId, \
 		return (op_f_invsqrt(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
-	);
+	);\
+	ADD_MULTI_OP_BINARY_OPERATOR("reflect"a, type, typeId, typeId, \
+		return (op_f_reflect(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("round"a, type, typeId, \
+		return (op_f_round(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("trunc"a, type, typeId, \
+		return (op_f_trunc(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("abs"a, type, typeId, \
+		return (op_f_abs(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("floor"a, type, typeId, \
+		return (op_f_floor(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("ceil"a, type, typeId, \
+		return (op_f_ceil(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
+	ADD_MULTI_OP_UNARY_OPERATOR("fract"a, type, typeId, \
+		return (op_f_fract(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
+	);\
 	
 	
 
@@ -2206,18 +2235,37 @@ struct DSLCompiler {
 			return (op_cross(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1])); \
 		);
 
-		addCarryStructTypeId = nextSpvId++;
+		twoU32StructTypeId = nextSpvId++;
 		ADD_MULTI_OP_BINARY_OPERATOR("v2u_u64_add"a, &v2u32Type->type, v2u32Id, u32Id, \
 			U32 idx0 = 0;\
 			U32 idx1 = 1;\
 			SpvId low = (op_composite_extract(codeOutput, compiler.defaultTypeU32->id, compiler.nextSpvId++, params[0], &idx0, 1));\
 			SpvId high = (op_composite_extract(codeOutput, compiler.defaultTypeU32->id, compiler.nextSpvId++, params[0], &idx1, 1));\
-			SpvId carried = (op_i_add_carry(codeOutput, compiler.addCarryStructTypeId, compiler.nextSpvId++, low, params[1]));\
+			SpvId carried = (op_i_add_carry(codeOutput, compiler.twoU32StructTypeId, compiler.nextSpvId++, low, params[1]));\
 			SpvId newLow = (op_composite_extract(codeOutput, compiler.defaultTypeU32->id, compiler.nextSpvId++, carried, &idx0, 1));\
 			SpvId carry = (op_composite_extract(codeOutput, compiler.defaultTypeU32->id, compiler.nextSpvId++, carried, &idx1, 1));\
 			SpvId readdCarry = (op_i_add(codeOutput, compiler.defaultTypeU32->id, compiler.nextSpvId++, high, carry));\
 			SpvId v2Members[2]{ newLow COMMA readdCarry };\
 			return (op_composite_construct(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, v2Members, 2)); \
+		);
+		ADD_MULTI_OP_BINARY_OPERATOR("mulhi"a, u32Type, u32Id, u32Id, \
+			U32 idx1 = 1;\
+			SpvId extended = (op_u_mul_extended(codeOutput, compiler.twoU32StructTypeId, compiler.nextSpvId++, params[0], params[1]));\
+			return (op_composite_extract(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, extended, &idx1, 1)); \
+		);
+		oneF32OneI32StructTypeId = nextSpvId++;
+		ADD_MULTI_OP_UNARY_OPERATOR("f32_significand"a, f32Type, f32Id, \
+			U32 idx0 = 0;\
+			SpvId frexp = (op_frexp(codeOutput, compiler.oneF32OneI32StructTypeId, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0]));\
+			return (op_composite_extract(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, frexp, &idx0, 1)); \
+		);
+		ADD_MULTI_OP_UNARY_OPERATOR("f32_exponent"a, i32Type, f32Id, \
+			U32 idx1 = 1;\
+			SpvId frexp = (op_frexp(codeOutput, compiler.oneF32OneI32StructTypeId, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0]));\
+			return (op_composite_extract(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, frexp, &idx1, 1)); \
+		);
+		ADD_MULTI_OP_BINARY_OPERATOR("f32_from_exponent_significand"a, f32Type, u32Id, f32Id, \
+			return (op_ldexp(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[1], params[0])); \
 		);
 
 		Type* samplerType = defaultTypeSampler = arena->zalloc<Type>(1);
@@ -2657,10 +2705,19 @@ struct DSLCompiler {
 					imageType.type.typeName = name;
 					imageType.type.id = nextSpvId++;
 					if (imageType.dimension != DIMENSIONALITY_BUFFER && imageType.dimension != DIMENSIONALITY_SUBPASS_DATA) {
+						U32 coordComponentCount =
+							imageType.dimension == DIMENSIONALITY_1D ? 1 :
+							imageType.dimension == DIMENSIONALITY_2D ? 2 :
+							imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? 3 :
+							4;
+						if (imageType.arrayed) {
+							coordComponentCount = min(4u, coordComponentCount + 1u);
+						}
 						if (imageType.sampled == 2) { // Storage image
-							SpvId coordTypeId = imageType.dimension == DIMENSIONALITY_1D ? defaultTypeU32->id :
-								imageType.dimension == DIMENSIONALITY_2D ? reinterpret_cast<ScalarType*>(defaultTypeU32)->v2Type->type.id :
-								imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? reinterpret_cast<ScalarType*>(defaultTypeU32)->v3Type->type.id :
+							SpvId coordTypeId =
+								coordComponentCount == 1 ? defaultTypeU32->id :
+								coordComponentCount == 2 ? reinterpret_cast<ScalarType*>(defaultTypeU32)->v2Type->type.id :
+								coordComponentCount == 3 ? reinterpret_cast<ScalarType*>(defaultTypeU32)->v3Type->type.id :
 								reinterpret_cast<ScalarType*>(defaultTypeU32)->v4Type->type.id;
 
 							SpvId* argTypes = arena->alloc<SpvId>(2);
@@ -2701,9 +2758,10 @@ struct DSLCompiler {
 								return op_sampled_image(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
 							} }));
 
-							SpvId coordTypeId = imageType.dimension == DIMENSIONALITY_1D ? defaultTypeF32->id :
-								imageType.dimension == DIMENSIONALITY_2D ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v2Type->type.id :
-								imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v3Type->type.id :
+							SpvId coordTypeId =
+								coordComponentCount == 1 ? defaultTypeF32->id :
+								coordComponentCount == 2 ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v2Type->type.id :
+								coordComponentCount == 3 ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v3Type->type.id :
 								reinterpret_cast<ScalarType*>(defaultTypeF32)->v4Type->type.id;
 
 							argTypes = arena->alloc<SpvId>(2);
@@ -2723,6 +2781,18 @@ struct DSLCompiler {
 								SpvId sampledImageType = SpvId(proc.userData);
 								SpvId sampledImage = op_sampled_image(codeOutput, sampledImageType, compiler.nextSpvId++, params[0], params[1]);
 								return op_image_sample_implicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, sampledImage, params[2]);
+							}, imageType.sampledImageType->id }));
+
+							argTypes = arena->alloc<SpvId>(4);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = defaultTypeSampler->id;
+							argTypes[2] = coordTypeId;
+							argTypes[3] = defaultTypeF32->id;
+							signature = ProcedureType{ ProcedureIdentifier{ "operator[]"a, argTypes, 4 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								SpvId sampledImageType = SpvId(proc.userData);
+								SpvId sampledImage = op_sampled_image(codeOutput, sampledImageType, compiler.nextSpvId++, params[0], params[1]);
+								return op_image_sample_explicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, sampledImage, params[2], IMAGE_OPERAND_LOD, params[3]);
 							}, imageType.sampledImageType->id }));
 						}
 						
@@ -4371,18 +4441,10 @@ struct DSLCompiler {
 		}
 
 		// Type declarations, constants, global variables here
-		for (Type* type : allTypes) {
-			emit_type_definition(finalCode, type);
-		}
-		SpvId addCarryTypeMembers[2]{ defaultTypeU32->id, defaultTypeU32->id };
-		op_type_struct(finalCode, addCarryStructTypeId, addCarryTypeMembers, 2);
-		for (U32 i = 0; i < procedureTypeToSpvId.capacity; i++) {
-			ProcedureType& key = procedureTypeToSpvId.keys[i];
-			if (key == procedureTypeToSpvId.emptyKey) {
-				continue;
-			}
-			op_type_function(finalCode, procedureTypeToSpvId.values[i], key.returnType->id, key.identifier.argTypes, key.identifier.numArgs);
-		}
+		emit_type_definition(finalCode, defaultTypeBool);
+		emit_type_definition(finalCode, defaultTypeI32);
+		emit_type_definition(finalCode, defaultTypeU32);
+		emit_type_definition(finalCode, defaultTypeF32);
 		for (U32 i = 0; i < savedConstants.capacity; i++) {
 			Token constant = savedConstants.keys[i];
 			if (constant == savedConstants.emptyKey || constant.type == TOKEN_IDENTIFIER) {
@@ -4405,6 +4467,21 @@ struct DSLCompiler {
 			case TOKEN_F64: generation_error("F64 constants not yet supported"a, constantOp); break;
 			default: generation_error("Supposed literal did not have literal type"a, constantOp); break;
 			}
+		}
+
+		for (Type* type : allTypes) {
+			emit_type_definition(finalCode, type);
+		}
+		SpvId twoU32TypeMembers[2]{ defaultTypeU32->id, defaultTypeU32->id };
+		op_type_struct(finalCode, twoU32StructTypeId, twoU32TypeMembers, 2);
+		SpvId oneU32OneF32TypeMembers[2]{ defaultTypeF32->id, defaultTypeI32->id };
+		op_type_struct(finalCode, oneF32OneI32StructTypeId, oneU32OneF32TypeMembers, 2);
+		for (U32 i = 0; i < procedureTypeToSpvId.capacity; i++) {
+			ProcedureType& key = procedureTypeToSpvId.keys[i];
+			if (key == procedureTypeToSpvId.emptyKey) {
+				continue;
+			}
+			op_type_function(finalCode, procedureTypeToSpvId.values[i], key.returnType->id, key.identifier.argTypes, key.identifier.numArgs);
 		}
 		for (ShaderSection& section : shaderSections) {
 			if (section.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE) {

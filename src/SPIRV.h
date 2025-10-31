@@ -695,6 +695,27 @@ enum ImageFormat {
 	IMAGE_FORMAT_R64I
 };
 
+enum ImageOperand {
+	IMAGE_OPERAND_NONE = 0x0,
+	IMAGE_OPERAND_BIAS = 0x1,
+	IMAGE_OPERAND_LOD = 0x2,
+	IMAGE_OPERAND_GRAD = 0x4,
+	IMAGE_OPERAND_CONST_OFFSET = 0x8,
+	IMAGE_OPERAND_OFFSET = 0x10,
+	IMAGE_OPERAND_CONST_OFFSETS = 0x20,
+	IMAGE_OPERAND_SAMPLE = 0x40,
+	IMAGE_OPERAND_MIN_LOD = 0x80,
+	IMAGE_OPERAND_MAKE_TEXEL_AVAILABLE = 0x100,
+	IMAGE_OPERAND_MAKE_TEXEL_VISIBLE = 0x200,
+	IMAGE_OPERAND_NON_PRIVATE_TEXEL = 0x400,
+	IMAGE_OPERAND_VOLATILE_TEXEL = 0x800,
+	IMAGE_OPERAND_SIGN_EXTEND = 0x1000,
+	IMAGE_OPERAND_ZERO_EXTEND = 0x2000,
+	IMAGE_OPERAND_NONTEMPORAL = 0x4000,
+	IMAGE_OPERAND_OFFSETS = 0x10000,
+};
+typedef U32 ImageOperands;
+
 // Again ignoring the INTEL ones
 const U32 NUM_MEMORY_OPERANDS = 6;
 const U32 NUM_MEMORY_OPERANDS_WITH_ARGUMENT = 3;
@@ -988,6 +1009,7 @@ SPV_BINARY_OP(op_bit_or, 197)
 SPV_BINARY_OP(op_bit_xor, 198)
 SPV_BINARY_OP(op_bit_and, 199)
 SPV_BINARY_OP(op_i_add_carry, 149)
+SPV_BINARY_OP(op_u_mul_extended, 151)
 SPV_UNARY_OP(op_bit_not, 200)
 SPV_UNARY_OP(op_logical_not, 168)
 SpvId op_bitfield_insert(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, SpvId insert, SpvId offset, SpvId count) {
@@ -1092,6 +1114,11 @@ SpvId op_sampled_image(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId
 SpvId op_image_sample_implicit_lod(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId sampledImage, SpvId coordinate) {
 	const U32 opcode = 87, wordCount = 5;
 	output.push_back(wordCount << 16 | opcode, resultType, resultId, sampledImage, coordinate);
+	return resultId;
+}
+SpvId op_image_sample_explicit_lod(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId sampledImage, SpvId coordinate, ImageOperands lodImageOperand, SpvId lod) {
+	const U32 opcode = 88, wordCount = 7;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, sampledImage, coordinate, lodImageOperand, lod);
 	return resultId;
 }
 SpvId op_image_read(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId image, SpvId coordinate) {
@@ -1268,11 +1295,12 @@ SpvId op_f_atan(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId result
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 18, &x, 1);
 }
 SpvId op_f_atan2(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId y, SpvId x) {
-	SpvId args[3]{ y, x };
+	SpvId args[2]{ y, x };
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 25, args, 2);
 }
-SpvId op_f_pow(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
-	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 26, &x, 1);
+SpvId op_f_pow(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId y) {
+	SpvId args[2]{ x, y };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 26, args, 2);
 }
 SpvId op_f_exp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 27, &x, 1);
@@ -1280,12 +1308,48 @@ SpvId op_f_exp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultI
 SpvId op_f_log(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 28, &x, 1);
 }
+SpvId op_f_exp2(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 29, &x, 1);
+}
+SpvId op_f_log2(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 30, &x, 1);
+}
 SpvId op_f_sqrt(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 31, &x, 1);
 }
 SpvId op_f_invsqrt(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 32, &x, 1);
 }
+SpvId op_f_reflect(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId i, SpvId n) {
+	SpvId args[2]{ i, n };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 71, args, 2);
+}
+SpvId op_f_round(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 1, &x, 1);
+}
+SpvId op_f_trunc(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 3, &x, 1);
+}
+SpvId op_f_abs(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 4, &x, 1);
+}
+SpvId op_f_floor(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 8, &x, 1);
+}
+SpvId op_f_ceil(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 9, &x, 1);
+}
+SpvId op_f_fract(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 10, &x, 1);
+}
+SpvId op_frexp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x) {
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 52, &x, 1);
+}
+SpvId op_ldexp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId glsl450InstructionSet, SpvId x, SpvId exp) {
+	SpvId args[2]{ x, exp };
+	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 53, args, 2);
+}
+
 
 
 }

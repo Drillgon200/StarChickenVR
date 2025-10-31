@@ -300,7 +300,7 @@ struct UniformMatricesHandler {
 		return offset;
 	}
 
-	void set_eye_matrices(ProjectiveTransformMatrix left, ProjectiveTransformMatrix right) {
+	void set_eye_matrices(ProjectiveTransformMatrix& left, ProjectiveTransformMatrix& right, PerspectiveProjection& projLeft, PerspectiveProjection& projRight, M4x3F& viewLeft, M4x3F& viewRight) {
 		// These two aren't really Matrix4x3fs, since the third row is omitted instead of the fourth, but they will fit in a Matrix4x3f
 		memoryMapping[1] = M4x3F32{
 			left.m00, left.m01, left.m02, left.m03,
@@ -312,6 +312,12 @@ struct UniformMatricesHandler {
 			right.m10, right.m11, right.m12, right.m13,
 			right.m30, right.m31, right.m32, right.m33
 		};
+		// I am lazy so we're going to do a bit of a hack here and just stuff the 5 projection numbers into a M4x3F linearly
+		// Surely this won't come back to bite me later...
+		memoryMapping[3] = M4x3F{ projLeft.xScale, projLeft.yScale, projLeft.xZBias, projLeft.yZBias, projLeft.nearPlane };
+		memoryMapping[4] = M4x3F{ projRight.xScale, projRight.yScale, projRight.xZBias, projRight.yZBias, projRight.nearPlane };
+		memoryMapping[5] = viewLeft;
+		memoryMapping[6] = viewRight;
 	}
 
 	void flush_memory() {
@@ -323,8 +329,8 @@ struct UniformMatricesHandler {
 	}
 
 	void reset() {
-		// First 3 are identity and two eye matrices
-		matrixOffset = 3;
+		// First 7 are identity and two eye viewproj/proj/view matrices
+		matrixOffset = 7;
 	}
 };
 

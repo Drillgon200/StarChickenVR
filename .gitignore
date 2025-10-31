@@ -363,3 +363,5 @@ MigrationBackup/
 FodyWeavers.xsd
 
 spv_test_output
+cubemap_test
+*.spv

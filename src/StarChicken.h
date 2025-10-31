@@ -223,8 +223,15 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		scissor.extent.width = VK::mainFramebuffer.framebufferWidth;
 		scissor.extent.height = VK::mainFramebuffer.framebufferHeight;
 		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
-		VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+
+		if (CubemapGen::hasCubemap) {
+			// Fill in background
+			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
+			VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+		}
+		
+		VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 
 		{ // Draw world geometry
 			VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
@@ -329,7 +336,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			ProjectiveTransformMatrix leftProjectiveTransform, rightProjectiveTransform;
 			leftProjectiveTransform.generate(leftProjection, leftTransform);
 			rightProjectiveTransform.generate(rightProjection, rightTransform);
-			VK::uniformMatricesHandler.set_eye_matrices(leftProjectiveTransform, rightProjectiveTransform);
+			VK::uniformMatricesHandler.set_eye_matrices(leftProjectiveTransform, rightProjectiveTransform, leftProjection, rightProjection, leftTransform, rightTransform);
 		}
 	} else {
 		PerspectiveProjection proj;
@@ -345,7 +352,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		view.translate(-playerEye);*/
 		ProjectiveTransformMatrix viewProj;
 		viewProj.generate(proj, view);
-		VK::uniformMatricesHandler.set_eye_matrices(viewProj, viewProj);
+		VK::uniformMatricesHandler.set_eye_matrices(viewProj, viewProj, proj, proj, view, view);
 	}
 	VK::uniformMatricesHandler.flush_memory();
 
@@ -489,11 +496,13 @@ U32 run_star_chicken() {
 		print("Shutting down OpenXR...\n");
 		XR::end_openxr();
 	}
+	
+	UI::destroy_ui();
+	print("Shutting down Vulkan...\n");
+	VK::vkDeviceWaitIdle(VK::logicalDevice);
 	if (isInEditorMode) {
 		CubemapGen::destroy();
 	}
-	UI::destroy_ui();
-	print("Shutting down Vulkan...\n");
 	VK::end_vulkan();
 
 	if (Win32::timeEndPeriod_ptr) {

@@ -1248,8 +1248,15 @@ struct ProjectiveTransformMatrix {
 		//m20, m21, m22, m23,
 		m30, m31, m32, m33;
 
-	FINLINE void generate(PerspectiveProjection projection, M4x3F32 transform) {
+	void generate(PerspectiveProjection projection, M4x3F32 transform) {
 		// projectiveTransformMatrix = projectionMatrix * transformMatrix
+		/*
+		projectionMatrix = 
+		[ xScale, 0,      xZBias, 0]
+		[ 0,      yScale, yZBias, 0]
+		[ 0,      0,      0,      0] (z component set to nearPlane by shader)
+		[ 0,      0,      -1,     0]
+		*/
 		m00 = transform.m00 * projection.xScale + transform.m20 * projection.xZBias;
 		m01 = transform.m01 * projection.xScale + transform.m21 * projection.xZBias;
 		m02 = transform.m02 * projection.xScale + transform.m22 * projection.xZBias;

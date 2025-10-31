@@ -64,7 +64,7 @@ struct Vertex {
 #shader fragment
 
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
-[uniform, set 0, binding 2] &Image2DSampled[] textures;
+[uniform, set 0, binding 3] &Image2DSampled[] textures;
 
 [output, location 0] &V4F fragColor;
 
