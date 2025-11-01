@@ -113,7 +113,8 @@ VkPipelineLayout cubemapComputePipelineLayout;
 VkPipeline cubemapConvolvePipeline;
 VkPipeline cubemapFromEquirectPipeline;
 VkPipeline cubemapMipgenPipeline;
-VkPipeline brdfLutPipeline;
+VkPipeline brdfTRLutPipeline;
+VkPipeline brdfEONLutPipeline;
 
 
 XrSwapchainData xrSwapchainData;
@@ -1616,7 +1617,10 @@ void load_pipelines_and_descriptors() {
 		.sampled_image(2, VK_SHADER_STAGE_COMPUTE_BIT) // input cube
 		.sampled_image(3, VK_SHADER_STAGE_COMPUTE_BIT) // input equirect
 		.sampled_image(4, VK_SHADER_STAGE_COMPUTE_BIT) // input cube array layers
-		.storage_image_array(5, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output convolve
+		.storage_image_array(5, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output tr convolve
+		.storage_image_array(6, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output eon convolve
+		.storage_image(7, VK_SHADER_STAGE_COMPUTE_BIT) // output tr lut
+		.storage_image(8, VK_SHADER_STAGE_COMPUTE_BIT) // output eon lut
 		.build();
 
 	VkWriteDescriptorSet drawDataDescriptorWrites[2]{};
@@ -1675,7 +1679,8 @@ void load_pipelines_and_descriptors() {
 	cubemapConvolvePipeline = build_compute_pipeline("./resources/shaders/cubemap_convolve.spv"a, cubemapComputePipelineLayout);
 	cubemapFromEquirectPipeline = build_compute_pipeline("./resources/shaders/cubemap_from_equirect.spv"a, cubemapComputePipelineLayout);
 	cubemapMipgenPipeline = build_compute_pipeline("./resources/shaders/cubemap_mipgen.spv"a, cubemapComputePipelineLayout);
-	brdfLutPipeline = build_compute_pipeline("./resources/shaders/brdf_lut.spv"a, cubemapComputePipelineLayout);
+	brdfTRLutPipeline = build_compute_pipeline("./resources/shaders/brdf_tr_lut.spv"a, cubemapComputePipelineLayout);
+	brdfEONLutPipeline = build_compute_pipeline("./resources/shaders/brdf_eon_lut.spv"a, cubemapComputePipelineLayout);
 }
 
 void finish_startup() {

@@ -497,9 +497,9 @@ U32 run_star_chicken() {
 		XR::end_openxr();
 	}
 	
-	UI::destroy_ui();
 	print("Shutting down Vulkan...\n");
-	VK::vkDeviceWaitIdle(VK::logicalDevice);
+	CHK_VK(VK::vkDeviceWaitIdle(VK::logicalDevice));
+	UI::destroy_ui();
 	if (isInEditorMode) {
 		CubemapGen::destroy();
 	}

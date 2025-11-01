@@ -1,7 +1,7 @@
 #version 2
 #shader compute
 
-[set 0, binding 1, uniform] &ImageCubeStorageRGBA8 outputImage;
+[set 0, binding 7, uniform] &ImageCubeStorageRG8 outputTR;
 
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
@@ -116,7 +116,7 @@
 
 	// This is the BRDF part of the split sum approximation (assuming integral[vary normal and view and roughness](L * BRDF) ~= integral[vary normal and roughness, assume E=N](L * BRDF) * integral[vary nDotV and roughness, N=constant](BRDF))
 	/*
-	For dielectric trowbridge reitz, we're trying to integrate this functinon
+	For dielectric trowbridge reitz, we're trying to integrate this function
 	(r + (1 - r) * (1 - LdotH)^5) * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotL * NdotV * 4pi)
 	Where
 	L = to light
