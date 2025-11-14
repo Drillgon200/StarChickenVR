@@ -167,6 +167,8 @@ enum Key {
 	X(SetProcessDPIAware)\
 	X(LoadIconA)\
 	X(GetCursorPos)\
+	X(WindowFromPoint)\
+	X(GetForegroundWindow)\
 	X(ScreenToClient)\
 	X(RegisterRawInputDevices)\
 	X(ClientToScreen)\
@@ -407,6 +409,9 @@ LRESULT CALLBACK window_callback(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 		}
 	} break;
 	case WM_INPUT: {
+		if (pGetForegroundWindow() != window) {
+			break;
+		}
 		UINT size = sizeof(RAWINPUT);
 		pGetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER));
 		MemoryArena& stackArena = get_scratch_arena();
@@ -433,6 +438,7 @@ LRESULT CALLBACK window_callback(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 					mouseDX += rawMouse.lLastX;
 					mouseDY += rawMouse.lLastY;
 				}
+
 				POINT point{};
 				pGetCursorPos(&point);
 				pScreenToClient(window, &point);

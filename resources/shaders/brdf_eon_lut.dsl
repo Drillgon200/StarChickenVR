@@ -46,8 +46,8 @@
 	F32 directionalAlbedo1{ A + B * directional_albedo_g_approx_oren_nayar(nDotL) };
 	F32 directionalAlbedo2{ A + B * directional_albedo_g_approx_oren_nayar(nDotV) };
 
-	V3F diffuseOrenNayar{ diffuseColor * PI_RCP * (A + B * s * tRcp);
-	V3F energyCompensation{ colorMultiscattering * ((1.0 - directionalAlbedo1) * (1.0 - directionalAlbedo2) / (1.0 - albedoAverage));
+	V3F diffuseOrenNayar{ diffuseColor * PI_RCP * (A + B * s * tRcp) };
+	V3F energyCompensation{ colorMultiscattering * ((1.0 - directionalAlbedo1) * (1.0 - directionalAlbedo2) / (1.0 - albedoAverage)) };
 	return diffuseOrenNayar + energyCompensation;
 };
 
@@ -92,8 +92,8 @@
 	V2F integral{ 0.0, 0.0 };
 	U32 samplesPhi{ 1024u };
 	U32 samplesTheta{ 256u };
-	for U32 i{ 0u }; i < samplesPhi; i = i + 1 {
-		for U32 j{ 0u }; j < samplesTheta; j = j + 1 {
+	for U32 i{ 0u }; i < samplesPhi; i = i + 1u {
+		for U32 j{ 0u }; j < samplesTheta; j = j + 1u {
 			F32 t{ F32(j) / 256.0 * 0.5 * PI };
 			F32 p{ F32(i) / 1024.0 * 2.0 * PI };
 			V3F toLight{ cos(p) * cos(t), sin(t), sin(p) * cos(t) };
@@ -101,8 +101,8 @@
 			F32 vDotL{ dot(toEye, toLight) };
 			F32 s{ vDotL - nDotL * nDotV };
 			F32 tRcp{ if s <= 0.0 { 1.0 } else { 1.0 / max(nDotL, nDotV) } };
-			F32 diffuse{ (A + B * PI_RCP * s * tRcp };
-			F32 comp{ (1 - (A + B * directional_albedo_g_approx_oren_nayar(nDotL))) * (1 - (A + B * directional_albedo_g_approx_oren_nayar(NdotV))) / (1 - albedoAverage) };
+			F32 diffuse{ A + B * PI_RCP * s * tRcp };
+			F32 comp{ (1.0 - (A + B * directional_albedo_g_approx_oren_nayar(nDotL))) * (1.0 - (A + B * directional_albedo_g_approx_oren_nayar(nDotV))) / (1.0 - albedoAverage) };
 			integral = integral + V2F(diffuse, comp) * sin(t) * nDotL;
 		};
 	};

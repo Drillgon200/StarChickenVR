@@ -12,10 +12,20 @@
 #include "UI_decl.h"
 namespace VK {
 
+#define VK_ENABLE_VIL 1
 #define VK_ENABLE_VALIDATION_LAYERS 1
 
 //TODO enable gpu assisted validation, VkValidationFeaturesEXT
-const char* ENABLED_VALIDATION_LAYERS[]{ "VK_LAYER_KHRONOS_validation", "VK_LAYER_KHRONOS_synchronization2" };
+const char* ENABLED_VALIDATION_LAYERS[]{
+#if VK_ENABLE_VIL != 0
+	"VK_LAYER_live_introspection",
+#endif
+#if VK_ENABLE_VALIDATION_LAYERS != 0
+	"VK_LAYER_KHRONOS_validation",
+	"VK_LAYER_KHRONOS_synchronization2",
+#endif
+	"" // Extra dummy name so this array always has non zero size
+};
 
 const char* INSTANCE_EXTENSIONS[]{
 #if VK_DEBUG != 0	
@@ -477,6 +487,9 @@ bool is_suitable_device(MemoryArena& arena, VkPhysicalDevice dev) {
 			((subgroupProperties.supportedOperations & requiredSubgroupOperations) == requiredSubgroupOperations) &&
 			deviceFeatures12.descriptorIndexing &&
 			deviceFeatures12.vulkanMemoryModel &&
+#if VK_ENABLE_VIL != 0
+			deviceFeatures12.vulkanMemoryModelDeviceScope &&
+#endif
 			deviceFeatures12.samplerFilterMinmax &&
 			deviceFeatures12.shaderSampledImageArrayNonUniformIndexing &&
 			deviceFeatures12.shaderStorageBufferArrayNonUniformIndexing &&
@@ -517,7 +530,7 @@ void init_vulkan(bool useXR) {
 	xrRequiredExtensions[instanceExtensionCount] = 0;*/
 
 	ArenaArrayList<const char*> enabledLayers{ &stackArena };
-	enabledLayers.push_back_n(ENABLED_VALIDATION_LAYERS, ARRAY_COUNT(ENABLED_VALIDATION_LAYERS));
+	enabledLayers.push_back_n(ENABLED_VALIDATION_LAYERS, ARRAY_COUNT(ENABLED_VALIDATION_LAYERS) - 1);
 	ArenaArrayList<const char*> enabledExtensions{ &stackArena };
 	enabledExtensions.push_back_n(INSTANCE_EXTENSIONS, ARRAY_COUNT(INSTANCE_EXTENSIONS));
 	/*while(*xrRequiredExtensions){
@@ -708,6 +721,9 @@ allNecessaryQueuesPresent:;
 	deviceEnabledFeatures12.scalarBlockLayout = VK_TRUE;
 	deviceEnabledFeatures12.samplerFilterMinmax = VK_TRUE;
 	deviceEnabledFeatures12.vulkanMemoryModel = VK_TRUE;
+#if VK_ENABLE_VIL != 0
+	deviceEnabledFeatures12.vulkanMemoryModelDeviceScope = VK_TRUE;
+#endif
 	deviceEnabledFeatures11.pNext = &deviceEnabledFeatures12;
 
 	if (useXR) {

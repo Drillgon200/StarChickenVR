@@ -177,5 +177,5 @@
 			int2 = int2 + (1.0 - fresnel) * brdfPart;
 		};
 	};
-	write_image(^outputImage, V3U(outputCoord, faceIdx), V4F(V2F(int2, int1) / F32(sampleCount), 0.0, 1.0));
+	write_image(^outputTR, V3U(outputCoord, faceIdx), V4F(V2F(int2, int1) / F32(sampleCount), 0.0, 1.0));
 };

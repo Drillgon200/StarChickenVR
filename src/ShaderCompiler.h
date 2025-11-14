@@ -403,6 +403,7 @@ struct EnabledExtensions {
 	Flags32 shaderNonUniform : 1;
 	Flags32 sampledImageArrayNonUniformIndexing : 1;
 	Flags32 demoteToHelperInvocation : 1;
+	Flags32 storageImageExtendedFormats : 1;
 };
 
 struct DSLCompileError {
@@ -2657,47 +2658,49 @@ struct DSLCompiler {
 				else if (cfg.consume("Storage"a)) { imageType.sampled = 2; }
 
 				if (cfg.length && cfg[0] == 'R') {
+					bool extended = false;
 					if (cfg.consume("RGBA32F"a)) { imageType.format = IMAGE_FORMAT_RGBA32F; }
 					else if (cfg.consume("RGBA16F"a)) { imageType.format = IMAGE_FORMAT_RGBA16F; }
 					else if (cfg.consume("R32F"a)) { imageType.format = IMAGE_FORMAT_R32F; }
 					else if (cfg.consume("RGBA8"a)) { imageType.format = IMAGE_FORMAT_RGBA8; }
 					else if (cfg.consume("RGBA8SNORM"a)) { imageType.format = IMAGE_FORMAT_RGBA8SNORM; }
-					else if (cfg.consume("RG32F"a)) { imageType.format = IMAGE_FORMAT_RG32F; }
-					else if (cfg.consume("RG16F"a)) { imageType.format = IMAGE_FORMAT_RG16F; }
-					else if (cfg.consume("R11FG11FB10F"a)) { imageType.format = IMAGE_FORMAT_R11FG11FB10F; }
-					else if (cfg.consume("R16F"a)) { imageType.format = IMAGE_FORMAT_R16F; }
-					else if (cfg.consume("RGBA16"a)) { imageType.format = IMAGE_FORMAT_RGBA16; }
-					else if (cfg.consume("RGB10A2"a)) { imageType.format = IMAGE_FORMAT_RGB10A2; }
-					else if (cfg.consume("RG16"a)) { imageType.format = IMAGE_FORMAT_RG16; }
-					else if (cfg.consume("RG8"a)) { imageType.format = IMAGE_FORMAT_RG8; }
-					else if (cfg.consume("R16"a)) { imageType.format = IMAGE_FORMAT_R16; }
-					else if (cfg.consume("R8"a)) { imageType.format = IMAGE_FORMAT_R8; }
-					else if (cfg.consume("RGBA16SNORM"a)) { imageType.format = IMAGE_FORMAT_RGBA16SNORM; }
-					else if (cfg.consume("RG16SNORM"a)) { imageType.format = IMAGE_FORMAT_RG16SNORM; }
-					else if (cfg.consume("RG8SNORM"a)) { imageType.format = IMAGE_FORMAT_RG8SNORM; }
-					else if (cfg.consume("R16SNORM"a)) { imageType.format = IMAGE_FORMAT_R16SNORM; }
-					else if (cfg.consume("R8SNORM"a)) { imageType.format = IMAGE_FORMAT_R8SNORM; }
+					else if (cfg.consume("RG32F"a)) { imageType.format = IMAGE_FORMAT_RG32F; extended = true; }
+					else if (cfg.consume("RG16F"a)) { imageType.format = IMAGE_FORMAT_RG16F; extended = true; }
+					else if (cfg.consume("R11FG11FB10F"a)) { imageType.format = IMAGE_FORMAT_R11FG11FB10F; extended = true; }
+					else if (cfg.consume("R16F"a)) { imageType.format = IMAGE_FORMAT_R16F; extended = true; }
+					else if (cfg.consume("RGBA16"a)) { imageType.format = IMAGE_FORMAT_RGBA16; extended = true; }
+					else if (cfg.consume("RGB10A2"a)) { imageType.format = IMAGE_FORMAT_RGB10A2; extended = true; }
+					else if (cfg.consume("RG16"a)) { imageType.format = IMAGE_FORMAT_RG16; extended = true; }
+					else if (cfg.consume("RG8"a)) { imageType.format = IMAGE_FORMAT_RG8; extended = true; }
+					else if (cfg.consume("R16"a)) { imageType.format = IMAGE_FORMAT_R16; extended = true; }
+					else if (cfg.consume("R8"a)) { imageType.format = IMAGE_FORMAT_R8; extended = true; }
+					else if (cfg.consume("RGBA16SNORM"a)) { imageType.format = IMAGE_FORMAT_RGBA16SNORM; extended = true; }
+					else if (cfg.consume("RG16SNORM"a)) { imageType.format = IMAGE_FORMAT_RG16SNORM; extended = true; }
+					else if (cfg.consume("RG8SNORM"a)) { imageType.format = IMAGE_FORMAT_RG8SNORM; extended = true; }
+					else if (cfg.consume("R16SNORM"a)) { imageType.format = IMAGE_FORMAT_R16SNORM; extended = true; }
+					else if (cfg.consume("R8SNORM"a)) { imageType.format = IMAGE_FORMAT_R8SNORM; extended = true; }
 					else if (cfg.consume("RGBA32I"a)) { imageType.format = IMAGE_FORMAT_RGBA32I; }
 					else if (cfg.consume("RGBA16I"a)) { imageType.format = IMAGE_FORMAT_RGBA16I; }
 					else if (cfg.consume("RGBA8I"a)) { imageType.format = IMAGE_FORMAT_RGBA8I; }
-					else if (cfg.consume("R32I"a)) { imageType.format = IMAGE_FORMAT_R32I; }
-					else if (cfg.consume("RG32I"a)) { imageType.format = IMAGE_FORMAT_RG32I; }
-					else if (cfg.consume("RG16I"a)) { imageType.format = IMAGE_FORMAT_RG16I; }
-					else if (cfg.consume("RG8I"a)) { imageType.format = IMAGE_FORMAT_RG8I; }
-					else if (cfg.consume("R16I"a)) { imageType.format = IMAGE_FORMAT_R16I; }
-					else if (cfg.consume("R8I"a)) { imageType.format = IMAGE_FORMAT_R8I; }
+					else if (cfg.consume("R32I"a)) { imageType.format = IMAGE_FORMAT_R32I; extended = true; }
+					else if (cfg.consume("RG32I"a)) { imageType.format = IMAGE_FORMAT_RG32I; extended = true; }
+					else if (cfg.consume("RG16I"a)) { imageType.format = IMAGE_FORMAT_RG16I; extended = true; }
+					else if (cfg.consume("RG8I"a)) { imageType.format = IMAGE_FORMAT_RG8I; extended = true; }
+					else if (cfg.consume("R16I"a)) { imageType.format = IMAGE_FORMAT_R16I; extended = true; }
+					else if (cfg.consume("R8I"a)) { imageType.format = IMAGE_FORMAT_R8I; extended = true; }
 					else if (cfg.consume("RGBA32UI"a)) { imageType.format = IMAGE_FORMAT_RGBA32UI; }
 					else if (cfg.consume("RGBA16UI"a)) { imageType.format = IMAGE_FORMAT_RGBA16UI; }
 					else if (cfg.consume("RGBA8UI"a)) { imageType.format = IMAGE_FORMAT_RGBA8UI; }
 					else if (cfg.consume("R32UI"a)) { imageType.format = IMAGE_FORMAT_R32UI; }
-					else if (cfg.consume("RGB10A2UI"a)) { imageType.format = IMAGE_FORMAT_RGB10A2UI; }
-					else if (cfg.consume("RG32UI"a)) { imageType.format = IMAGE_FORMAT_RG32UI; }
-					else if (cfg.consume("RG16UI"a)) { imageType.format = IMAGE_FORMAT_RG16UI; }
-					else if (cfg.consume("RG8UI"a)) { imageType.format = IMAGE_FORMAT_RG8UI; }
-					else if (cfg.consume("R16UI"a)) { imageType.format = IMAGE_FORMAT_R16UI; }
-					else if (cfg.consume("R8UI"a)) { imageType.format = IMAGE_FORMAT_R8UI; }
-					else if (cfg.consume("R64UI"a)) { imageType.format = IMAGE_FORMAT_R64UI; }
-					else if (cfg.consume("R64I"a)) { imageType.format = IMAGE_FORMAT_R64I; }
+					else if (cfg.consume("RGB10A2UI"a)) { imageType.format = IMAGE_FORMAT_RGB10A2UI; extended = true; }
+					else if (cfg.consume("RG32UI"a)) { imageType.format = IMAGE_FORMAT_RG32UI; extended = true; }
+					else if (cfg.consume("RG16UI"a)) { imageType.format = IMAGE_FORMAT_RG16UI; extended = true; }
+					else if (cfg.consume("RG8UI"a)) { imageType.format = IMAGE_FORMAT_RG8UI; extended = true; }
+					else if (cfg.consume("R16UI"a)) { imageType.format = IMAGE_FORMAT_R16UI; extended = true; }
+					else if (cfg.consume("R8UI"a)) { imageType.format = IMAGE_FORMAT_R8UI; extended = true; }
+					else if (cfg.consume("R64UI"a)) { imageType.format = IMAGE_FORMAT_R64UI; generation_error("U64 not supported\n"a, srcOp); }
+					else if (cfg.consume("R64I"a)) { imageType.format = IMAGE_FORMAT_R64I; generation_error("I64 not supported\n"a, srcOp); }
+					enabledExtensions.storageImageExtendedFormats |= extended;
 				}
 
 				if (cfg.length == 0 && imageType.dimension != DIMENSIONALITY_Invalid) {
@@ -4324,6 +4327,7 @@ struct DSLCompiler {
 		if (enabledExtensions.shaderNonUniform)                    op_capability(finalCode, CAPABILITY_SHADER_NON_UNIFORM);
 		if (enabledExtensions.sampledImageArrayNonUniformIndexing) op_capability(finalCode, CAPABILITY_SAMPLED_IMAGE_ARRAY_NON_UNIFORM_INDEXING);
 		if (enabledExtensions.demoteToHelperInvocation)            op_capability(finalCode, CAPABILITY_DEMOTE_TO_HELPER_INVOCATION);
+		if (enabledExtensions.storageImageExtendedFormats)         op_capability(finalCode, CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS);
 
 		if (enabledExtensions.multiview) op_extension(finalCode, "SPV_KHR_multiview"a);
 
