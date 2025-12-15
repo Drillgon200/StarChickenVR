@@ -286,6 +286,15 @@ struct DedicatedBuffer {
 };
 
 #pragma pack(push, 1)
+struct GPUCameraMatrices {
+	M4x3F worldToView;
+	F32 projXScale;
+	F32 projXZBias;
+	F32 projYScale;
+	F32 projYZBias;
+	V3F position;
+	V3F direction;
+};
 struct GPUModelInfo {
 	U32 transformIdx;
 	I32 verticesOffset;
@@ -296,6 +305,22 @@ struct CubemapPipelineInfo {
 	F32 roughness;
 	U32 outputIdx;
 	U32 inputIdx;
+};
+struct DrawDataUniforms {
+	V2F screenDimensions;
+	UPtr uiClipBoxes;
+	UPtr uiVertices;
+	UPtr matrices;
+	UPtr positions;
+	UPtr texcoords;
+	UPtr normals;
+	UPtr tangents;
+	UPtr boneIndicesAndWeights;
+	UPtr skinnedPositions;
+	UPtr skinnedNormals;
+	UPtr skinnedTangents;
+	UPtr materials;
+	UPtr cameras;
 };
 #pragma pack(pop)
 

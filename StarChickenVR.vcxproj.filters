@@ -146,9 +146,6 @@
     <ClInclude Include="src\physics\RigidBody.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="resources\shaders\cubemap_convolve.dsl">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\CubemapGen.h">
       <Filter>Header Files</Filter>
     </ClInclude>

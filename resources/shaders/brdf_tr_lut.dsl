@@ -116,7 +116,7 @@
 
 	// This is the BRDF part of the split sum approximation (assuming integral[vary normal and view and roughness](L * BRDF) ~= integral[vary normal and roughness, assume E=N](L * BRDF) * integral[vary nDotV and roughness, N=constant](BRDF))
 	/*
-	For dielectric trowbridge reitz, we're trying to integrate this functinon
+	For dielectric trowbridge reitz, we're trying to integrate this function
 	(r + (1 - r) * (1 - LdotH)^5) * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotL * NdotV * 4pi)
 	Where
 	L = to light
@@ -153,6 +153,7 @@
 			F32 nDotH{ half.y };
 			F32 vDotH{ dot(toEye, half) };
 			F32 fresnel{ 1.0 - vDotH };
+			F32 pdf{ normal_distribution_trowbridge_reitz(nDotH, roughness) * nDotH };
 			fresnel = (fresnel * fresnel) * (fresnel * fresnel) * fresnel;
 			/*
 			Divide by nDotH because the PDF contained a factor of nDotH so it could integrate to 1, and we divided out the PDF (the rest of the PDF canceled with the NDF)
@@ -172,7 +173,8 @@
 			The 4 cancels with the 4 from the BRDF, and we multiply by vDotH
 			Thanks to "Physically Based Rendering: From Theory to Implementation" Third Edition pages 812-813 for clearing up that confusion
 			*/
-			F32 brdfPart{ (masking_shadowing_trowbridge_reitz(nDotL, nDotV, roughness) * vDotH) / (nDotH * nDotV) };
+			F32 ndfWeight{ vDotH / (nDotH * nDotV) };
+			F32 brdfPart{ masking_shadowing_trowbridge_reitz(nDotL, nDotV, roughness) * ndfWeight };
 			int1 = int1 + fresnel * brdfPart;
 			int2 = int2 + (1.0 - fresnel) * brdfPart;
 		};

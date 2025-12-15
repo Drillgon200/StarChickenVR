@@ -15,6 +15,13 @@ struct M4x3F {
 	V4F row2;
 };
 
+struct Material {
+	U32 colorTexIdx;
+	U32 normalTexIdx;
+	U32 roughnessTexIdx;
+	F32 ior;
+};
+
 [set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
 	V2F screenDimensions;
 	&V4F uiClipBoxes;
@@ -28,6 +35,7 @@ struct M4x3F {
 	&V3F skinnedPositions;
 	&V3F skinnedNormals;
 	&V3F skinnedTangents;
+	&Material materials;
 } drawData;
 
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;

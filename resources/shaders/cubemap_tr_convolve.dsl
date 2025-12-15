@@ -1,27 +1,51 @@
 #version 2
 #shader compute
 
-[set 0, binding 7, uniform] &ImageCubeStorageRG8 outputTR;
+[set 0, binding 0, uniform] &Sampler bilinearSampler;
+[set 0, binding 2, uniform] &ImageCubeSampled inputImageCube;
+[set 0, binding 5, uniform] &ImageU32CubeStorageR32UI[17] outputs;
 
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
 	V2U inputDimensions;
 	V2U outputDimensions;
-	// This is only used for the cubemap convolution part
 	F32 roughness;
+	U32 outputIdx;
+	U32 inputIdx;
 } pushConstants;
 
-@[F32 maskShadow][F32 nDotL, F32 nDotV, F32 roughness] masking_shadowing_trowbridge_reitz{
-	// https://jcgt.org/published/0003/02/03/paper.pdf
-	// "Physically Based Rendering: From Theory to Implementation" third edition, page 541
-	F32 a2{ roughness * roughness };
-	F32 cosIn2{ nDotL * nDotL };
-	F32 maskingShadowingIn{ 0.5 * (sqrt(1.0 + a2 * (1.0 - cosIn2) / cosIn2) - 1.0) };
-	F32 cosOut2{ nDotV * nDotV };
-	F32 maskingShadowingOut{ 0.5 * (sqrt(1.0 + a2 * (1.0 - cosOut2) / cosOut2) - 1.0) };
-	// Height correlated combination 
-	return 1.0 / (1.0 + maskingShadowingIn + maskingShadowingOut);
+@[V2F r][U32 i, U32 n] hammersley{
+    U32 bits{ i };
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >>> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >>> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >>> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >>> 8u);
+    bits = (bits << 16u) | (bits >>> 16u);
+    return V2F(F32(i) / F32(n), F32(bits) * 2.3283064365386963e-10);
 };
+
+@[V2F r][U32 i, U32 n] uniform_grid{
+	F32 n2{ sqrt(F32(n)) };
+    return V2F(F32(i) % n2 / n2, F32(i) / F32(n));
+};
+
+@[U32 packed][V3F x] pack_E5B9G9R9{
+	// The 5 bit exponent has no explicit 1 and has a bias of 15
+	V3I significand{ I32(f32_significand(x.r) * 512.0), I32(f32_significand(x.g) * 512.0), I32(f32_significand(x.b) * 512.0) };
+	V3I exponent{ f32_exponent(x.r), f32_exponent(x.g), f32_exponent(x.b) };
+	// We'll just choose the max here, I think it's more important to represent the high numbers accurately
+	I32 newExponent{ clamp(max(exponent.x, max(exponent.y, exponent.z)), -15, 16) };
+	V3I expDiff{ newExponent - exponent };
+	// Try to fit each significand to the chosen exponent.
+	// If positive difference, shift down by at most 9 (don't want to accidentally get undefined results with a big difference).
+	// If negative difference (only the case when the original exponent was bigger than 5 bits), shift up by 1, causing it to be clamped to 511.
+	V3I newSignificand{ min(V3I(511), significand >>> clamp(expDiff, V3I(0), V3I(9)) << clamp(-expDiff, V3I(0), V3I(1))) };
+	return U32(newExponent + 15) << 27u |
+		U32(newSignificand.b) << 18u |
+		U32(newSignificand.g) << 9u |
+		U32(newSignificand.r);
+};
+
 @[F32 prob][F32 nDotH, F32 roughness] normal_distribution_trowbridge_reitz{
 	// https://jcgt.org/published/0003/02/03/paper.pdf
 	F32 r2{ roughness * roughness };
@@ -40,12 +64,22 @@
 	*/
 	//F32 r1{ fract(0.5 + F32(n) * 0.75487766624) };
 	//F32 r2{ fract(0.5 + F32(n) * 0.56984029099) };
-	F32 r1{ F32(n * 0xC13FA9A9u + mulhi(n, 0x02A6328Fu) + 0x80000000u) / (4294967296.0) };
-	F32 r2{ F32(n * 0x91E10DA5u + mulhi(n, 0xC79E7B1Cu) + 0x80000000u) / (4294967296.0) };
+	F32 r1{ F32(n * 0xC13FA9A9u + mulhi(n, 0x02A6328Fu) + 0x80000000u) / 4294967296.0 };
+	F32 r2{ F32(n * 0x91E10DA5u + mulhi(n, 0xC79E7B1Cu) + 0x80000000u) / 4294967296.0 };
+	return V2F(r1, r2);
+};
+// This generates a much more regular grid than the plastic constant version.
+// This is less random, but generates significantly less noisy results than both the plastic quasirandom function and hammersley in my testing
+// I think this is because the grid is rotated, so the samples are more spread out in theta/phi when importance sampling
+@[V2F r][U32 n, U32 sampleCount] golden_ratio_grid{
+	F32 r1{ F32(n) / F32(sampleCount) };
+	//F32 r2{ fract(0.5 + F32(n) * 0.61803398875) };
+	F32 r2{ F32(n * 0x9E3779B9u + mulhi(n, 0x7F4A7C16u) + 0x80000000u) / 4294967296.0 };
 	return V2F(r1, r2);
 };
 
-@[V3F dir][U32 n, F32 roughness] importance_sample_trowbridge_reitz{
+
+@[V3F dir][U32 n, U32 sampleCount, F32 roughness] importance_sample_trowbridge_reitz{
 	/*
 	Thanks to this post for an explanation of importance sampling.
 	https://patapom.com/blog/Math/ImportanceSampling/
@@ -99,7 +133,10 @@
 	The rotation phi can just be random because the function is isotropic
 	*/
 	
-	V2F r{ quasirandom2d(n) };
+	V2F r{ golden_ratio_grid(n, sampleCount) };
+	//r = uniform_grid(n, sampleCount);
+	//r = quasirandom2d(n);
+	//r = hammersley(n, sampleCount);
 	F32 cost{ sqrt((1.0 - r.x) / ((roughness * roughness - 1.0) * r.x + 1.0)) };
 	F32 sint{ sqrt(1.0 - cost * cost) };
 	F32 p{ 2.0 * 3.1415926535 * r.y };
@@ -109,54 +146,53 @@
 [entrypoint, localsize 16 16 1] @[][] compute_main{
 	V2U outputCoord{ globalInvocationId.xy };
 	U32 faceIdx{ globalInvocationId.z };
+	V2U inputDim{ pushConstants.inputDimensions };
 	V2U outputDim{ pushConstants.outputDimensions };
 	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
 		return;
 	};
 
-	// This is the BRDF part of the split sum approximation (assuming integral[vary normal and view and roughness](L * BRDF) ~= integral[vary normal and roughness, assume E=N](L * BRDF) * integral[vary nDotV and roughness, N=constant](BRDF))
-	/*
-	For dielectric trowbridge reitz, we're trying to integrate this function
-	(r + (1 - r) * (1 - LdotH)^5) * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotL * NdotV * 4pi)
-	Where
-	L = to light
-	V = to eye
-	N = normal
-	H = normalize(L + E)
-	R = roughness
-	r = ((iorA - iorB) / (iorA + iorB))^2
-	
-	1/(4pi) can be taken out as a constant
-	(r + (1 - r) * (1 - LdotH)^5) * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotV * NdotL)
-	(r(1 - (1 - LdotH)^5) + (1 - LdotH)^5)
+	V2F faceDir{ (V2F(outputCoord) + 0.5) / V2F(outputDim) * 2.0 - 1.0 };
+	V3F dir{ 
+		if faceIdx == 0u { V3F(1.0, -faceDir.y, -faceDir.x) } // +X
+		else if faceIdx == 1u { V3F(-1.0, -faceDir.y, faceDir.x) } // -X
+		else if faceIdx == 2u { V3F(faceDir.x, 1.0, faceDir.y) } // +Y
+		else if faceIdx == 3u { V3F(faceDir.x, -1.0, -faceDir.y) } // -Y
+		else if faceIdx == 4u { V3F(faceDir.x, -faceDir.y, 1.0) } // +Z
+		else { V3F(-faceDir.x, -faceDir.y, -1.0) } // -Z
+	};
+	dir = normalize(dir);
+	// https://box2d.org/posts/2014/02/computing-a-basis/
+	V3F tan{
+		normalize(
+			if abs(dir.x) >= 0.57735 { V3F(dir.y, -dir.x, 0.0) }
+			else { V3F(0.0, dir.z, -dir.y) }
+		)
+	};
+	V3F bitan{ cross(dir, tan) };
 
-	Take out r as a constant as well. This splits the integral in two, where the full integral is calculated as Integral1 + r * Integral2.
-	(r(1 - (1 - LdotH)^5) + (1 - LdotH)^5) * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotV * NdotL)
-	Integral1: (1 - LdotH)^5 * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotV * NdotL)
-	Integral2: (1 - (1 - LdotH)^5) * (R^2 / (NdotH^2 * (R^2 - 1) + 1)^2) * (1.0 / (1.0 + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotL^2)/NdotL^2) - 1) + 0.5 * (sqrt(1.0 + R^2 * (1.0 - NdotV^2)/NdotV^2) - 1))) / (NdotV * NdotL)
-	
-	*/
+	V3F norm{ dir };
+	V3F eye{ dir };
 
-	F32 nDotV{ (F32(outputCoord.x) + 0.5) / F32(outputDim.x) };
-	V3F toEye{ sqrt(1.0 - nDotV * nDotV), nDotV, 0.0 };
-	F32 roughness{ (F32(outputCoord.y) + 0.5) / F32(outputDim.y) };
+	F32 roughness{ pushConstants.roughness };
 	roughness = roughness * roughness;
 
-	F32 int1{ 0.0 };
-	F32 int2{ 0.0 };
-	U32 sampleCount{ 8192u };
+	// Not accurate for every texel, but the mip level selection doesn't need to be accurate anyway.
+	F32 rcpTexelSolidAngle{ (F32(inputDim.x) * F32(inputDim.y) * 6.0) / (4.0 * 3.1415926535) };
+
+	V3F color{ 0.0, 0.0, 0.0 };
+	U32 sampleCount{ 16384u };
 	for U32 n{ 0 }; n < sampleCount; n = n + 1u {
-		V3F half{ importance_sample_trowbridge_reitz(n, roughness) };
-		V3F toLight{ normalize(reflect(-toEye, half)) };
-		F32 nDotL{ toLight.y };
+		V3F half{ importance_sample_trowbridge_reitz(n, sampleCount, roughness) };
+		half = half.x * tan + half.y * dir + half.z * bitan;
+		V3F toLight{ normalize(reflect(-eye, half)) };
+		F32 nDotL{ dot(toLight, norm) };
 		if nDotL > 0.0 {
-			F32 nDotH{ half.y };
-			F32 vDotH{ dot(toEye, half) };
-			F32 fresnel{ 1.0 - vDotH };
-			fresnel = (fresnel * fresnel) * (fresnel * fresnel) * fresnel;
+			F32 nDotH{ dot(half, norm) };
+			F32 vDotH{ dot(eye, half) };
 			/*
 			Divide by nDotH because the PDF contained a factor of nDotH so it could integrate to 1, and we divided out the PDF (the rest of the PDF canceled with the NDF)
-			Divide by nDotV because it's part of the BRDF. The divide by nDotL isn't present because it cancels with the multiply by nDotL when integrating the light
+			No nDotV divide because N and V are the same in this approximation
 			Our PDF is with respect to the halfway vector, but this integral is with respect to the light vector
 			We can divide out the solid angle for the half integral and multiply by the solid angle for the light integral to convert a PDF division with respect to half to a PDF division with respect to light
 			These angles are with respect to h, not the normal. Theta is the angle from the eye to the light or half vector, respectively.
@@ -172,10 +208,28 @@
 			The 4 cancels with the 4 from the BRDF, and we multiply by vDotH
 			Thanks to "Physically Based Rendering: From Theory to Implementation" Third Edition pages 812-813 for clearing up that confusion
 			*/
-			F32 brdfPart{ (masking_shadowing_trowbridge_reitz(nDotL, nDotV, roughness) * vDotH) / (nDotH * nDotV) };
-			int1 = int1 + fresnel * brdfPart;
-			int2 = int2 + (1.0 - fresnel) * brdfPart;
+			// Mipmap weighting based on GPU Gems 3
+			// https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-20-gpu-based-importance-sampling
+			F32 p{ normal_distribution_trowbridge_reitz(nDotH, roughness) * nDotH / (4.0 * vDotH) };
+			F32 sampleSolidAngle{ 1.0 / max(p * F32(sampleCount), 0.0001) };
+			F32 mipLevel{ 0.5 * log2(sampleSolidAngle * rcpTexelSolidAngle) };
+			color = color + (^inputImageCube)[^bilinearSampler, toLight, mipLevel].rgb * (vDotH / nDotH);
 		};
 	};
-	write_image(^outputTR, V3U(outputCoord, faceIdx), V4F(V2F(int2, int1) / F32(sampleCount), 0.0, 1.0));
+	color = color / F32(sampleCount);
+	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
+
+	// This code is just for debug visualization, don't mind the potential data races
+	/*
+	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(0u));
+	for U32 n{ 0 }; n < sampleCount; n = n + 1u {
+		V2F coord{ golden_ratio_grid(n, sampleCount) };
+		coord = quasirandom2d(n);
+		coord = hammersley(n, sampleCount);
+		coord = uniform_grid(n, sampleCount);
+		write_image((^outputs)[pushConstants.outputIdx], V3U(U32(coord.x * F32(outputDim.x)), U32(coord.y * F32(outputDim.y)), faceIdx), V4U(pack_E5B9G9R9(V3F(1.0))));
+	};
+	*/
+	
+	
 };

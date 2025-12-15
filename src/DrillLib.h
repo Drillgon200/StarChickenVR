@@ -117,44 +117,6 @@ FINLINE void swap(T* a, T* b) {
 	*a = tmp;
 }
 
-FINLINE U32 bswap32(U32 val) {
-	return (val >> 24) | ((val >> 8) & 0xFF00) | ((val << 8) & 0xFF0000) | (val << 24);
-}
-
-FINLINE U16 bswap16(U16 val) {
-	return U16((val >> 8) | (val << 8));
-}
-
-FINLINE U32 lzcnt32(U32 val) {
-	return _lzcnt_u32(val);
-}
-FINLINE U64 lzcnt64(U64 val) {
-	return _lzcnt_u64(val);
-}
-FINLINE U32 tzcnt32(U32 val) {
-	return _tzcnt_u32(val);
-}
-FINLINE U64 tzcnt64(U64 val) {
-	return _tzcnt_u64(val);
-}
-FINLINE U64 log2ceil32(U32 val) {
-	return 32 - _lzcnt_u32(val - 1);
-}
-FINLINE U64 log2floor32(U32 val) {
-	return 31 - _lzcnt_u32(val);
-}
-FINLINE U64 log2ceil64(U64 val) {
-	return 64 - _lzcnt_u64(val - 1);
-}
-FINLINE U64 log2floor64(U64 val) {
-	return 63 - _lzcnt_u64(val);
-}
-
-template<typename To, typename From>
-FINLINE constexpr To bitcast(const From& val) {
-	return __builtin_bit_cast(To, val);
-}
-
 DEBUG_OPTIMIZE_OFF
 
 namespace SerializeTools {

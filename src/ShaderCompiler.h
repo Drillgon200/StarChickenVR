@@ -1982,6 +1982,9 @@ struct DSLCompiler {
 	ADD_MULTI_OP_UNARY_OPERATOR("fract"a, type, typeId, \
 		return (op_f_fract(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0])); \
 	);\
+	ADD_MULTI_OP_TERNARY_OPERATOR("mix"a, type, typeId, typeId, typeId, \
+		return (op_f_mix(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1], params[2])); \
+	);
 	
 	
 
@@ -3991,6 +3994,10 @@ struct DSLCompiler {
 						type = typeTCOp.type;
 					} else if (typeTCOp.opcode == TC_OP_IDENTIFIER) {
 						type = allScopes.data[currentScope].find_type(allScopes.data, typeTCOp.vIdentifier);
+						if (!type) {
+							generation_error(strafmt(*arena, "No type exists with name: %"a, typeTCOp.vIdentifier), typeTCOp);
+							break;
+						}
 					} else {
 						generation_error("Could not resolve type for object creation"a, typeTCOp);
 						break;

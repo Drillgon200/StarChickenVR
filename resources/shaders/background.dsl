@@ -30,6 +30,23 @@ struct M4x3F {
 [input, location 0] &V2F passPos;
 [input, location 1, flat] &I32 passViewIndex;
 
+struct Camera {
+	M4x3F worldToView;
+	F32 projXScale;
+	F32 projXZBias;
+	F32 projYScale;
+	F32 projYZBias;
+	V3F position;
+	V3F direction;
+};
+
+struct Material {
+	U32 colorTexIdx;
+	U32 normalTexIdx;
+	U32 roughnessTexIdx;
+	F32 ior;
+};
+
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
 [set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
 	V2F screenDimensions;
@@ -44,8 +61,11 @@ struct M4x3F {
 	&V3F skinnedPositions;
 	&V3F skinnedNormals;
 	&V3F skinnedTangents;
+	&Material materials;
+	&Camera cams;
 } drawData;
 [uniform, set 0, binding 2] &ImageCubeSampled backgroundCube;
+[uniform, set 0, binding 3] &ImageCubeSampled diffuseCube;
 
 //TODO do some actual research into tonemappers
 // https://64.github.io/tonemapping/
@@ -66,18 +86,13 @@ struct M4x3F {
 
 [entrypoint] @[][] frag_main{
 	I32 viewIdx{ ^passViewIndex };
-	M4x3F proj{ drawData.matrices[viewIdx + 3] };
-	M4x3F view{ drawData.matrices[viewIdx + 5] };
-	F32 xScale{ proj.row0.x };
-	F32 yScale{ proj.row0.y };
-	F32 xzBias{ proj.row0.z };
-	F32 yzBias{ proj.row0.w };
-
+	Camera cam{ drawData.cams[viewIdx] };
 	V2F pos{ ^passPos };
-	V3F worldDirection{ -(pos.x - xzBias) / xScale, (pos.y - yzBias) / yScale, 1.0 };
+	V3F worldDirection{ -(pos.x - cam.projXZBias) / cam.projXScale, (pos.y - cam.projYZBias) / cam.projYScale, 1.0 };
 	worldDirection = normalize(worldDirection);
-	worldDirection = worldDirection.x * view.row0.xyz + worldDirection.y * view.row1.xyz + worldDirection.z * view.row2.xyz;
+	worldDirection = worldDirection.x * cam.worldToView.row0.xyz + worldDirection.y * cam.worldToView.row1.xyz + worldDirection.z * cam.worldToView.row2.xyz;
 	worldDirection = V3F(worldDirection.x, -worldDirection.y, worldDirection.z);
 
-	^outFragColor = V4F(uncharted2_filmic((^backgroundCube)[^bilinearSampler, worldDirection, 1.0].rgb), 1.0);
+	//^outFragColor = V4F(uncharted2_filmic((^backgroundCube)[^bilinearSampler, worldDirection, 1.0].rgb), 1.0);
+	^outFragColor = V4F(uncharted2_filmic((^diffuseCube)[^bilinearSampler, worldDirection, 0.0].rgb), 1.0);
 };

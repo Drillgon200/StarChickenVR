@@ -41,6 +41,9 @@
 	};
 	V3F texCoord{ (V2F(outputCoord) + 0.5) / V2F(outputDim), F32(faceIdx) };
 	V3F color{ (^input)[^bilinearSampler, texCoord, F32(pushConstants.inputIdx)].rgb };
+	// Unfortunately I have to clamp the brightness to not require a huge number of samples to avoid banding for bright objects like the sun.
+	// Perhaps I should create a high quality cubemap pre-processor mode that spends several minutes calculating millions of samples per pixel
+	color = min(color, V3F(500.0));
 
 	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
 };

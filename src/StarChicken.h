@@ -165,7 +165,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	}
 	UI::layout_boxes(VK::desktopSwapchainData.width, VK::desktopSwapchainData.height);
 	if (openxrFrameBeginInfo.shouldRender || isInEditorMode) {
-		draw_scene();
+		//draw_scene();
 		
 		VkCommandBuffer cmdBuf = VK::graphicsCommandBuffer;
 
@@ -274,13 +274,13 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	{ // Update GPU model and skeleton matrices
 		for (VKGeometry::StaticModel* model : staticModelsToRender) {
 			if (model->gpuMatrixIndex != 0) {
-				VK::uniformMatricesHandler.memoryMapping[model->gpuMatrixIndex] = model->transform;
+				VK::uniformMatricesHandler.matrixMemoryMapping[model->gpuMatrixIndex] = model->transform;
 			}
 		}
 		for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
 			U64 stackArenaFrame1 = stackArena.stackPtr;
 			if (model->gpuMatrixIndex != 0) {
-				VK::uniformMatricesHandler.memoryMapping[model->gpuMatrixIndex] = model->transform;
+				VK::uniformMatricesHandler.matrixMemoryMapping[model->gpuMatrixIndex] = model->transform;
 			}
 			if (model->skeletonMatrixOffset != 0) {
 				U32 boneCount = model->mesh->skeletonData->boneCount;
@@ -303,7 +303,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 					}
 				}
 				for (U32 i = 0; i < boneCount; i++) {
-					VK::uniformMatricesHandler.memoryMapping[model->skeletonMatrixOffset + i] = matrices[i];
+					VK::uniformMatricesHandler.matrixMemoryMapping[model->skeletonMatrixOffset + i] = matrices[i];
 				}
 			}
 			stackArena.stackPtr = stackArenaFrame1;
@@ -322,7 +322,8 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			M4x3F32 leftTransform;
 			leftTransform.set_identity();
 			leftTransform.set_orientation_from_quat(XR::xr_quat_to_drillmath_quat(openxrFrameBeginInfo.leftEyePose.orientation).conjugate());
-			leftTransform.translate(-(player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.leftEyePose.position)));
+			V3F leftCamPos = player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.leftEyePose.position);
+			leftTransform.translate(-leftCamPos);
 			PerspectiveProjection rightProjection{};
 			rightProjection.project_perspective(PROJECTION_NEAR_PLANE,
 												RAD_TO_TURN(openxrFrameBeginInfo.rightEyeFov.angleRight),
@@ -332,27 +333,18 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			M4x3F32 rightTransform;
 			rightTransform.set_identity();
 			rightTransform.set_orientation_from_quat(XR::xr_quat_to_drillmath_quat(openxrFrameBeginInfo.rightEyePose.orientation).conjugate());
-			rightTransform.translate(-(player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.rightEyePose.position)));
-			ProjectiveTransformMatrix leftProjectiveTransform, rightProjectiveTransform;
-			leftProjectiveTransform.generate(leftProjection, leftTransform);
-			rightProjectiveTransform.generate(rightProjection, rightTransform);
-			VK::uniformMatricesHandler.set_eye_matrices(leftProjectiveTransform, rightProjectiveTransform, leftProjection, rightProjection, leftTransform, rightTransform);
+			V3F rightCamPos = player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.rightEyePose.position);
+			rightTransform.translate(-rightCamPos);
+
+			VK::uniformMatricesHandler.set_camera(0, leftTransform, leftProjection, leftCamPos);
+			VK::uniformMatricesHandler.set_camera(1, rightTransform, rightProjection, rightCamPos);
 		}
 	} else {
 		PerspectiveProjection proj;
 		proj.project_perspective(0.05F, DEG_TO_TURN(120.0F), F32(Win32::framebufferHeight) / F32(Win32::framebufferWidth));
-
-		M4x3F32 view = EditorUI::editor.get_view_transform();
-		/*view.set_identity();
-		F32 pitch = 0.05F;
-		F32 yaw = 0.25F;
-		view.rotate_axis_angle(V3F{ 1.0F, 0.0F, 0.0F }, -pitch);
-		view.rotate_axis_angle(V3F{ 0.0F, 1.0F, 0.0F }, -yaw);
-		V3F playerEye{ -30.0F, 15.0F, 0.0F };
-		view.translate(-playerEye);*/
-		ProjectiveTransformMatrix viewProj;
-		viewProj.generate(proj, view);
-		VK::uniformMatricesHandler.set_eye_matrices(viewProj, viewProj, proj, proj, view, view);
+		V3F camPos;
+		M4x3F32 view = EditorUI::editor.get_view_transform(&camPos);
+		VK::uniformMatricesHandler.set_camera(0, view, proj, camPos);
 	}
 	VK::uniformMatricesHandler.flush_memory();
 

@@ -9,8 +9,9 @@ namespace EditorUI {
 
 UI::BoxHandle growableBox;
 
-U32 middlePoint;
-U32 c1, c2;
+ArenaArrayList<U32> constraintsToMove;
+ArenaArrayList<U32> pointsToImpulse;
+U32 physicsThreadCount;
 
 RigidBody::OrientedBox boxA;
 RigidBody::OrientedBox boxB;
@@ -27,6 +28,9 @@ struct EditorPlayer {
 		if (key == Win32::KEY_ESC && state == Win32::BUTTON_STATE_DOWN) {
 			Win32::set_mouse_captured(false);
 		}
+		if (key == Win32::KEY_P && state == Win32::BUTTON_STATE_DOWN) {
+			Win32::keyboardState[Win32::KEY_SHIFT] ? physicsThreadCount-- : physicsThreadCount++;
+		}
 	}
 	void mouse_input(Win32::MouseButton button, Win32::MouseValue state, V2F pos) {
 		if (button == Win32::MOUSE_BUTTON_WHEEL) {
@@ -34,7 +38,9 @@ struct EditorPlayer {
 			rotateDistance = clamp(rotateDistance - state.scroll * sensitivity, 1.0F, 1000.0F);
 		}
 		if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_DOWN) {
-			Physics::points.data[middlePoint].vel += V3F{ 1.0F, 0.0F, 0.0F } * 100.0F;
+			for (U32 p : pointsToImpulse) {
+				Physics::points.data[p].vel += V3F{ 1.0F, 0.0F, 0.0F } * 100.0F;
+			}
 		}
 	}
 	void update() {
@@ -72,21 +78,19 @@ struct EditorPlayer {
 			pos += V3F{ 0.0F, moveDelta, 0.0F };
 		}
 		F32 constraintMoveAmount = 5.0F * StarChicken::deltaTime;
-		if (Win32::keyboardState[Win32::KEY_UP]) {
-			Physics::constraints.data[c1].offset.y += constraintMoveAmount;
-			Physics::constraints.data[c2].offset.y += constraintMoveAmount;
-		}
-		if (Win32::keyboardState[Win32::KEY_DOWN]) {
-			Physics::constraints.data[c1].offset.y -= constraintMoveAmount;
-			Physics::constraints.data[c2].offset.y -= constraintMoveAmount;
-		}
-		if (Win32::keyboardState[Win32::KEY_RIGHT]) {
-			Physics::constraints.data[c1].offset.z += constraintMoveAmount;
-			Physics::constraints.data[c2].offset.z += constraintMoveAmount;
-		}
-		if (Win32::keyboardState[Win32::KEY_LEFT]) {
-			Physics::constraints.data[c1].offset.z -= constraintMoveAmount;
-			Physics::constraints.data[c2].offset.z -= constraintMoveAmount;
+		for (U32 c : constraintsToMove) {
+			if (Win32::keyboardState[Win32::KEY_UP]) {
+				Physics::constraints.data[c].offset.y += constraintMoveAmount;
+			}
+			if (Win32::keyboardState[Win32::KEY_DOWN]) {
+				Physics::constraints.data[c].offset.y -= constraintMoveAmount;
+			}
+			if (Win32::keyboardState[Win32::KEY_RIGHT]) {
+				Physics::constraints.data[c].offset.z += constraintMoveAmount;
+			}
+			if (Win32::keyboardState[Win32::KEY_LEFT]) {
+				Physics::constraints.data[c].offset.z -= constraintMoveAmount;
+			}
 		}
 		F32 boxMoveAmount = 1.0F * StarChicken::deltaTime;
 		if (Win32::keyboardState[Win32::KEY_H]) {
@@ -97,11 +101,12 @@ struct EditorPlayer {
 		}
 	}
 
-	M4x3F get_view_transform() {
+	M4x3F get_view_transform(V3F* camPosOut) {
 		M4x3F view; view.set_identity();
 		view.translate(V3F{ 0.0F, 0.0F, -rotateDistance });
 		view.rotate_quat(AxisAngleF{ { 0.0F, 1.0F, 0.0F }, -yaw }.to_qf32() * AxisAngleF { { 1.0F, 0.0F, 0.0F }, -pitch }.to_qf32());
 		view.translate(-pos);
+		*camPosOut = pos;
 		return view;
 	}
 };
@@ -128,38 +133,50 @@ void update() {
 		b7->size.x = max(1.0F, Win32::get_mouse().x);
 		b7->size.y = max(1.0F, Win32::get_mouse().y);
 	}
-	Physics::do_timestep(StarChicken::deltaTime, 8, 0.95F, 300.0F, 0.98F);
+	Physics::do_timestep_parallel(StarChicken::deltaTime, 8, 0.95F, 300.0F, 0.98F, physicsThreadCount);
+}
+
+void add_point_grid(U32 width, U32 height, F32 scale, V3F pos) {
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		I32* indices = arena.alloc<I32>(width * height);
+		for (U32 y = 0; y < height; y++) {
+			for (U32 z = 0; z < width; z++) {
+				indices[y * width + z] = Physics::add_point(V3F{ pos.x, (F32(height) - F32(y)) * scale + pos.y, F32(z) * scale + pos.z}, 0.5F);
+			}
+		}
+		U32 middlePoint = indices[(height / 2) * width + width / 2];
+		pointsToImpulse.push_back(middlePoint);
+		U32 c1 = Physics::constraints.size;
+		Physics::hard_constrain_point_global(indices[0 * width + 0], V3F{ pos.x, pos.y + (F32(height) + 1.0F) * scale, pos.z - 1.5F * scale }, scale);
+		U32 c2 = Physics::constraints.size;
+		Physics::hard_constrain_point_global(indices[0 * width + (width - 1)], V3F{ pos.x, pos.y + (F32(height) + 1.0F) * scale, F32(width - 1.0F) * scale + pos.z }, scale);
+		constraintsToMove.push_back(c1, c2);
+		for (U32 y = 0; y < height; y++) {
+			for (U32 z = 0; z < width; z++) {
+				if (y > 0) {
+					Physics::hard_constrain_point_to(indices[y * width + z], indices[(y - 1) * width + z], scale);
+				}
+				if (y + 1 < height) {
+					Physics::hard_constrain_point_to(indices[y * width + z], indices[(y + 1) * width + z], scale);
+				}
+				if (z > 0) {
+					Physics::hard_constrain_point_to(indices[y * width + z], indices[y * width + z - 1], scale);
+				}
+				if (z + 1 < width) {
+					Physics::hard_constrain_point_to(indices[y * width + z], indices[y * width + z + 1], scale);
+				}
+			}
+		}
+	}
 }
 
 void init_physics() {
-	const U32 width = 10, height = 10;
-	I32 indices[width * height];
-	for (U32 y = 0; y < height; y++) {
-		for (U32 z = 0; z < width; z++) {
-			indices[y * width + z] = Physics::add_point(V3F{ 0.0F, 15.0F - F32(y), F32(z) }, 0.5F);
-		}
-	}
-	middlePoint = indices[(height / 2) * width + width / 2];
-	c1 = Physics::constraints.size;
-	Physics::hard_constrain_point_global(indices[0 * width + 0], V3F{ 0.0F, 16.0F, -1.5F }, 1.0F);
-	c2 = Physics::constraints.size;
-	Physics::hard_constrain_point_global(indices[0 * width + (width - 1)], V3F{ 0.0F, 16.0F, F32(width - 1) }, 1.0F);
-	for (U32 y = 0; y < height; y++) {
-		for (U32 z = 0; z < width; z++) {
-			if (y > 0) {
-				Physics::hard_constrain_point_to(indices[y * width + z], indices[(y - 1) * width + z], 1.0F);
-			}
-			if (y + 1 < height) {
-				Physics::hard_constrain_point_to(indices[y * width + z], indices[(y + 1) * width + z], 1.0F);
-			}
-			if (z > 0) {
-				Physics::hard_constrain_point_to(indices[y * width + z], indices[y * width + z - 1], 1.0F);
-			}
-			if (z + 1 < width) {
-				Physics::hard_constrain_point_to(indices[y * width + z], indices[y * width + z + 1], 1.0F);
-			}
-		}
-	}
+	add_point_grid(10, 10, 1.0F, V3F{ 0.0F, 5.0F, 0.0F });
+	add_point_grid(20, 20, 2.0F, V3F{ 0.0F, 30.0F, 0.0F });
+	add_point_grid(20, 20, 2.0F, V3F{ 0.0F, 30.0F, 50.0F });
+	add_point_grid(20, 20, 2.0F, V3F{ 0.0F, 30.0F, -50.0F });
+	add_point_grid(10, 10, 0.2F, V3F{ 0.0F, -10.0F, 0.0F });
 
 	boxA.maxX = 1.0F;
 	boxA.maxY = 1.0F;
@@ -177,8 +194,8 @@ void debug_render() {
 	Physics::debug_render();
 	bool intersect = SAT::is_intersecting(boxA, boxB);
 	V3F color = intersect ? V3F{ 0.0F, 1.0F, 0.0F } : V3F{ 1.0F, 0.0F, 0.0F };
-	boxA.debug_render(color);
-	boxB.debug_render(color);
+	//boxA.debug_render(color);
+	//boxB.debug_render(color);
 }
 
 void init() {
@@ -186,7 +203,7 @@ void init() {
 	editor.pos = playerEye;
 	editor.yaw = 0.25F;
 	init_physics();
-	//return;
+	return;
 
 	using namespace UI;
 	Box* b1 = generic_box().unsafeBox;

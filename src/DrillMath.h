@@ -189,6 +189,44 @@ FINLINE F64 absf64(F64 f) {
 	return _mm_cvtsd_f64(_mm_and_pd(_mm_set_sd(f), _mm_castsi128_pd(_mm_set1_epi64x(0x7FFFFFFFFFFFFFFFULL))));
 }
 
+FINLINE U32 bswap32(U32 val) {
+	return (val >> 24) | ((val >> 8) & 0xFF00) | ((val << 8) & 0xFF0000) | (val << 24);
+}
+
+FINLINE U16 bswap16(U16 val) {
+	return U16((val >> 8) | (val << 8));
+}
+
+FINLINE U32 lzcnt32(U32 val) {
+	return _lzcnt_u32(val);
+}
+FINLINE U64 lzcnt64(U64 val) {
+	return _lzcnt_u64(val);
+}
+FINLINE U32 tzcnt32(U32 val) {
+	return _tzcnt_u32(val);
+}
+FINLINE U64 tzcnt64(U64 val) {
+	return _tzcnt_u64(val);
+}
+FINLINE U64 log2ceil32(U32 val) {
+	return 32 - _lzcnt_u32(val - 1);
+}
+FINLINE U64 log2floor32(U32 val) {
+	return 31 - _lzcnt_u32(val);
+}
+FINLINE U64 log2ceil64(U64 val) {
+	return 64 - _lzcnt_u64(val - 1);
+}
+FINLINE U64 log2floor64(U64 val) {
+	return 63 - _lzcnt_u64(val);
+}
+
+template<typename To, typename From>
+FINLINE constexpr To bitcast(const From& val) {
+	return __builtin_bit_cast(To, val);
+}
+
 template<typename T>
 FINLINE T max(T a, T b) {
 	return a > b ? a : b;
@@ -1458,6 +1496,33 @@ FINLINE B32 rng_contains_point(Rng3F32 rng, V3F32 v) {
 FINLINE U32 pack_unorm4x8(V4F32 v) {
 	return U32(v.x * 255.0F) | U32(v.y * 255.0F) << 8 | U32(v.z * 255.0F) << 16 | U32(v.w * 255.0F) << 24;
 }
+
+V3F uncharted2_tonemap_partial(V3F x) {
+	F32 A = 0.15F;
+	F32 B = 0.50F;
+	F32 C = 0.10F;
+	F32 D = 0.20F;
+	F32 E = 0.02F;
+	F32 F = 0.30F;
+	return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+V3F uncharted2_filmic(V3F v) {
+	float exposureBias = 2.0F;
+	V3F whitePoint{ 11.2F, 11.2F, 11.2F };
+	return uncharted2_tonemap_partial(v * exposureBias) / uncharted2_tonemap_partial(whitePoint);
+}
+
+V3F unpack_E5B9G9R9(U32 packed) {
+	F32 base = bitcast<F32>(((packed >> 27u) - 15 + 127) << 23);
+	return V3F{ (packed & 0b111111111) / 512.0F * base, (packed >> 9 & 0b111111111) / 512.0F * base, (packed >> 18 & 0b111111111) / 512.0F * base };
+}
+
+RGBA8 tonemap_E5B9G9R9(U32 packed) {
+	V3F raw = unpack_E5B9G9R9(packed);
+	V3F tonemapped = raw;// uncharted2_filmic(raw);
+	return RGBA8{ U8(clamp01(tonemapped.x) * 255.0F), U8(clamp01(tonemapped.y) * 255.0F), U8(clamp01(tonemapped.z) * 255.0F), 255 };
+}
+
 
 template <typename T>
 FINLINE T eval_bezier_quadratic(T start, T control, T end, F32 t) {

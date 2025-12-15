@@ -228,20 +228,27 @@ struct GeometryHandler {
 struct UniformMatricesHandler {
 	VkDeviceMemory memory;
 	VkBuffer buffer;
-	M4x3F32* memoryMapping;
+	M4x3F32* matrixMemoryMapping;
+	VK::GPUCameraMatrices* camerasMemoryMapping;
 	VkDeviceAddress gpuAddress;
+	// Cameras also store some other stuff
+	VkDeviceAddress camerasGPUAddress;
 	U32 maxMatrices;
+	U32 maxCameras;
 	// Matrix is always at least 3. The first matrix is the identity matrix and the next two are eye matrices
 	U32 matrixOffset;
+	
 
-	void init(U32 size) {
-		ASSERT(size >= 4096, "Needs at least 4k of matrix data"a);
-		maxMatrices = size / sizeof(M4x3F32);
+	void init(U32 matrixBytes, U32 cameraBytes) {
+		ASSERT(matrixBytes >= 4096, "Needs at least 4k of matrix data"a);
+		ASSERT(cameraBytes >= sizeof(VK::GPUCameraMatrices), "Needs at least one camera"a);
+		maxMatrices = matrixBytes / sizeof(M4x3F32);
+		maxCameras = cameraBytes / sizeof(VK::GPUCameraMatrices);
 		matrixOffset = 3;
 
 		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 		bufferInfo.flags = 0;
-		bufferInfo.size = size;
+		bufferInfo.size = matrixBytes + cameraBytes;
 		bufferInfo.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		bufferInfo.queueFamilyIndexCount = 0;
@@ -260,13 +267,15 @@ struct UniformMatricesHandler {
 		allocInfo.pNext = &allocFlags;
 		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
-		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, size, 0, reinterpret_cast<void**>(&memoryMapping)));
+		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, VK_WHOLE_SIZE, 0, (void**)&matrixMemoryMapping));
+		camerasMemoryMapping = (VK::GPUCameraMatrices*)((char*)matrixMemoryMapping + matrixBytes);
 
 		VkBufferDeviceAddressInfo addressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
 		addressInfo.buffer = buffer;
 		gpuAddress = VK::vkGetBufferDeviceAddress(VK::logicalDevice, &addressInfo);
+		camerasGPUAddress = gpuAddress + matrixBytes;
 
-		memoryMapping[0] = M4x3F32{}.set_identity();
+		matrixMemoryMapping[0] = M4x3F32{}.set_identity();
 	}
 
 	void destroy() {
@@ -283,7 +292,7 @@ struct UniformMatricesHandler {
 			offset = 0;
 		} else {
 			for (U32 i = 0; i < numMatrices; i++) {
-				memoryMapping[offset + i] = matrices[i];
+				matrixMemoryMapping[offset + i] = matrices[i];
 			}
 		}
 		return offset;
@@ -300,37 +309,30 @@ struct UniformMatricesHandler {
 		return offset;
 	}
 
-	void set_eye_matrices(ProjectiveTransformMatrix& left, ProjectiveTransformMatrix& right, PerspectiveProjection& projLeft, PerspectiveProjection& projRight, M4x3F& viewLeft, M4x3F& viewRight) {
-		// These two aren't really Matrix4x3fs, since the third row is omitted instead of the fourth, but they will fit in a Matrix4x3f
-		memoryMapping[1] = M4x3F32{
-			left.m00, left.m01, left.m02, left.m03,
-			left.m10, left.m11, left.m12, left.m13,
-			left.m30, left.m31, left.m32, left.m33
-		};
-		memoryMapping[2] = M4x3F32{
-			right.m00, right.m01, right.m02, right.m03,
-			right.m10, right.m11, right.m12, right.m13,
-			right.m30, right.m31, right.m32, right.m33
-		};
-		// I am lazy so we're going to do a bit of a hack here and just stuff the 5 projection numbers into a M4x3F linearly
-		// Surely this won't come back to bite me later...
-		memoryMapping[3] = M4x3F{ projLeft.xScale, projLeft.yScale, projLeft.xZBias, projLeft.yZBias, projLeft.nearPlane };
-		memoryMapping[4] = M4x3F{ projRight.xScale, projRight.yScale, projRight.xZBias, projRight.yZBias, projRight.nearPlane };
-		memoryMapping[5] = viewLeft;
-		memoryMapping[6] = viewRight;
+	void set_camera(U32 idx, M4x3F& worldToView, PerspectiveProjection& projection, V3F camPos) {
+		ASSERT(idx < maxCameras, "Need more cameras"a);
+		VK::GPUCameraMatrices cam{};
+		cam.worldToView = worldToView;
+		cam.projXScale = projection.xScale;
+		cam.projYScale = projection.yScale;
+		cam.projXZBias = projection.xZBias;
+		cam.projYZBias = projection.yZBias;
+		cam.position = camPos;
+		cam.direction = V3F{ worldToView.m20, worldToView.m21, worldToView.m22 };
+		camerasMemoryMapping[idx] = cam;
 	}
 
 	void flush_memory() {
 		VkMappedMemoryRange memoryRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
 		memoryRange.memory = memory;
 		memoryRange.offset = 0;
-		memoryRange.size = ALIGN_HIGH(matrixOffset * sizeof(M4x3F32), VK::physicalDeviceProperties.limits.nonCoherentAtomSize);
+		memoryRange.size = VK_WHOLE_SIZE;
 		CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryRange));
 	}
 
 	void reset() {
-		// First 7 are identity and two eye viewproj/proj/view matrices
-		matrixOffset = 7;
+		// First matrix is always the identity matrix
+		matrixOffset = 1;
 	}
 };
 

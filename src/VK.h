@@ -12,7 +12,7 @@
 #include "UI_decl.h"
 namespace VK {
 
-#define VK_ENABLE_VIL 1
+#define VK_ENABLE_VIL 0
 #define VK_ENABLE_VALIDATION_LAYERS 1
 
 //TODO enable gpu assisted validation, VkValidationFeaturesEXT
@@ -75,22 +75,6 @@ U32 currentFrameInFlight;
 VKStaging::GPUUploadStager graphicsStager;
 VKGeometry::GeometryHandler geometryHandler;
 VKGeometry::UniformMatricesHandler uniformMatricesHandler;
-#pragma pack(push, 1)
-struct DrawDataUniforms {
-	V2F screenDimensions;
-	UPtr uiClipBoxes;
-	UPtr uiVertices;
-	UPtr matrices;
-	UPtr positions;
-	UPtr texcoords;
-	UPtr normals;
-	UPtr tangents;
-	UPtr boneIndicesAndWeights;
-	UPtr skinnedPositions;
-	UPtr skinnedNormals;
-	UPtr skinnedTangents;
-};
-#pragma pack(pop)
 DedicatedBuffer drawDataUniformBuffer;
 
 Framebuffer mainFramebuffer;
@@ -120,11 +104,11 @@ VkPipeline tmpBackgroundPipeline;
 VkPipelineLayout skinningPipelineLayout;
 VkPipeline skinningPipeline;
 VkPipelineLayout cubemapComputePipelineLayout;
-VkPipeline cubemapConvolvePipeline;
+VkPipeline cubemapTRConvolvePipeline;
+VkPipeline cubemapCosConvolvePipeline;
 VkPipeline cubemapFromEquirectPipeline;
 VkPipeline cubemapMipgenPipeline;
 VkPipeline brdfTRLutPipeline;
-VkPipeline brdfEONLutPipeline;
 
 
 XrSwapchainData xrSwapchainData;
@@ -508,7 +492,7 @@ bool is_suitable_device(MemoryArena& arena, VkPhysicalDevice dev) {
 }
 
 void init_vulkan(bool useXR) {
-	recompile_modified_shaders(".\\resources\\shaders\\"a, ".\\resources\\shaders\\"a);
+	recompile_modified_shaders(".\\resources\\shaders\\"a, ".\\resources\\shaders\\spv\\"a);
 
 	if (!load_first_vulkan_functions()) {
 		abort("Failed to load Vulkan Functions");
@@ -789,7 +773,7 @@ allNecessaryQueuesPresent:;
 	
 	graphicsStager.init(graphicsQueue, graphicsFamily);
 	geometryHandler.init(128 * MEGABYTE);
-	uniformMatricesHandler.init(2 * MEGABYTE);
+	uniformMatricesHandler.init(2 * MEGABYTE, 4096);
 
 	VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -1624,8 +1608,10 @@ void load_pipelines_and_descriptors() {
 	drawDataDescriptorSet.init()
 		.sampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
 		.uniform_buffer(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT) // draw data
-		.sampled_image(2, VK_SHADER_STAGE_FRAGMENT_BIT) // cubemap
-		.sampled_image_array_dynamic(3, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
+		.sampled_image(2, VK_SHADER_STAGE_FRAGMENT_BIT) // specular cubemap
+		.sampled_image(3, VK_SHADER_STAGE_FRAGMENT_BIT) // diffuse cubemap
+		.sampled_image(4, VK_SHADER_STAGE_FRAGMENT_BIT) // TR BRDF LUT
+		.sampled_image_array_dynamic(5, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
 		.build();
 	cubemapConvolveDescriptorSet.init()
 		.sampler(0, VK_SHADER_STAGE_COMPUTE_BIT) // bilinear sampler
@@ -1634,9 +1620,8 @@ void load_pipelines_and_descriptors() {
 		.sampled_image(3, VK_SHADER_STAGE_COMPUTE_BIT) // input equirect
 		.sampled_image(4, VK_SHADER_STAGE_COMPUTE_BIT) // input cube array layers
 		.storage_image_array(5, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output tr convolve
-		.storage_image_array(6, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output eon convolve
+		.storage_image_array(6, VK_SHADER_STAGE_COMPUTE_BIT, MAX_MIP_LEVEL) // output cos convolve
 		.storage_image(7, VK_SHADER_STAGE_COMPUTE_BIT) // output tr lut
-		.storage_image(8, VK_SHADER_STAGE_COMPUTE_BIT) // output eon lut
 		.build();
 
 	VkWriteDescriptorSet drawDataDescriptorWrites[2]{};
@@ -1668,35 +1653,35 @@ void load_pipelines_and_descriptors() {
 		.build();
 	drawPipeline = GraphicsPipelineBuilder{}.set_default()
 		.layout(drawPipelineLayout)
-		.shader_name("./resources/shaders/vrtest.spv"a)
+		.shader_name("./resources/shaders/spv/pbr_surface.spv"a)
 		.build();
 
 	uiPipeline = GraphicsPipelineBuilder{}.set_default()
 		.layout(drawPipelineLayout)
-		.shader_name("./resources/shaders/ui.spv"a)
+		.shader_name("./resources/shaders/spv/ui.spv"a)
 		.blending(VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
 		.build();
 
-	debugPipeline = GraphicsPipelineBuilder{}.set_default().layout(drawPipelineLayout).shader_name("./resources/shaders/debug.spv"a).build();
-	debugLinesPipeline = GraphicsPipelineBuilder{}.set_default().primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).layout(drawPipelineLayout).shader_name("./resources/shaders/debug.spv"a).build();
-	debugPointsPipeline = GraphicsPipelineBuilder{}.set_default().primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).layout(drawPipelineLayout).shader_name("./resources/shaders/debug.spv"a).build();
-	tmpBackgroundPipeline = GraphicsPipelineBuilder{}.set_default().depth_test(false).depth_write(false).layout(drawPipelineLayout).shader_name("./resources/shaders/background.spv"a).build();
+	debugPipeline = GraphicsPipelineBuilder{}.set_default().layout(drawPipelineLayout).shader_name("./resources/shaders/spv/debug.spv"a).build();
+	debugLinesPipeline = GraphicsPipelineBuilder{}.set_default().primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).layout(drawPipelineLayout).shader_name("./resources/shaders/spv/debug.spv"a).build();
+	debugPointsPipeline = GraphicsPipelineBuilder{}.set_default().primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).layout(drawPipelineLayout).shader_name("./resources/shaders/spv/debug.spv"a).build();
+	tmpBackgroundPipeline = GraphicsPipelineBuilder{}.set_default().depth_test(false).depth_write(false).layout(drawPipelineLayout).shader_name("./resources/shaders/spv/background.spv"a).build();
 
 	skinningPipelineLayout = PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel))
 		.set_layout(drawDataDescriptorSet.setLayout)
 		.build();
-	skinningPipeline = build_compute_pipeline("./resources/shaders/skinning.spv"a, skinningPipelineLayout);
+	skinningPipeline = build_compute_pipeline("./resources/shaders/spv/skinning.spv"a, skinningPipelineLayout);
 
 	cubemapComputePipelineLayout = PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo))
 		.set_layout(cubemapConvolveDescriptorSet.setLayout)
 		.build();
-	cubemapConvolvePipeline = build_compute_pipeline("./resources/shaders/cubemap_convolve.spv"a, cubemapComputePipelineLayout);
-	cubemapFromEquirectPipeline = build_compute_pipeline("./resources/shaders/cubemap_from_equirect.spv"a, cubemapComputePipelineLayout);
-	cubemapMipgenPipeline = build_compute_pipeline("./resources/shaders/cubemap_mipgen.spv"a, cubemapComputePipelineLayout);
-	brdfTRLutPipeline = build_compute_pipeline("./resources/shaders/brdf_tr_lut.spv"a, cubemapComputePipelineLayout);
-	brdfEONLutPipeline = build_compute_pipeline("./resources/shaders/brdf_eon_lut.spv"a, cubemapComputePipelineLayout);
+	cubemapTRConvolvePipeline = build_compute_pipeline("./resources/shaders/spv/cubemap_tr_convolve.spv"a, cubemapComputePipelineLayout);
+	cubemapCosConvolvePipeline = build_compute_pipeline("./resources/shaders/spv/cubemap_cos_convolve.spv"a, cubemapComputePipelineLayout);
+	cubemapFromEquirectPipeline = build_compute_pipeline("./resources/shaders/spv/cubemap_from_equirect.spv"a, cubemapComputePipelineLayout);
+	cubemapMipgenPipeline = build_compute_pipeline("./resources/shaders/spv/cubemap_mipgen.spv"a, cubemapComputePipelineLayout);
+	brdfTRLutPipeline = build_compute_pipeline("./resources/shaders/spv/brdf_tr_lut.spv"a, cubemapComputePipelineLayout);
 }
 
 void finish_startup() {
@@ -1768,7 +1753,7 @@ FrameBeginResult begin_frame() {
 	CHK_VK(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
 	
 	{ // Update frame uniforms
-		DrawDataUniforms drawData;
+		DrawDataUniforms drawData{};
 		drawData.screenDimensions = V2F{ F32(mainFramebuffer.framebufferWidth), F32(mainFramebuffer.framebufferHeight) };
 		drawData.uiClipBoxes = UI::clipBoxBuffers[currentFrameInFlight].gpuAddress;
 		drawData.uiVertices = DynamicVertexBuffer::get_gpu_address(DynamicVertexBuffer::get_tessellator());
@@ -1781,6 +1766,8 @@ FrameBeginResult begin_frame() {
 		drawData.skinnedPositions = geometryHandler.gpuAddress + geometryHandler.skinnedPositionsOffset;
 		drawData.skinnedNormals = geometryHandler.gpuAddress + geometryHandler.skinnedNormalsOffset;
 		drawData.skinnedTangents = geometryHandler.gpuAddress + geometryHandler.skinnedTangentsOffset;
+		drawData.materials = 0; //TODO materials system
+		drawData.cameras = uniformMatricesHandler.camerasGPUAddress;
 
 		// Barrier before is not necessary because a CPU fence is waited on to ensure drawing is done before draw data updates
 		vkCmdUpdateBuffer(graphicsCommandBuffer, drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms), &drawData);

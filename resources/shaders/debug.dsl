@@ -13,6 +13,23 @@ struct Vertex {
 	U32 color;
 };
 
+struct Camera {
+	M4x3F worldToView;
+	F32 projXScale;
+	F32 projXZBias;
+	F32 projYScale;
+	F32 projYZBias;
+	V3F position;
+	V3F direction;
+};
+
+struct Material {
+	U32 colorTexIdx;
+	U32 normalTexIdx;
+	U32 roughnessTexIdx;
+	F32 ior;
+};
+
 [set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
 	V2F screenDimensions;
 	&V4F uiClipBoxes;
@@ -26,6 +43,8 @@ struct Vertex {
 	&V3F skinnedPositions;
 	&V3F skinnedNormals;
 	&V3F skinnedTangents;
+	&Material materials;
+	&Camera cams;
 } drawData;
 [push_constant, block] &struct {
 	U32 transformIdx;
@@ -42,13 +61,13 @@ struct Vertex {
 	Vertex vert{ vertexBuffer[^inVertexIndex] };
 
 	I32 viewIdx{ ^inViewIndex };
+	Camera cam{ drawData.cams[viewIdx] };
 	M4x3F viewProj{ drawData.matrices[viewIdx + 1] };
-	F32 x{ dot(V4F(vert.pos, 1.0), viewProj.row0) };
-	F32 y{ dot(V4F(vert.pos, 1.0), viewProj.row1) };
-	F32 z{ 0.05F }; // Near plane
-	// row2 is actually row3 in  this case, since the matrix is a ProjectiveTransformMatrix
-	F32 w{ dot(V4F(vert.pos, 1.0), viewProj.row2) };
-	^outPosition = V4F(x, -y, z, w);
+	F32 x{ dot(V4F(vert.pos, 1.0), cam.worldToView.row0) };
+	F32 y{ dot(V4F(vert.pos, 1.0), cam.worldToView.row1) };
+	F32 z{ dot(V4F(vert.pos, 1.0), cam.worldToView.row2) };
+	F32 nearPlane{ 0.05F };
+	^outPosition = V4F(x * cam.projXScale + z * cam.projXZBias, -(y * cam.projYScale + z * cam.projYZBias), nearPlane, -z);
 	^color = unpack_unorm4x8(vert.color);
 	^outPointSize = 4.0;
 };
