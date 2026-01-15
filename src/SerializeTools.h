@@ -38,6 +38,38 @@ FINLINE StrA& skip_whitespace(StrA* str) {
 	return *str;
 }
 
+StrA escape_str(MemoryArena& arena, StrA str) {
+	char* result = (char*)arena.stackBase + arena.stackPtr;
+	char* write = result;
+	for (U64 i = 0; i < str.length; i++) {
+		char c = str.str[i];
+		switch (c) {
+		case '\'': *write++ = '\\', *write++ = '\''; break;
+		case '\"': *write++ = '\\', *write++ = '"'; break;
+		case '\?': *write++ = '\\', *write++ = '?'; break;
+		case '\\': *write++ = '\\', *write++ = '\\'; break;
+		case '\a': *write++ = '\\', *write++ = 'a'; break;
+		case '\b': *write++ = '\\', *write++ = 'b'; break;
+		case '\f': *write++ = '\\', *write++ = 'f'; break;
+		case '\n': *write++ = '\\', *write++ = 'n'; break;
+		case '\r': *write++ = '\\', *write++ = 'r'; break;
+		case '\t': *write++ = '\\', *write++ = 't'; break;
+		case '\v': *write++ = '\\', *write++ = 'v'; break;
+		default: {
+			if (c >= ' ' && c <= '~') {
+				*write++ = c;
+			} else {
+				*write++ = '\\', *write++ = 'x';
+				*write++ = "0123456789ABCDEF"[U8(c) >> 4];
+				*write++ = "0123456789ABCDEF"[U8(c) & 0b1111];
+			}
+		} break;
+		}
+	}
+	arena.stackPtr += U64(write - result);
+	return StrA{ result, U64(write - result) };
+}
+
 enum IntParseError : U32 {
 	INT_PARSE_SUCCESS,
 	INT_PARSE_BAD_INPUT,

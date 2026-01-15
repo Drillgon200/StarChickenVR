@@ -1,0 +1,16 @@
+//TODO do some actual research into tonemappers
+// https://64.github.io/tonemapping/
+@[V3F mapped][V3F x] uncharted2_tonemap_partial{
+    F32 A{ 0.15 };
+    F32 B{ 0.50 };
+    F32 C{ 0.10 };
+    F32 D{ 0.20 };
+    F32 E{ 0.02 };
+    F32 F{ 0.30 };
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+};
+@[V3F mapped][V3F v] uncharted2_filmic{
+    F32 exposureBias{ 2.0 };
+    V3F whitePoint{ 11.2 };
+    return uncharted2_tonemap_partial(v * exposureBias) / uncharted2_tonemap_partial(whitePoint);
+};

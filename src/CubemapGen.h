@@ -464,7 +464,7 @@ void equirectangular2convolved_cubemap(StrA name) {
 					CubemapPipelineInfo convolveInfo{};
 					convolveInfo.inputDim = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES };
 					convolveInfo.outputDim = V2U{ res, res };
-					convolveInfo.roughness = max(0.01F, F32(i) / (cubeMipLevels - 1));
+					convolveInfo.roughness = max(0.01F, F32(i) / F32(cubeMipLevels - 1));
 					convolveInfo.outputIdx = i;
 					vkCmdPushConstants(convolveCmdBuf, cubemapComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo), &convolveInfo);
 					vkCmdDispatch(convolveCmdBuf, (res + 15) / 16, (res + 15) / 16, 6);
@@ -551,19 +551,14 @@ void equirectangular2convolved_cubemap(StrA name) {
 			}
 			write_data_to_file("cubemap_test/convolved.dat"a, imageCPUBuffer.mapping, cubemapTotalSize);
 			write_data_to_file("cubemap_test/convolved_diffuse.dat"a, (char*)imageCPUBuffer.mapping + cubemapTotalSize, CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32));
-			RGBA8* pixels = arena.zalloc<RGBA8>(CUBEMAP_SPECULAR_RES * CUBEMAP_SPECULAR_RES);
-			StrA fileNames[]{ "cubemap_test/cube_x_pos.png"a, "cubemap_test/cube_x_neg.png"a, "cubemap_test/cube_y_pos.png"a, "cubemap_test/cube_y_neg.png"a, "cubemap_test/cube_z_pos.png"a, "cubemap_test/cube_z_neg.png"a };
 			
-			MemoryArena& arena = get_scratch_arena();
-			MEMORY_ARENA_FRAME(arena) {
-				RGBA8* colors = arena.alloc<RGBA8>(CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES);
-				for (U32 layer = 0; layer < 6; layer++) {
-					for (U32 i = 0; i < CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES; i++) {
-						U32 packed = ((U32*)((char*)imageCPUBuffer.mapping + cubemapTotalSize + layer * CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * sizeof(U32)))[i];
-						colors[i] = tonemap_E5B9G9R9(packed);
-					}
-					PNG::write_image(strafmt(arena, "cubemap_test/diffuse_%.png"a, layer), colors, CUBEMAP_DIFFUSE_RES, CUBEMAP_DIFFUSE_RES);
+			RGBA8* colors = arena.alloc<RGBA8>(CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES);
+			for (U32 layer = 0; layer < 6; layer++) {
+				for (U32 i = 0; i < CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES; i++) {
+					U32 packed = ((U32*)((char*)imageCPUBuffer.mapping + cubemapTotalSize + layer * CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * sizeof(U32)))[i];
+					colors[i] = tonemap_E5B9G9R9(packed);
 				}
+				PNG::write_image(strafmt(arena, "cubemap_test/diffuse_%.png"a, layer), colors, CUBEMAP_DIFFUSE_RES, CUBEMAP_DIFFUSE_RES);
 			}
 			hasCubemap = true;
 		}

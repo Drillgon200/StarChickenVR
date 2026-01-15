@@ -2,32 +2,11 @@
 #shader vertex
 #extension multiview
 
-struct M4x3F {
-	V4F row0;
-	V4F row1;
-	V4F row2;
-};
+#include "lib.dsi"
 
 struct Vertex {
 	V3F pos;
 	U32 color;
-};
-
-struct Camera {
-	M4x3F worldToView;
-	F32 projXScale;
-	F32 projXZBias;
-	F32 projYScale;
-	F32 projYZBias;
-	V3F position;
-	V3F direction;
-};
-
-struct Material {
-	U32 colorTexIdx;
-	U32 normalTexIdx;
-	U32 roughnessTexIdx;
-	F32 ior;
 };
 
 [set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
@@ -46,10 +25,7 @@ struct Material {
 	&Material materials;
 	&Camera cams;
 } drawData;
-[push_constant, block] &struct {
-	U32 transformIdx;
-	I32 verticesOffset;
-} modelData;
+[push_constant] &WorldDrawPushConstants modelData;
 
 [input, builtin VertexIndex] &I32 inVertexIndex;
 [input, builtin ViewIndex] &I32 inViewIndex;
@@ -61,8 +37,7 @@ struct Material {
 	Vertex vert{ vertexBuffer[^inVertexIndex] };
 
 	I32 viewIdx{ ^inViewIndex };
-	Camera cam{ drawData.cams[viewIdx] };
-	M4x3F viewProj{ drawData.matrices[viewIdx + 1] };
+	Camera cam{ drawData.cams[modelData.camIdx + U32(viewIdx)] };
 	F32 x{ dot(V4F(vert.pos, 1.0), cam.worldToView.row0) };
 	F32 y{ dot(V4F(vert.pos, 1.0), cam.worldToView.row1) };
 	F32 z{ dot(V4F(vert.pos, 1.0), cam.worldToView.row2) };
@@ -82,7 +57,9 @@ struct Material {
 [uniform, set 0, binding 2] &Image2DSampled[] textures;
 
 [output, location 0] &V4F fragColor;
+[output, location 1] &U32 outObjId;
 
 [entrypoint] @[][] frag_main{
 	^fragColor = ^color;
+	^outObjId = 0u;
 };

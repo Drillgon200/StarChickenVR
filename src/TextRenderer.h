@@ -71,7 +71,7 @@ StrA wrap_text(MemoryArena& arena, StrA str, F32 width, F32 sizeY) {
 		// Attempt to insert extra newlines after spaces to keep words from splitting
 		if (is_whitespace(c)) {
 			F32 speculativeWordSize = current;
-			U32 j = i + 1;
+			U64 j = i + 1;
 			// Treat a block of characters + a block of whitespace as one unit
 			for (; j < str.length && !is_whitespace(str.str[j]); j++) {
 				speculativeWordSize += characterStep;
@@ -85,7 +85,7 @@ StrA wrap_text(MemoryArena& arena, StrA str, F32 width, F32 sizeY) {
 			}
 		}
 	}
-	U64 length = writePtr - result;
+	U64 length = U64(writePtr - result);
 	arena.stackPtr += length;
 	return StrA{ result, length };
 }
@@ -130,7 +130,7 @@ void draw_string_batched(DynamicVertexBuffer::Tessellator& tes, StrA str, F32 x,
 
 	F32 xBegin = x;
 	for (U64 i = 0; i < str.length; i++) {
-		if (str[i] == '\n') {
+		if (str.str[i] == '\n') {
 			y += lineStep;
 			x = xBegin;
 			continue;

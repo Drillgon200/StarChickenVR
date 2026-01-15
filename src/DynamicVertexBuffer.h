@@ -30,6 +30,7 @@ struct Tessellator {
 	U32* indexDataPointer;
 	B32 isCurrentlyDrawing;
 	DrawMode currentDrawMode;
+	U32 lastDrawSetCmdIdx;
 	ArenaArrayList<DrawCommand> drawCommands;
 
 	void ensure_space_for(U32 vertexBytes, U32 indexBytes) {
@@ -69,6 +70,10 @@ struct Tessellator {
 		buffer.destroy();
 	}
 
+	VkDeviceAddress get_gpu_address() {
+		return buffer.gpuAddress;
+	}
+
 	void begin_draw(VkPipeline pipeline, VkPipelineLayout pipelineLayout, DrawMode mode) {
 		if (isCurrentlyDrawing) {
 			abort("Already drawing something, end that draw first");
@@ -92,25 +97,35 @@ struct Tessellator {
 	void end_draw() {
 		isCurrentlyDrawing = false;
 	}
-	void draw() {
-		buffer.invalidate_mapped();
-
-		VK::GPUModelInfo renderData{};
+	Rng1I32 end_draw_set() {
+		Rng1I32 result{ I32(lastDrawSetCmdIdx), I32(drawCommands.size) };
+		lastDrawSetCmdIdx = drawCommands.size;
+		return result;
+	}
+	void draw(Rng1I32 drawRange, U32 camIdx) {
+		VK::WorldDrawPushConstants renderData{};
+		renderData.camIdx = camIdx;
 		VK::vkCmdBindIndexBuffer(VK::graphicsCommandBuffer, buffer.buffer, vertexCapacity, VK_INDEX_TYPE_UINT32);
 		VkPipeline prevPipeline = VK_NULL_HANDLE;
-		for (DrawCommand& drawCmd : drawCommands) {
+		for (I32 drawCmdIdx = drawRange.minX; drawCmdIdx < drawRange.maxX; drawCmdIdx++) {
+			DrawCommand& drawCmd = drawCommands.data[drawCmdIdx];
 			if (drawCmd.pipeline != prevPipeline) {
 				VK::vkCmdBindPipeline(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawCmd.pipeline);
 				VK::vkCmdBindDescriptorSets(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawCmd.pipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 				prevPipeline = drawCmd.pipeline;
 			}
 			renderData.verticesOffset = I32(drawCmd.vertexBufferOffset);
-			VK::vkCmdPushConstants(VK::graphicsCommandBuffer, drawCmd.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::GPUModelInfo), &renderData);
+			VK::vkCmdPushConstants(VK::graphicsCommandBuffer, drawCmd.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::WorldDrawPushConstants), &renderData);
 			VK::vkCmdDrawIndexed(VK::graphicsCommandBuffer, drawCmd.indexCount, 1, drawCmd.indexBufferOffset, 0, 0);
 		}
+	}
+
+	void end_frame() {
+		buffer.invalidate_mapped();
 		drawCommands = ArenaArrayList<DrawCommand>{ &frameArena };
 		currentIndexByteCount = 0;
 		currentVertexByteCount = 0;
+		lastDrawSetCmdIdx = 0;
 	}
 
 	Tessellator& pos3(F32 x, F32 y, F32 z) {
@@ -371,6 +386,7 @@ void destroy() {
 Tessellator& get_tessellator() {
 	return tessellators[VK::currentFrameInFlight];
 }
+// This function seems useless, but it avoids a circular dependency on VK.h
 VkDeviceAddress get_gpu_address(Tessellator& t) {
 	return t.buffer.gpuAddress;
 }

@@ -2,28 +2,7 @@
 #shader vertex
 #extension multiview
 
-struct M4x3F {
-	V4F row0;
-	V4F row1;
-	V4F row2;
-};
-
-struct Camera {
-	M4x3F worldToView;
-	F32 projXScale;
-	F32 projXZBias;
-	F32 projYScale;
-	F32 projYZBias;
-	V3F position;
-	V3F direction;
-};
-
-struct Material {
-	U32 colorTexIdx;
-	U32 normalTexIdx;
-	U32 roughnessTexIdx;
-	F32 ior;
-};
+#include "lib.dsi"
 
 [set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
 	V2F screenDimensions;
@@ -41,10 +20,7 @@ struct Material {
 	&Material materials;
 	&Camera cams;
 } drawData;
-[push_constant, block] &struct {
-	U32 transformIdx;
-	I32 verticesOffset;
-} modelData;
+[push_constant] &WorldDrawPushConstants modelData;
 
 [input, builtin VertexIndex] &I32 inVertexIndex;
 [input, builtin ViewIndex] &I32 inViewIndex;
@@ -53,9 +29,11 @@ struct Material {
 [output, location 0] &V3F passPos;
 [output, location 1] &V3F passNormal;
 [output, location 2] &V3F passCamPos;
+[output, location 3, flat] &U32 passObjId;
 
 [entrypoint] @[][] vert_main{
 	I32 vertIdx{ modelData.verticesOffset };
+	I32 camIdx{ modelData.camIdx };
 	V4F pos{ 0.0 };
 	V3F norm{ 0.0 };
 	if vertIdx > 0 {
@@ -80,9 +58,8 @@ struct Material {
 		dot(norm, modelMat.row1.xyz),
 		dot(norm, modelMat.row2.xyz)
 	};
-	Camera cam{ drawData.cams[viewIdx] };
+	Camera cam{ drawData.cams[camIdx + viewIdx] };
 
-	M4x3F viewProj{ drawData.matrices[viewIdx + 1] };
 	F32 x{ dot(transformedPos, cam.worldToView.row0) };
 	F32 y{ dot(transformedPos, cam.worldToView.row1) };
 	F32 z{ dot(transformedPos, cam.worldToView.row2) };
@@ -91,15 +68,20 @@ struct Material {
 	^passPos = transformedPos.xyz;
 	^passNormal = transformedNorm;
 	^passCamPos = cam.position;
+	^passObjId = modelData.objId;
 };
 
 //---------------------------------------------------------//
 #shader fragment
 
+#include "tonemap.dsi"
+
 [output, location 0] &V4F outFragColor;
+[output, location 1] &U32 outObjId;
 [input, location 0] &V3F passPosition;
 [input, location 1] &V3F passNormal;
 [input, location 2] &V3F passCamPos;
+[input, location 3, flat] &U32 passObjId;
 
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
 [uniform, set 0, binding 2] &ImageCubeSampled specularCubemap;
@@ -154,23 +136,6 @@ struct Material {
 	return diffuseOrenNayar + energyCompensation;
 };
 
-//TODO do some actual research into tonemappers
-// https://64.github.io/tonemapping/
-@[V3F mapped][V3F x] uncharted2_tonemap_partial{
-    F32 A{ 0.15 };
-    F32 B{ 0.50 };
-    F32 C{ 0.10 };
-    F32 D{ 0.20 };
-    F32 E{ 0.02 };
-    F32 F{ 0.30 };
-    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
-};
-@[V3F mapped][V3F v] uncharted2_filmic{
-    F32 exposureBias{ 2.0 };
-    V3F whitePoint{ 11.2 };
-    return uncharted2_tonemap_partial(v * exposureBias) / uncharted2_tonemap_partial(whitePoint);
-};
-
 [entrypoint] @[][] frag_main{
 	V3F camPos{ ^passCamPos };
 	V3F normal{ normalize(^passNormal) };
@@ -212,5 +177,8 @@ struct Material {
 	V3F finalColor{ (fresnelEnergySingleScattering * specularSample + (diffuseSingleScattering + fresnelEnergyMultiScattering) * diffuseSample) * ambientOcclusion };
 	finalColor = uncharted2_filmic(finalColor);
 
+	finalColor = V3F(0.5);
+
 	^outFragColor = V4F(finalColor, 1.0);
+	^outObjId = ^passObjId;
 };

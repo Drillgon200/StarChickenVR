@@ -58,18 +58,19 @@ struct PositionConstraint {
 	}
 	M3x3FSymmetric hessian(V3F pos) {
 		M3x3FSymmetric h;
-		F32 dSq = distance_sq(pos, relative == -1 ? offset : points.data[relative].pos);
+		V3F rel = pos - (relative == -1 ? offset : points.data[relative].pos);
+		F32 dSq = length_sq(rel);
 		if (dSq < 0.00001F) {
 			return M3x3FSymmetric{};
 		}
 		F32 dInv = 1.0F / sqrtf32(dSq);
 		F32 dInvCu = dInv * dInv * dInv;
-		h.m00 = dInv - pos.x * pos.x * dInvCu;
-		h.m01 = -pos.x * pos.y * dInvCu;
-		h.m02 = -pos.x * pos.z * dInvCu;
-		h.m11 = dInv - pos.y * pos.y * dInvCu;
-		h.m12 = -pos.y * pos.z * dInvCu;
-		h.m22 = dInv - pos.z * pos.z * dInvCu;
+		h.m00 = dInv - rel.x * rel.x * dInvCu;
+		h.m01 = -rel.x * rel.y * dInvCu;
+		h.m02 = -rel.x * rel.z * dInvCu;
+		h.m11 = dInv - rel.y * rel.y * dInvCu;
+		h.m12 = -rel.y * rel.z * dInvCu;
+		h.m22 = dInv - rel.z * rel.z * dInvCu;
 		return h;
 	}
 };
@@ -85,7 +86,7 @@ I32 add_point(V3F pos, F32 mass) {
 	Point& point = points.push_back_zeroed();
 	point.pos = pos;
 	point.mass = mass;
-	return points.size - 1;
+	return I32(points.size) - 1;
 }
 
 void hard_constrain_points(I32 idxA, I32 idxB, F32 dist) {
@@ -273,41 +274,10 @@ void do_timestep_parallel(F32 dt, U32 iterations, F32 alpha, F32 beta, F32 gamma
 				work.push_back(WorkItem{ currentColor, pointsPerThread * t, t == threadCount - 1 ? pointsToProcess : pointsPerThread * (t + 1) });
 			}
 			workLock.unlock_write();
-			while (__iso_volatile_load32((int*)&completedWorkItems) != threadCount);
+			while (U32(__iso_volatile_load32((int*)&completedWorkItems)) != threadCount);
 			workLock.lock_write();
 			work.clear();
 			workLock.unlock_write();
-
-			/*for (U32 colorIdx = 0; colorIdx < coloredPoints[currentColor].size; colorIdx++) {
-				U32 pointIdx = coloredPoints[currentColor].data[colorIdx];
-				Point& p = points.data[pointIdx];
-
-				V3F force = p.inertialVel * p.mass / dtSq;
-				M3x3FSymmetric hessian{};
-				hessian.m00 = hessian.m11 = hessian.m22 = p.mass / dtSq;
-				for (U32 constraintIdx = pointIdx == 0 ? 0 : points.data[pointIdx - 1].constraintEndOffset; constraintIdx < p.constraintEndOffset; constraintIdx++) {
-					PositionConstraint& c = constraints[constraintSortedIndices[constraintIdx]];
-					V3F grad = c.gradient(p.pos);
-					F32 energy = c.energy(p.pos, alpha);
-					bool hardConstraint = c.finiteStiffness == F32_INF;
-					if (hardConstraint) {
-						force -= clamp(c.stiffness * energy + c.lambda, lambdaMin, lambdaMax) * grad;
-					} else {
-						force -= c.stiffness * energy * grad;
-					}
-					F32 lambdaPlus = c.stiffness * energy + c.lambda;
-					hessian += c.stiffness * M3x3FSymmetric{ grad.x * grad.x, grad.x * grad.y, grad.x * grad.z,
-						grad.y * grad.y, grad.y * grad.z,
-						grad.z * grad.z };
-					M3x3FSymmetric g = lambdaPlus * c.hessian(p.pos);
-					hessian.m00 += sqrtf32(g.m00 * g.m00 + g.m01 * g.m01 + g.m02 * g.m02);
-					hessian.m11 += sqrtf32(g.m01 * g.m01 + g.m11 * g.m11 + g.m12 * g.m12);
-					hessian.m22 += sqrtf32(g.m02 * g.m02 + g.m12 * g.m12 + g.m22 * g.m22);
-				}
-				V3F posDelta = hessian.solve_ldlt(force);
-				p.pos += posDelta;
-				p.inertialVel -= posDelta;
-			}*/
 		}
 		for (U32 constraintIdx = 0; constraintIdx < constraints.size; constraintIdx++) {
 			PositionConstraint& c = constraints.data[constraintIdx];
@@ -457,8 +427,6 @@ void debug_render() {
 		tes.pos3(p.pos.x, p.pos.y, p.pos.z).color(1.0F, 0.0F, 0.0F).end_vert();
 	}
 	tes.end_draw();
-
-	TextRenderer::draw_string(strafmt(frameArena, "Physics time (ms): %.%\nThread count: %"a, I32(simTimingSmooth) / 10, I32(simTimingSmooth) % 10, threadCount), 10.0F, 10.0F, -0.1F, 20.0F);
 }
 
 }

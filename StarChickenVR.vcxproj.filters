@@ -149,6 +149,9 @@
     <ClInclude Include="src\CubemapGen.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\Level.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />

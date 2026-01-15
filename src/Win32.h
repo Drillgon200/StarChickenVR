@@ -448,12 +448,14 @@ LRESULT CALLBACK window_callback(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 						if (currentButton) {
 							MouseValue val;
 							val.state = BUTTON_STATE_DOWN;
+							mouseButtonState[MOUSE_BUTTON_0 + i] = true;
 							mouseCallback(MouseButton(MOUSE_BUTTON_0 + i), val);
 						}
 						currentButton = (rawMouse.ulButtons >> (i * 2 + 1)) & 1;
 						if (currentButton) {
 							MouseValue val;
 							val.state = BUTTON_STATE_UP;
+							mouseButtonState[MOUSE_BUTTON_0 + i] = false;
 							mouseCallback(MouseButton(MOUSE_BUTTON_0 + i), val);
 						}
 					}

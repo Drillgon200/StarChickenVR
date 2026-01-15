@@ -1,0 +1,29 @@
+struct M4x3F {
+	V4F row0;
+	V4F row1;
+	V4F row2;
+};
+
+struct Camera {
+	M4x3F worldToView;
+	F32 projXScale;
+	F32 projXZBias;
+	F32 projYScale;
+	F32 projYZBias;
+	V3F position;
+	V3F direction;
+};
+
+struct Material {
+	U32 colorTexIdx;
+	U32 normalTexIdx;
+	U32 roughnessTexIdx;
+	F32 ior;
+};
+
+[block] struct WorldDrawPushConstants {
+	U32 transformIdx;
+	I32 verticesOffset;
+	U32 camIdx;
+	U32 objId; // High bit set if selected
+};

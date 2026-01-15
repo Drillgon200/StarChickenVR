@@ -215,11 +215,12 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324</DisableSpecificWarnings>
       <CallingConvention>VectorCall</CallingConvention>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -250,11 +251,12 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324</DisableSpecificWarnings>
       <CallingConvention>VectorCall</CallingConvention>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -285,11 +287,12 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324</DisableSpecificWarnings>
       <CallingConvention>VectorCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -319,10 +322,11 @@
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324</DisableSpecificWarnings>
       <CreateHotpatchableImage>false</CreateHotpatchableImage>
       <CallingConvention>VectorCall</CallingConvention>
       <PreprocessToFile>false</PreprocessToFile>
+      <MultiProcessorCompilation>false</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -366,6 +370,7 @@
     <ClInclude Include="src\ShaderCompiler.h" />
     <ClInclude Include="src\SPIRV.h" />
     <ClInclude Include="src\StarChicken.h" />
+    <ClInclude Include="src\Level.h" />
     <ClInclude Include="src\StarChicken_decl.h" />
     <ClInclude Include="src\TextRenderer.h" />
     <ClInclude Include="src\UI.h" />

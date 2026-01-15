@@ -329,6 +329,42 @@ struct ArenaArrayList {
 		data[index] = T(value);
 	}
 
+	T remove_ordered(U32 index) {
+		T val = data[index];
+		size--;
+		for (U32 i = index; i < size; i++) {
+			data[i] = data[i + 1];
+		}
+		return val;
+	}
+
+	T remove_unordered(U32 index) {
+		T val = data[index];
+		data[index] = data[--size];
+		return val;
+	}
+
+	void remove_obj_ordered(const T& obj) {
+		U32 i = 0;
+		for (; i < size && !(data[i] == obj); i++);
+		if (i == size) {
+			return;
+		}
+		size--;
+		for (; i < size; i++) {
+			data[i] = data[i + 1];
+		}
+	}
+
+	void remove_obj_unordered(const T& obj) {
+		U32 i = 0;
+		for (; i < size && !(data[i] == obj); i++);
+		if (i == size) {
+			return;
+		}
+		data[i] = data[--size];
+	}
+
 	FINLINE T& pop_back() {
 		return data[--size];
 	}
@@ -587,11 +623,17 @@ struct ArenaHashMap {
 		}
 		return nullptr;
 	}
-	To* find_or_default(const From& key, const To& val) {
+	To* find_or_insert(const From& key, const To& val) {
 		if (To* result = find(key)) {
 			return result;
 		}
 		return insert(key, val);
+	}
+	To find_or_default(const From& key, const To& val) {
+		if (To* result = find(key)) {
+			return *result;
+		}
+		return val;
 	}
 	void insert_all(const ArenaHashMap<From, To, KeyHasher>& other) {
 		for (U32 i = 0; i < other.capacity; i++) {
@@ -611,6 +653,28 @@ struct ArenaHashMap {
 		for (U32 i = 0; i < capacity; i++) {
 			keys[i] = emptyKey;
 		}
+	}
+};
+
+template<typename T>
+struct PoolAllocator {
+	static_assert(sizeof(T) >= 8, "Allocated type must be large enough to store a pointer");
+	MemoryArena* arena;
+	T* freeList;
+	T* alloc() {
+		T* result;
+		if (freeList) {
+			result = freeList;
+			freeList = (T*)LOAD_LE64(freeList);
+		} else {
+			result = (arena ? arena : &globalArena)->alloc<T>(1);
+		}
+		*result = T{};
+		return result;
+	}
+	void free(T* obj) {
+		STORE_LE64(obj, U64(freeList));
+		freeList = obj;
 	}
 };
 

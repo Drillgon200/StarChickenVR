@@ -71,12 +71,8 @@ namespace VK {
 #define VK_DEBUG_INSTANCE_FUNCTIONS
 #endif
 
-#define VK_DEVICE_FUNCTIONS OP(vkCmdBeginRenderPass)\
-	OP(vkCmdEndRenderPass)\
-	OP(vkCreateCommandPool)\
+#define VK_DEVICE_FUNCTIONS OP(vkCreateCommandPool)\
 	OP(vkAllocateCommandBuffers)\
-	OP(vkCreateRenderPass)\
-	OP(vkDestroyRenderPass)\
 	OP(vkCreateFramebuffer)\
 	OP(vkDestroyFramebuffer)\
 	OP(vkBeginCommandBuffer)\
@@ -146,7 +142,10 @@ namespace VK {
 	OP(vkCreateSampler)\
 	OP(vkDestroySampler)\
 	OP(vkGetBufferDeviceAddress)\
-	OP(vkCmdUpdateBuffer)
+	OP(vkCmdUpdateBuffer)\
+	OP(vkCmdBeginRenderingKHR)\
+	OP(vkCmdEndRenderingKHR)\
+	OP(vkCmdClearAttachments)
 
 #if VK_DEBUG != 0
 #define VK_DEBUG_DEVICE_FUNCTIONS
@@ -187,9 +186,13 @@ extern VkPhysicalDevice physicalDevice;
 extern VkDevice logicalDevice;
 
 extern U32 hostMemoryTypeIndex;
+extern U32 hostCachedMemoryTypeIndex;
 extern U32 deviceMemoryTypeIndex;
+extern U32 deviceHostMappedMemoryTypeIndex;
 extern VkMemoryPropertyFlags hostMemoryFlags;
+extern VkMemoryPropertyFlags hostCachedMemoryFlags;
 extern VkMemoryPropertyFlags deviceMemoryFlags;
+extern VkMemoryPropertyFlags deviceHostMappedMemoryFlags;
 
 extern VkPhysicalDeviceProperties physicalDeviceProperties;
 
@@ -256,7 +259,7 @@ struct DedicatedBuffer {
 			gpuAddress = 0;
 		}
 
-		if (memoryTypeIndex == hostMemoryTypeIndex) {
+		if (memoryTypeIndex == hostMemoryTypeIndex || memoryTypeIndex == hostCachedMemoryTypeIndex) {
 			CHK_VK(vkMapMemory(logicalDevice, memory, 0, capacity, 0, reinterpret_cast<void**>(&mapping)));
 		}
 	}
@@ -285,6 +288,12 @@ struct DedicatedBuffer {
 	}
 };
 
+enum RenderPass {
+	RENDER_PASS_WORLD,
+	RENDER_PASS_WORLD_NO_ID,
+	RENDER_PASS_UI
+};
+
 #pragma pack(push, 1)
 struct GPUCameraMatrices {
 	M4x3F worldToView;
@@ -295,9 +304,15 @@ struct GPUCameraMatrices {
 	V3F position;
 	V3F direction;
 };
-struct GPUModelInfo {
+struct WorldDrawPushConstants {
 	U32 transformIdx;
 	I32 verticesOffset;
+	U32 camIdx;
+	U32 objId; // High bit set if object is selected
+};
+struct FinalCompositePushConstants {
+	U32 activeObjectId;
+	V2U outputDimensions;
 };
 struct CubemapPipelineInfo {
 	V2U inputDim;
@@ -324,34 +339,10 @@ struct DrawDataUniforms {
 };
 #pragma pack(pop)
 
-struct FramebufferAttachment {
+struct DedicatedImage {
+	VkImage img;
+	VkImageView imgView;
 	VkDeviceMemory memory;
-	VkImage image;
-	VkImageView imageView;
-	VkFormat imageFormat;
-	VkImageUsageFlags imageUsage;
-	VkImageAspectFlags imageAspectMask;
-	U32 layerCount;
-	B32 ownsImage;
-};
-
-struct Framebuffer {
-	static constexpr U32 MAX_FRAMEBUFFER_ATTACHMENTS = 4;
-	VkFramebuffer framebuffer;
-	VkRenderPass renderPass;
-	U32 framebufferWidth;
-	U32 framebufferHeight;
-	FramebufferAttachment attachments[MAX_FRAMEBUFFER_ATTACHMENTS];
-	U32 attachmentCount;
-	B32 addedToFreeList;
-
-	Framebuffer& set_default();
-	Framebuffer& render_pass(VkRenderPass pass);
-	Framebuffer& dimensions(U32 width, U32 height);
-	Framebuffer& new_attachment(VkFormat imageFormat, VkImageUsageFlags usage, VkImageAspectFlags aspectMask, U32 layerCount);
-	Framebuffer& existing_attachment(VkImageView view);
-	Framebuffer& build();
-	void destroy();
 };
 
 struct DescriptorSet {
@@ -387,8 +378,6 @@ struct DescriptorSet {
 
 	U32 current_dynamic_array_length();
 };
-
-extern Framebuffer mainFramebuffer;
 
 extern XrSwapchainData xrSwapchainData;
 

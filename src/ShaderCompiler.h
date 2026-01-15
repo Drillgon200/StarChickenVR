@@ -707,6 +707,8 @@ struct ShaderSection {
 struct DSLCompiler {
 	MemoryArena* arena;
 	const char* src;
+	StrA includePath;
+	StrA srcFileName;
 	U32 srcLen;
 	U32 currentLine;
 	U32 lastColumn;
@@ -751,7 +753,7 @@ struct DSLCompiler {
 
 	DLSCompileErrorCallback errorCallback;
 
-	void init(MemoryArena& arenaInput, const char* srcInput, U32 srcSizeInput) {
+	void init(MemoryArena& arenaInput, const char* srcInput, U32 srcSizeInput, StrA srcName, StrA includePathIn) {
 		arena = &arenaInput;
 		tcCode.allocator = &arenaInput;
 		savedConstants.allocator = &arenaInput;
@@ -771,6 +773,8 @@ struct DSLCompiler {
 		allModifierContexts.clear();
 		src = srcInput;
 		srcLen = srcSizeInput;
+		srcFileName = srcName;
+		includePath = includePathIn;
 		tabColumnWidth = 4;
 		nextSpvId = 1;
 		next_token();
@@ -1046,7 +1050,67 @@ struct DSLCompiler {
 			case ':': return Token{ TOKEN_COLON };
 			case ';': return Token{ TOKEN_SEMICOLON };
 			case '.': return Token{ TOKEN_DOT };
-			case '#': return Token{ TOKEN_HASH };
+			case '#': {
+				if (StrA{ src + currentByte, srcLen - currentByte }.starts_with("include \""a)) {
+					U32 beforeInclude = currentByte - 1;
+					U32 beforeIncludeColumn = currentColumn;
+					currentByte += U32("include \""a.length);
+					StrA pathEscaped{ src + currentByte - 1 };
+					StrA path = parse_string('"');
+					path = stracat(*arena, includePath, path);
+					pathEscaped.length = U64(src + currentByte - pathEscaped.str);
+					U64 prevStackPtr = arena->stackPtr;
+					char* newSrc = (char*)arena->stackBase + arena->stackPtr;
+					arena->stackPtr += beforeInclude;
+					memcpy(newSrc, src, beforeInclude);
+					// Inserting #line directives is more for human readability when I debug
+					strafmt(*arena, "#line 0\""a);
+					SerializeTools::escape_str(*arena, path);
+					((char*)arena->stackBase)[arena->stackPtr++] = '"';
+					((char*)arena->stackBase)[arena->stackPtr++] = ' ';
+					U32 includedLength;
+					// read_full_file_to_arena will put the data directly after arena->stackPtr
+					char* includedData = read_full_file_to_arena<char>(&includedLength, *arena, path);
+					strafmt(*arena, "#line %\""a, currentLine);
+					SerializeTools::escape_str(*arena, srcFileName);
+					((char*)arena->stackBase)[arena->stackPtr++] = '"';
+					((char*)arena->stackBase)[arena->stackPtr++] = ' ';
+					if (includedData) {
+						memcpy(arena->stackBase + arena->stackPtr, src + currentByte, srcLen - currentByte);
+						arena->stackPtr += srcLen - currentByte;
+						U32 newSrcLen = U32(((char*)arena->stackBase + arena->stackPtr) - newSrc);
+						src = newSrc;
+						srcLen = newSrcLen;
+						currentByte = beforeInclude;
+						currentColumn = beforeIncludeColumn;
+					} else {
+						arena->stackPtr = prevStackPtr;
+						parse_error(strafmt(*arena, "Failed to include file %"a, path));
+					}
+					continue;
+				} else if (StrA{ src + currentByte, srcLen - currentByte }.starts_with("line "a)) {
+					currentByte += U32("line "a.length);
+					U64 lineNum;
+					StrA restOfSrc{ src + currentByte, srcLen - currentByte };
+					SerializeTools::IntParseError parseErr = SerializeTools::parse_u64(&lineNum, &restOfSrc);
+					if (parseErr != SerializeTools::INT_PARSE_SUCCESS) {
+						parse_error("Failed to parse line directive. This should not happen."a);
+						continue;
+					}
+					if (!restOfSrc.starts_with("\""a)) {
+						parse_error("Failed to parse line directive src string. This should not happen."a);
+						continue;
+					}
+					restOfSrc++;
+					currentByte = U32(restOfSrc.str - src);
+					StrA srcFile = parse_string('"');
+					srcFileName = srcFile;
+					currentLine = U32(lineNum);
+					currentColumn = 0;
+					continue;
+				}
+				return Token{ TOKEN_HASH };
+			}
 			case '?': return Token{ TOKEN_QUESTION_MARK };
 			case '@': return Token{ TOKEN_AT };
 			case '$': return Token{ TOKEN_DOLLAR };
@@ -1890,6 +1954,12 @@ struct DSLCompiler {
 	);\
 	ADD_MULTI_OP_TERNARY_OPERATOR("clamp"a, type, typeId, typeId, typeId, \
 		return (op_##opTypeLetter##_clamp(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[0], params[1], params[2])); \
+	);\
+	ADD_MULTI_OP_TERNARY_OPERATOR("select"a, type, boolId, typeId, typeId, \
+		return (op_select(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1], params[2])); \
+	);\
+	ADD_MULTI_OP_TERNARY_OPERATOR("select"a, type, boolToUse->id, typeId, typeId, \
+		return (op_select(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1], params[2])); \
 	);
 
 #define ADD_DEFAULT_BIT_OPS(type, typeId)\
@@ -2712,10 +2782,10 @@ struct DSLCompiler {
 					imageType.type.id = nextSpvId++;
 					if (imageType.dimension != DIMENSIONALITY_BUFFER && imageType.dimension != DIMENSIONALITY_SUBPASS_DATA) {
 						U32 coordComponentCount =
-							imageType.dimension == DIMENSIONALITY_1D ? 1 :
-							imageType.dimension == DIMENSIONALITY_2D ? 2 :
-							imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? 3 :
-							4;
+							imageType.dimension == DIMENSIONALITY_1D ? 1u :
+							imageType.dimension == DIMENSIONALITY_2D ? 2u :
+							imageType.dimension == DIMENSIONALITY_3D || imageType.dimension == DIMENSIONALITY_CUBE ? 3u :
+							4u;
 						if (imageType.arrayed) {
 							coordComponentCount = min(4u, coordComponentCount + 1u);
 						}
@@ -2766,9 +2836,9 @@ struct DSLCompiler {
 
 							SpvId coordTypeId =
 								coordComponentCount == 1 ? defaultTypeF32->id :
-								coordComponentCount == 2 ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v2Type->type.id :
-								coordComponentCount == 3 ? reinterpret_cast<ScalarType*>(defaultTypeF32)->v3Type->type.id :
-								reinterpret_cast<ScalarType*>(defaultTypeF32)->v4Type->type.id;
+								coordComponentCount == 2 ? ((ScalarType*)defaultTypeF32)->v2Type->type.id :
+								coordComponentCount == 3 ? ((ScalarType*)defaultTypeF32)->v3Type->type.id :
+								((ScalarType*)defaultTypeF32)->v4Type->type.id;
 
 							argTypes = arena->alloc<SpvId>(2);
 							argTypes[0] = imageType.sampledImageType->id;
@@ -2776,6 +2846,29 @@ struct DSLCompiler {
 							signature = ProcedureType{ ProcedureIdentifier{ "sample_image"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
 							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
 								return op_image_sample_implicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
+
+							SpvId coordIntTypeId =
+								coordComponentCount == 1 ? defaultTypeU32->id :
+								coordComponentCount == 2 ? ((ScalarType*)defaultTypeU32)->v2Type->type.id :
+								coordComponentCount == 3 ? ((ScalarType*)defaultTypeU32)->v3Type->type.id :
+								((ScalarType*)defaultTypeU32)->v4Type->type.id;
+
+							argTypes = arena->alloc<SpvId>(2);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = coordIntTypeId;
+							signature = ProcedureType{ ProcedureIdentifier{ "read_image"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_image_fetch(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
+
+							argTypes = arena->alloc<SpvId>(3);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = coordTypeId;
+							argTypes[2] = defaultTypeU32->id;
+							signature = ProcedureType{ ProcedureIdentifier{ "gather_image"a, argTypes, 3 }, imageType.sampledType };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_image_gather(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1], params[2]);
 							} }));
 
 							argTypes = arena->alloc<SpvId>(3);
@@ -2800,6 +2893,14 @@ struct DSLCompiler {
 								SpvId sampledImage = op_sampled_image(codeOutput, sampledImageType, compiler.nextSpvId++, params[0], params[1]);
 								return op_image_sample_explicit_lod(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, sampledImage, params[2], IMAGE_OPERAND_LOD, params[3]);
 							}, imageType.sampledImageType->id }));
+
+							argTypes = arena->alloc<SpvId>(2);
+							argTypes[0] = imageType.type.id;
+							argTypes[1] = coordIntTypeId;
+							signature = ProcedureType{ ProcedureIdentifier{ "operator[]"a, argTypes, 2 }, &reinterpret_cast<ScalarType*>(imageType.sampledType)->v4Type->type };
+							allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+								return op_image_fetch(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
+							} }));
 						}
 						
 					}
@@ -4518,21 +4619,21 @@ struct DSLCompiler {
 };
 
 
-SpvDword* compile_dsl(U32* numCompiledDwords, const char* src, U32 srcSize) {
+SpvDword* compile_dsl(U32* numCompiledDwords, const char* src, U32 srcSize, StrA srcName, StrA includePath) {
 	MemoryArena& arena = get_scratch_arena();
 	SpvDword* result = nullptr;
 	MEMORY_ARENA_FRAME(arena) {
 		DSLCompiler compiler{};
-		compiler.init(arena, src, srcSize);
+		compiler.init(arena, src, srcSize, srcName, includePath);
 		result = compiler.compile(numCompiledDwords);
 	}
 	return result;
 }
-SpvDword* compile_dsl(U32* numCompiledDwords, StrA src) {
-	return compile_dsl(numCompiledDwords, src.str, U32(src.length));
+SpvDword* compile_dsl(U32* numCompiledDwords, StrA src, StrA srcName, StrA includePath) {
+	return compile_dsl(numCompiledDwords, src.str, U32(src.length), srcName, includePath);
 }
 
-bool compile_dsl_from_file_to_file(StrA src, StrA dst) {
+bool compile_dsl_from_file_to_file(StrA dst, StrA src, StrA includePath) {
 	MemoryArena& arena = get_scratch_arena();
 	bool success = true;
 	MEMORY_ARENA_FRAME(arena) {
@@ -4543,7 +4644,7 @@ bool compile_dsl_from_file_to_file(StrA src, StrA dst) {
 		if (!srcFile) {
 			goto fail;
 		}
-		compiled = compile_dsl(&compiledDwords, srcFile, srcSize);
+		compiled = compile_dsl(&compiledDwords, srcFile, srcSize, src, includePath);
 		if (!compiled) {
 			goto fail;
 		}

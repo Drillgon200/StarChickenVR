@@ -103,38 +103,12 @@ struct BitReader {
 };
 
 struct HuffmanTree {
-	constexpr static U32 MAX_BIT_LENGTH = 15;
-	constexpr static U32 MAX_CODES = 286;
-	//U16 lookupTable[32768];
+	const static U32 MAX_BIT_LENGTH = 15;
+	const static U32 MAX_CODES = 286;
 	U16 lengthCounts[MAX_BIT_LENGTH + 1];
 	U16 symbols[MAX_CODES * 2];
 
 	inline U16 read_next(BitReader& reader) {
-		/*U16 bits = reader.read_bits_no_check(MAX_BIT_LENGTH);
-		U16 value = lookupTable[bits];
-		U16 length = value >> 12;
-		value &= 0xFFF;
-		reader.put_back_bits(bits >> length, MAX_BIT_LENGTH-length);
-		reader.try_read_next();
-		return value;*/
-		/*I32 symbolIndex = 0;
-		I32 firstCodeForLength = 0;
-		I32 huffmanCode = 0;
-
-		for (I32 treeLevel = 1; treeLevel <= MAX_BIT_LENGTH; treeLevel++) {
-			I32 bit = reader.read_bits(1);
-			huffmanCode = (huffmanCode << 1) | bit;
-			I32 count = lengthCounts[treeLevel];
-			if ((huffmanCode - count) < firstCodeForLength) {
-				I32 index = symbolIndex + (huffmanCode - firstCodeForLength);
-				return symbols[index];
-			}
-			symbolIndex += count;
-			firstCodeForLength = (firstCodeForLength + count) << 1;
-		}
-		constexpr U16 error = ~0;
-		assert(false && "Huffman decode failed");
-		return error;*/
 		U32 scratch = reader.read_bits_no_check(15);
 		I32 symbolIndex = 0;
 		I32 firstCodeForLength = 0;
@@ -178,23 +152,12 @@ struct HuffmanTree {
 		U32 offsets[MAX_BIT_LENGTH + 2];
 		offsets[0] = 0;
 		offsets[1] = 0;
-		//U16 code = 0;
-		//U32 nextCode[MAX_BIT_LENGTH+1];
 		for (U32 i = 1; i <= MAX_BIT_LENGTH; i++) {
 			offsets[i + 1] = offsets[i] + lengthCounts[i];
-			//code = (code + lengthCounts[i - 1]) << 1;
-			//nextCode[i] = code;
 		}
 		for (U16 value = 0; value < numValues; value++) {
 			U8 valLength = valueLengths[value];
 			if (valLength > 0) {
-				/*U16 huffman = nextCode[valLength] << (MAX_BIT_LENGTH - valLength);
-				nextCode[valLength]++;
-				for (U32 fill = 0; fill < (1 << (MAX_BIT_LENGTH - valLength)); fill++) {
-					U32 lookupIndex = reverse_bits(huffman + fill) >> 1;
-					lookupTable[lookupIndex] = (valLength << 12) | value;
-				}*/
-
 				U32 offset = offsets[valLength];
 				symbols[offset] = value;
 				offsets[valLength]++;
@@ -334,12 +297,12 @@ void read_tree_lengths(BitReader& reader, HuffmanTree& decompressTree, U32 numCo
 }
 
 void decompress_trees(BitReader& reader, HuffmanTree* outLitLen, HuffmanTree* outDist) {
-	constexpr U32 maxHLit = 286;
-	//constexpr U32 minHLit = 257;
-	constexpr U32 maxHDist = 32;
-	//constexpr U32 minHDistn = 1;
-	constexpr U32 maxHCLen = 19;
-	//constexpr U32 minHCLen = 4;
+	const U32 maxHLit = 286;
+	//const U32 minHLit = 257;
+	const U32 maxHDist = 32;
+	//const U32 minHDistn = 1;
+	const U32 maxHCLen = 19;
+	//const U32 minHCLen = 4;
 
 	U32 hlit = reader.read_bits(5) + 257;
 	U32 hdist = reader.read_bits(5) + 1;
@@ -348,7 +311,7 @@ void decompress_trees(BitReader& reader, HuffmanTree* outLitLen, HuffmanTree* ou
 	RUNTIME_ASSERT(hdist <= maxHDist, "HDIST out of range!");
 	RUNTIME_ASSERT(hclen <= maxHCLen, "HCLEN out of range!");
 
-	constexpr U32 codeLengthOrder[maxHCLen]{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+	const U32 codeLengthOrder[maxHCLen]{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 	U8 lengths[maxHCLen]{};
 	for (U32 i = 0; i < hclen; i++) {
 		lengths[codeLengthOrder[i]] = U8(reader.read_bits(3));
@@ -373,15 +336,12 @@ Byte* inflate(MemoryArena& arena, Byte* data, Byte** result, U32* resultLength, 
 	U32 decompressedSize = 0;
 	Byte* decompressedOutput = arena.alloc<Byte>(bufferSize);
 
-	constexpr U32 extraBitLengthTable[29]{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0 };
-	constexpr U32 startingLengthTable[29]{ 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258 };
-	constexpr U32 extraBitDistTable[30]{ 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13 };
-	constexpr U32 startingDistTable[30]{ 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577 };
-	constexpr U32 endOfBlock = 256;
+	const U32 extraBitLengthTable[29]{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0 };
+	const U32 startingLengthTable[29]{ 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258 };
+	const U32 extraBitDistTable[30]{ 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13 };
+	const U32 startingDistTable[30]{ 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577 };
+	const U32 endOfBlock = 256;
 
-	//U64 huffmanReadTime = 0;
-	//U64 decompressTime = 0;
-	//U64 totalReadTime = 0;
 	while (!finalBlock) {
 		finalBlock = reader.read_bits(1);
 
@@ -390,14 +350,12 @@ Byte* inflate(MemoryArena& arena, Byte* data, Byte** result, U32* resultLength, 
 		if (compressionType == DEFLATE_COMPRESSION_NONE) {
 			// Skip remaining bits in current processing byte
 			reader.align_to_byte();
-			// Read LEN and NLEN
 			U16 len = reader.read_uint16();
 			U16 nlen = reader.read_uint16();
 			RUNTIME_ASSERT(len == (~nlen & 0xFFFF), "Data corruption? Length and the one's complement of length are not inverse of each other");
 			Byte* storedData = reader.get_current_pointer();
 			reader.increase_byte_pos(len);
 			resize_buffer(arena, &decompressedOutput, &bufferSize, decompressedSize, decompressedSize + len);
-			// Copy LEN bytes of data to output
 			memcpy(decompressedOutput + decompressedSize, storedData, len);
 			decompressedSize += len;
 		} else if (compressionType == DEFLATE_COMPRESSION_FIXED || compressionType == DEFLATE_COMPRESSION_DYNAMIC) {
@@ -405,20 +363,15 @@ Byte* inflate(MemoryArena& arena, Byte* data, Byte** result, U32* resultLength, 
 			HuffmanTree distTree;
 			HuffmanTree* litLenTreeRef = &litlenFixedTree;
 			HuffmanTree* distTreeRef = &distFixedTree;
-			//U64 time1 = __rdtsc();
 			if (compressionType == DEFLATE_COMPRESSION_DYNAMIC) {
 				decompress_trees(reader, &litLenTree, &distTree);
 				litLenTreeRef = &litLenTree;
 				distTreeRef = &distTree;
 			}
-			//decompressTime += __rdtsc() - time1;
 
 
-			//U64 time2 = __rdtsc();
 			while (true) {
-				//U64 time = __rdtsc();
 				U16 value = (*litLenTreeRef).read_next(reader);
-				//huffmanReadTime += __rdtsc() - time;
 				if (value == endOfBlock) {
 					break;
 				} else if (value < 256) {
@@ -428,9 +381,7 @@ Byte* inflate(MemoryArena& arena, Byte* data, Byte** result, U32* resultLength, 
 					value -= 257;
 					U32 extraBits = extraBitLengthTable[value];
 					U32 length = startingLengthTable[value] + reader.read_bits(extraBits);
-					//time = __rdtsc();
 					U32 distance = (*distTreeRef).read_next(reader);
-					//huffmanReadTime += __rdtsc() - time;
 					RUNTIME_ASSERT(distance < 30, "Distance read out of range");
 					extraBits = extraBitDistTable[distance];
 					distance = startingDistTable[distance] + reader.read_bits(extraBits);
@@ -444,11 +395,8 @@ Byte* inflate(MemoryArena& arena, Byte* data, Byte** result, U32* resultLength, 
 					RUNTIME_ASSERT(false, "Read wrong value!");
 				}
 			}
-			//totalReadTime += __rdtsc() - time2;
 		}
 	}
-
-	//std::cout << "Huffman read time: " << huffmanReadTime << "\nDecompress time: " << decompressTime << "\nTotal read time: " << totalReadTime << "\n" << std::endl;
 
 	*result = decompressedOutput;
 	*resultLength = decompressedSize;
@@ -486,7 +434,7 @@ void read_ihdr(ByteBuf& ihdr, ImageHeader& header) {
 	header.bitDepth = ihdr.read_be8();
 
 	U8 colorType = ihdr.read_be8();
-	constexpr U8 allowedBitDepths[5]{ 1, 2, 4, 8, 16 };
+	const U8 allowedBitDepths[5]{ 1, 2, 4, 8, 16 };
 	U8 bitCheckRange[2]{ 0, 5 };
 	switch (colorType) {
 	case 0: break;
@@ -598,7 +546,7 @@ void rescale_bit_depth(ImageHeader& header, Byte* finalData, RGBA8* finalImage, 
 	U32 bytesPerLine = (passWidth * numComponents * header.bitDepth + 7) / 8;
 
 	// Transparency but not null;
-	Byte transparencyDummyData[8];
+	Byte transparencyDummyData[8]{};
 	Byte* checkTransparency = transparency ? transparency : transparencyDummyData;
 	for (U32 y = 0; y < passHeight; y++) {
 		U32 finalY = y * interlaceYStride[pass] + interlaceYOffset[pass];
@@ -776,17 +724,13 @@ void read_image(MemoryArena& arena, RGBA8** outImage, U32* outWidth, U32* outHei
 	*outHeight = 0;
 	MemoryArena& stackArena = get_scratch_arena_excluding(arena);
 	U64 oldArenaStackPtr = stackArena.stackPtr;
-	//U64 readToBytesTime = __rdtsc();
 	U32 fileSize;
 	U8* file = read_full_file_to_arena<U8>(&fileSize, stackArena, fileName);
-	//readToBytesTime = __rdtsc() - readToBytesTime;
 	ByteBuf data; data.wrap(file, fileSize);
 
 	Byte pngSignature[]{ 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
 	if (file && data.capacity > 8 && memcmp(data.bytes, pngSignature, 8) == 0) {
 		data.offset += 8;
-
-		//U64 time1 = __rdtsc();
 
 		// Blocks we care about
 		ByteBuf ihdr{};
@@ -888,30 +832,17 @@ void read_image(MemoryArena& arena, RGBA8** outImage, U32* outWidth, U32* outHei
 		U32 decompressedSize;
 		U32 numComponents = 1u + (!!header.hasColor) * 2u + (!!header.hasAlpha);
 		U32 sizeGuess = ((header.width * numComponents * header.bitDepth + 7) / 8 + 1) * header.height;
-		//U64 inflateTime = __rdtsc();
 		Byte* newIdatPtr = inflate(stackArena, idat.bytes + idat.offset, &decompressedData, &decompressedSize, sizeGuess, litlenFixedTree, distFixedTree);
 		idat.skip(U32(newIdatPtr - (idat.bytes + idat.offset)));
-		//inflateTime = __rdtsc() - inflateTime;
 		U32 storedAdler32 = idat.read_be32();
-		//U64 adlerTime = __rdtsc();
 		U32 currentAdler32 = adler32(decompressedData, decompressedSize);
-		//adlerTime = __rdtsc() - adlerTime;
 		RUNTIME_ASSERT(storedAdler32 == currentAdler32, "Data checksums don't match!");
 		if (currentAdler32 != storedAdler32) {
 			RUNTIME_ASSERT(false, "Inflate failed!");
 		}
 
 		RGBA8* finalImage = arena.alloc<RGBA8>(header.width * header.height);
-		//U64 translationTime = __rdtsc();
 		translate_png_data(header, decompressedData, decompressedSize, finalImage, reinterpret_cast<RGB8*>(plte.bytes), paletteSize, trns.bytes, transparencySize);
-		//translationTime = __rdtsc() - translationTime;
-
-		//std::cout << "Translation time: " << translationTime << std::endl;
-		//std::cout << "Other time: " << time1 << std::endl;
-		//std::cout << "Inflate time: " << inflateTime << std::endl;
-		//std::cout << "Read to bytes time: " << readToBytesTime << std::endl;
-		//std::cout << "Adler time: " << adlerTime << std::endl;
-		//std::cout << "Inflate time: " << inflateTime << "\nPuff time:" << puffTime << "\nTranslate time: " << translationTime << "\n" << std::endl;
 
 		*outImage = finalImage;
 		*outWidth = header.width;

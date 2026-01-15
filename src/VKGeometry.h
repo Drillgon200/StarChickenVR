@@ -44,21 +44,6 @@ struct SkeletalAnimation {
 	M4x3F32* matrices;
 };
 
-struct StaticModel {
-	StaticMesh* mesh;
-	M4x3F32 transform;
-	U32 gpuMatrixIndex;
-};
-
-struct SkeletalModel {
-	SkeletalMesh* mesh;
-	M4x3F32* poseMatrices;
-	M4x3F32 transform;
-	U32 gpuMatrixIndex;
-	U32 skinnedVerticesOffset;
-	U32 skeletonMatrixOffset;
-};
-
 #pragma pack(push, 1)
 struct GPUSkinnedModel {
 	U32 matricesOffset;
@@ -336,14 +321,16 @@ struct UniformMatricesHandler {
 	}
 };
 
-void make_static_model(StaticModel* model, StaticMesh& mesh) {
-	model->mesh = &mesh;
-	model->transform.set_identity();
+void set_skeletal_default_pose(M4x3F* poseMatrices, VKGeometry::SkeletalMesh& mesh) {
+	for (U32 i = 0; i < mesh.skeletonData->boneCount; i++) {
+		poseMatrices[i] = mesh.skeletonData->bones[i].bindTransform;
+	}
 }
 
-void make_skeletal_model(SkeletalModel* model, SkeletalMesh& mesh) {
-	model->mesh = &mesh;
-	model->transform.set_identity();
+M4x3F* alloc_skeletal_default_pose(MemoryArena& arena, VKGeometry::SkeletalMesh& mesh) {
+	M4x3F* poseMatrices = arena.alloc<M4x3F>( mesh.skeletonData->boneCount);
+	set_skeletal_default_pose(poseMatrices, mesh);
+	return poseMatrices;
 }
 
 }

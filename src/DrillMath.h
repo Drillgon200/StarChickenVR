@@ -209,10 +209,10 @@ FINLINE U32 tzcnt32(U32 val) {
 FINLINE U64 tzcnt64(U64 val) {
 	return _tzcnt_u64(val);
 }
-FINLINE U64 log2ceil32(U32 val) {
+FINLINE U32 log2ceil32(U32 val) {
 	return 32 - _lzcnt_u32(val - 1);
 }
-FINLINE U64 log2floor32(U32 val) {
+FINLINE U32 log2floor32(U32 val) {
 	return 31 - _lzcnt_u32(val);
 }
 FINLINE U64 log2ceil64(U64 val) {
@@ -544,9 +544,9 @@ FINLINE V3F32 operator/=(V3F32& a, V3F32 b) {
 }
 FINLINE V3F32 operator/=(V3F32& a, F32 b) {
 	F32 invB = 1.0F / b;
-	a.x *= b;
-	a.y *= b;
-	a.z *= b;
+	a.x *= invB;
+	a.y *= invB;
+	a.z *= invB;
 	return a;
 }
 
@@ -1453,8 +1453,23 @@ struct Rng2F32 {
 	V2F32 midpoint() {
 		return V2F32{ (minX + maxX) * 0.5F, (minY + maxY) * 0.5F };
 	}
+
+	F32 width() {
+		return maxX - minX;
+	}
+	F32 height() {
+		return maxY - minY;
+	}
 };
 #pragma pack(pop)
+FINLINE Rng2F32 make_rng2f(V2F a, V2F b) {
+	Rng2F32 result;
+	result.minX = min(a.x, b.x);
+	result.maxX = max(a.x, b.x);
+	result.minY = min(a.y, b.y);
+	result.maxY = max(a.y, b.y);
+	return result;
+}
 FINLINE Rng2F32 rng_union(Rng2F32 a, Rng2F32 b) {
 	return Rng2F32{ min(a.minX, b.minX), min(a.minY, b.minY), max(a.maxX, b.maxX), max(a.maxY, b.maxY) };
 }
@@ -1492,6 +1507,18 @@ FINLINE B32 rng_contains_point(Rng3F32 rng, V3F32 v) {
 	return v.x >= rng.minX && v.x <= rng.maxX && v.y >= rng.minY && v.y <= rng.maxY && v.z >= rng.minZ && v.z <= rng.maxZ;
 }
 
+#pragma pack(push, 1)
+struct Rng1I32 {
+	I32 minX, maxX;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct Rng2I32 {
+	I32 minX, minY, maxX, maxY;
+};
+#pragma pack(pop)
+
 
 FINLINE U32 pack_unorm4x8(V4F32 v) {
 	return U32(v.x * 255.0F) | U32(v.y * 255.0F) << 8 | U32(v.z * 255.0F) << 16 | U32(v.w * 255.0F) << 24;
@@ -1514,7 +1541,7 @@ V3F uncharted2_filmic(V3F v) {
 
 V3F unpack_E5B9G9R9(U32 packed) {
 	F32 base = bitcast<F32>(((packed >> 27u) - 15 + 127) << 23);
-	return V3F{ (packed & 0b111111111) / 512.0F * base, (packed >> 9 & 0b111111111) / 512.0F * base, (packed >> 18 & 0b111111111) / 512.0F * base };
+	return V3F{ F32(packed & 0b111111111) / 512.0F * base, F32(packed >> 9 & 0b111111111) / 512.0F * base, F32(packed >> 18 & 0b111111111) / 512.0F * base };
 }
 
 RGBA8 tonemap_E5B9G9R9(U32 packed) {

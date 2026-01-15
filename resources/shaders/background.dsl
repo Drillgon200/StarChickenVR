@@ -27,6 +27,7 @@ struct M4x3F {
 };
 
 [output, location 0] &V4F outFragColor;
+[output, location 1] &U32 outObjId;
 [input, location 0] &V2F passPos;
 [input, location 1, flat] &I32 passViewIndex;
 
@@ -95,4 +96,5 @@ struct Material {
 
 	//^outFragColor = V4F(uncharted2_filmic((^backgroundCube)[^bilinearSampler, worldDirection, 1.0].rgb), 1.0);
 	^outFragColor = V4F(uncharted2_filmic((^diffuseCube)[^bilinearSampler, worldDirection, 0.0].rgb), 1.0);
+	^outObjId = 0u;
 };

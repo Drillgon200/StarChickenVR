@@ -58,7 +58,7 @@ struct Material {
 		V4F clip{ drawData.uiClipBoxes[vert.flags >> 16u] };
 		^clipBox = clip;
 	};
-	^outPosition = V4F((vert.pos.xy / drawData.screenDimensions) * 2.0 - 1.0, 0.01 / vert.pos.z + 0.99, 1.0);
+	^outPosition = V4F((vert.pos.xy / drawData.screenDimensions) * 2.0 - 1.0, vert.pos.z / 2048.0, 1.0);
 };
 
 #interface

@@ -7,7 +7,7 @@
 
 // Placement new from <new> (I don't want to include thousands of lines of C++ headers just for this)
 // Just to avoid potential UB issues when putting capturing lambdas in boxes
-inline void* __cdecl operator new(size_t _Size, void* _Where) noexcept {
+inline void* __cdecl operator new(size_t _Size, void* _Where) {
 	(void)_Size;
 	return _Where;
 }
@@ -25,6 +25,8 @@ ArenaArrayList<F32> borderWidthStack;
 ArenaArrayList<F32> paddingStack;
 ArenaArrayList<Flags32> defaultFlagsStack;
 
+#define UI_MAX_Z_OFFSET 2048.0F
+
 #define UI_SIZE(newSize) DEFER_LOOP(sizeStack.push_back(newSize), sizeStack.pop_back())
 #define UI_BACKGROUND_COLOR(newColor) DEFER_LOOP(backgroundColorStack.push_back((newColor).to_rgba8()), backgroundColorStack.pop_back())
 #define UI_TEXT_COLOR(newColor) DEFER_LOOP(textColorStack.push_back((newColor).to_rgba8()), textColorStack.pop_back())
@@ -33,8 +35,9 @@ ArenaArrayList<Flags32> defaultFlagsStack;
 #define UI_BORDER_WIDTH(newWidth) DEFER_LOOP(borderWidthStack.push_back(newWidth), borderWidthStack.pop_back())
 #define UI_PADDING(newPadding) DEFER_LOOP(paddingStack.push_back(newPadding), paddingStack.pop_back())
 #define UI_FLAGS(newFlags) DEFER_LOOP(defaultFlagsStack.push_back(newFlags), defaultFlagsStack.pop_back())
-
-#define UI_WORKING_BOX(newBox) for (UI::Box* oldWorkingBox = UI::workingBox, * irrelevant = UI::workingBox = (newBox); oldWorkingBox; UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
+// Suppress "hides previous local declaration" and "local variable is initialized but not referenced", intended behavior for this construct
+#define UI_WORKING_BOX(newBox) __pragma(warning(suppress : 4456 4189))\
+	for (UI::Box* oldWorkingBox = UI::workingBox, * irrelevant = UI::workingBox = (newBox); oldWorkingBox; UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
 
 const U32 MAX_CLIP_BOXES = 0x10000;
 ArenaArrayList<U32> clipBoxIndexStack;
@@ -55,6 +58,7 @@ enum LayoutDirection : U8 {
 enum SizeMode : U8 {
 	SIZE_MODE_FIT_CHILDREN,
 	SIZE_MODE_GROW_TO_PARENT,
+	SIZE_MODE_PARENT_PERCENT,
 	SIZE_MODE_ABSOLUTE
 };
 enum AlignMode : U8 {
@@ -109,7 +113,8 @@ enum BoxFlag : U32 {
 	BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION = 1 << 3,
 	BOX_FLAG_CUSTOM_DRAW = 1 << 4,
 	BOX_FLAG_DONT_CLOSE_CONTEXT_MENU_ON_INTERACTION = 1 << 5,
-	BOX_FLAG_WRAP_TEXT = 1 << 6
+	BOX_FLAG_WRAP_TEXT = 1 << 6,
+	BOX_FLAG_DONT_FIT_CHILDREN = 1 << 7
 };
 typedef Flags32 BoxFlags;
 const F32 BOX_INF_SIZE = 100000.0F;
@@ -136,14 +141,15 @@ struct Box {
 	Box* childFirst;
 	Box* childLast;
 
-	V2F32 pos;
-	V2F32 size;
-	V2F32 maxSize; // Treated as infinity if less than size, otherwise the size will be clamped to this
+	V2F pos;
+	V2F size;
+	V2F maxSize; // Treated as infinity if less than size, otherwise the size will be clamped to this
+	V2F parentSizePercent;
 	F32 padding; // Padding around edges as well as between children
 	F32 zOffset;
 
-	V2F32 computedPos;
-	V2F32 computedSize;
+	V2F computedPos;
+	V2F computedSize;
 
 	StrA text;
 	StrA tooltip;
@@ -160,7 +166,9 @@ struct Box {
 	Resources::Texture* backgroundTexture;
 
 	BoxActionCallback actionCallback;
-	U64 callbackAltData[3];
+	union {
+		BoxConsumer boxConsumerCallback;
+	};
 	alignas(16) char callbackData[32];
 };
 template<typename Callback>
@@ -169,10 +177,11 @@ ActionResult action_callback_adapter(Box* box, UserCommunication& comm) {
 	return (*reinterpret_cast<Callback*>(thisPtr))(box, comm);
 }
 template<typename Callback>
-void box_consumer_adapter(Box* box, UserCommunication& comm) {
+void box_consumer_adapter(Box* box) {
 	void* thisPtr = box->callbackData;
 	(*reinterpret_cast<Callback*>(thisPtr))(box);
 }
+// Callback of type BoxActionCallback (ActionResult callback(Box*, UserCommunication&))
 template<typename Callback>
 void set_box_callback(Box* box, Callback&& cb) {
 	static_assert(sizeof(Callback) <= sizeof(box->callbackData));
@@ -180,12 +189,13 @@ void set_box_callback(Box* box, Callback&& cb) {
 	new (box->callbackData) Callback(static_cast<Callback&&>(cb));
 	box->actionCallback = action_callback_adapter<Callback>;
 }
+// Callback of type BoxConsumer (void callback(Box*))
 template<typename Callback>
 void set_box_consumer_box_callback(Box* box, Callback&& cb) {
 	static_assert(sizeof(Callback) <= sizeof(box->callbackData));
 	//*reinterpret_cast<Callback*>(callbackData) = std::move(cb);
 	new (&box->callbackData[0]) Callback(static_cast<Callback&&>(cb));
-	box->callbackAltData[0] = UPtr(box_consumer_adapter<Callback>);
+	box->boxConsumerCallback = box_consumer_adapter<Callback>;
 }
 
 struct BoxHandle {
@@ -349,7 +359,7 @@ void init_ui() {
 
 	workingBox = root = alloc_box().unsafeBox;
 	root->flags |= BOX_FLAG_INVISIBLE;
-	root->zOffset = 1000.0F;
+	root->zOffset = UI_MAX_Z_OFFSET * 0.5F;
 
 	for (U32 i = 0; i < VK::FRAMES_IN_FLIGHT; i++) {
 		clipBoxBuffers[i].create(MAX_CLIP_BOXES * sizeof(Rng2F32), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK::hostMemoryTypeIndex);
@@ -393,7 +403,7 @@ void compute_min_sizes_x_recurse(Box* box) {
 		}
 	}
 	size = max(size, current + padding);
-	if (box->sizeModeX == SIZE_MODE_ABSOLUTE) {
+	if (box->sizeModeX == SIZE_MODE_ABSOLUTE || box->flags & BOX_FLAG_DONT_FIT_CHILDREN) {
 		size = box->size.x;
 	}
 	if (box->maxSize.x != 0.0F) {
@@ -406,13 +416,17 @@ void compute_min_sizes_y_recurse(Box* box) {
 	F32 size = box->size.y;
 	F32 padding = box->padding;
 
-	if (!box->text.is_empty()) {
+	StrA boxText = box->text;
+	if (box->typedTextBuffer) {
+		boxText = StrA{ box->typedTextBuffer, box->numTypedCharacters };
+	}
+	if (!boxText.is_empty()) {
 		if (box->flags & BOX_FLAG_WRAP_TEXT) {
 			MEMORY_ARENA_FRAME(scratchArena0) {
-				size = max(size, TextRenderer::string_size_y(TextRenderer::wrap_text(scratchArena0, box->text, box->computedSize.x - padding * 2.0F, box->textSize), box->textSize) + padding * 2.0F);
+				size = max(size, TextRenderer::string_size_y(TextRenderer::wrap_text(scratchArena0, boxText, box->computedSize.x - padding * 2.0F, box->textSize), box->textSize) + padding * 2.0F);
 			}
 		} else {
-			size = max(size, TextRenderer::string_size_y(box->text, box->textSize) + padding * 2.0F);
+			size = max(size, TextRenderer::string_size_y(boxText, box->textSize) + padding * 2.0F);
 		}
 	}
 
@@ -431,7 +445,7 @@ void compute_min_sizes_y_recurse(Box* box) {
 		}
 	}
 	size = max(size, current + padding);
-	if (box->sizeModeY == SIZE_MODE_ABSOLUTE) {
+	if (box->sizeModeY == SIZE_MODE_ABSOLUTE || box->flags & BOX_FLAG_DONT_FIT_CHILDREN) {
 		size = box->size.y;
 	}
 	if (box->maxSize.y != 0.0F) {
@@ -448,22 +462,27 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 	// LEFT = 0
 	// CENTER = 1
 	// RIGHT = 2
-	U32 alignMode = box->align & 0b11;
+	U32 alignMode = box->align & 0b11u;
 
 	if (layoutAxis == AXIS2_X) {
 		F32 totalSpace = box->computedSize.x;
 		F32 childrenSpace = 0.0F;
+		F32 percentageGrowMinSpace = 0.0F;
 		U32 growableCount = 0;
 		U32 childCount = 0;
 		Box** growables = scratchArena0.alloc<Box*>(0);
 		for (Box* child = box->childFirst; child; child = child->next) {
 			childrenSpace += child->computedSize.x;
-			if (child->sizeModeX == SIZE_MODE_GROW_TO_PARENT) {
+			if (child->sizeModeX == SIZE_MODE_GROW_TO_PARENT || child->sizeModeX == SIZE_MODE_PARENT_PERCENT) {
 				growables[growableCount++] = child;
+			}
+			if (child->sizeModeX == SIZE_MODE_PARENT_PERCENT) {
+				percentageGrowMinSpace += child->computedSize.x;
 			}
 			childCount++;
 		}
 		F32 spaceLeft = totalSpace - childrenSpace - F32(childCount - 1) * padding - padding * 2.0F;
+		F32 percentageGrowUsableSpace = spaceLeft + percentageGrowMinSpace;
 		while (growableCount && spaceLeft > 0.0F) {
 			F32 minSize = F32_LARGE;
 			F32 secondMinSize = F32_LARGE;
@@ -484,21 +503,25 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 					if (child->maxSize.x != 0.0F) {
 						maxSize = min(maxSize, child->maxSize.x);
 					}
+					if (child->sizeModeX == SIZE_MODE_PARENT_PERCENT) {
+						maxSize = min(maxSize, max(child->computedSize.x, child->parentSizePercent.x * percentageGrowUsableSpace));
+					}
 				}
 			}
 			F32 idealGrowth = min(maxSize, secondMinSize) - minSize;
 			F32 widthPerBox = min(idealGrowth, spaceLeft / F32(toGrowCount));
-			F32 growTo = idealGrowth * toGrowCount <= spaceLeft ? min(maxSize, secondMinSize) : minSize + widthPerBox;
+			F32 growTo = idealGrowth * F32(toGrowCount) <= spaceLeft ? min(maxSize, secondMinSize) : minSize + widthPerBox;
 			for (U32 childIdx = 0; childIdx < growableCount; childIdx++) {
 				Box* child = growables[childIdx];
 				if (child->computedSize.x == minSize) {
-					child->computedSize.x = growTo;
-					if (child->maxSize.x != 0.0F && child->maxSize.x == growTo) {
+					if (child->maxSize.x != 0.0F && child->maxSize.x == growTo ||
+						child->sizeModeX == SIZE_MODE_PARENT_PERCENT && max(child->computedSize.x, child->parentSizePercent.x * percentageGrowUsableSpace) == growTo) {
 						growables[childIdx] = growables[--growableCount], childIdx--;
 					}
+					child->computedSize.x = growTo;
 				}
 			}
-			if (idealGrowth * toGrowCount > spaceLeft) {
+			if (idealGrowth * F32(toGrowCount) > spaceLeft) {
 				spaceLeft = 0.0F;
 				break;
 			}
@@ -515,6 +538,8 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 		for (Box* child = box->childFirst; child; child = child->next) {
 			if (child->sizeModeX == SIZE_MODE_GROW_TO_PARENT) {
 				child->computedSize.x = clamp(growSizeX, child->computedSize.x, child->maxSize.x == 0.0F ? F32_LARGE : child->maxSize.x);
+			} else if (child->sizeModeX == SIZE_MODE_PARENT_PERCENT) {
+				child->computedSize.x = clamp(growSizeX, child->computedSize.x, max(child->padding * 2.0F, child->parentSizePercent.x * growSizeX));
 			}
 			F32 spaceLeft = floorf32(box->computedSize.x - child->computedSize.x - padding * 2.0F);
 			if (spaceLeft > 0.0F) {
@@ -545,13 +570,15 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 	// TOP = 0
 	// CENTER = 1
 	// BOTTOM = 2
-	U32 alignMode = box->align >> 2;
+	U32 alignMode = U32(box->align) >> 2u;
 
 	if (layoutAxis == AXIS2_X) {
 		F32 growSizeY = box->computedSize.y - padding * 2.0F;
 		for (Box* child = box->childFirst; child; child = child->next) {
 			if (child->sizeModeY == SIZE_MODE_GROW_TO_PARENT) {
 				child->computedSize.y = clamp(growSizeY, child->computedSize.y, child->maxSize.y == 0.0F ? F32_LARGE : child->maxSize.y);
+			} else if (child->sizeModeY == SIZE_MODE_PARENT_PERCENT) {
+				child->computedSize.y = clamp(growSizeY, child->computedSize.y, max(child->padding * 2.0F, child->parentSizePercent.y * growSizeY));
 			}
 			F32 spaceLeft = box->computedSize.y - child->computedSize.y - padding * 2.0F;
 			if (spaceLeft > 0.0F) {
@@ -561,17 +588,22 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 	} else {
 		F32 totalSpace = box->computedSize.y;
 		F32 childrenSpace = 0.0F;
+		F32 percentageGrowMinSpace = 0.0F;
 		U32 growableCount = 0;
 		U32 childCount = 0;
 		Box** growables = scratchArena0.alloc<Box*>(0);
 		for (Box* child = box->childFirst; child; child = child->next) {
 			childrenSpace += child->computedSize.y;
-			if (child->sizeModeY == SIZE_MODE_GROW_TO_PARENT) {
+			if (child->sizeModeY == SIZE_MODE_GROW_TO_PARENT || child->sizeModeY == SIZE_MODE_PARENT_PERCENT) {
 				growables[growableCount++] = child;
+			}
+			if (child->sizeModeY == SIZE_MODE_PARENT_PERCENT) {
+				percentageGrowMinSpace += child->computedSize.y;
 			}
 			childCount++;
 		}
 		F32 spaceLeft = totalSpace - childrenSpace - F32(childCount - 1) * padding - padding * 2.0F;
+		F32 percentageGrowUsableSpace = spaceLeft + percentageGrowMinSpace;
 		while (growableCount && spaceLeft > 0.0F) {
 			F32 minSize = F32_LARGE;
 			F32 secondMinSize = F32_LARGE;
@@ -592,21 +624,26 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 					if (child->maxSize.y != 0.0F) {
 						maxSize = min(maxSize, child->maxSize.y);
 					}
+					if (child->sizeModeY == SIZE_MODE_PARENT_PERCENT) {
+						maxSize = min(maxSize, max(child->computedSize.y, child->parentSizePercent.y * percentageGrowUsableSpace));
+					}
 				}
 			}
 			F32 idealGrowth = min(maxSize, secondMinSize) - minSize;
 			F32 widthPerBox = min(idealGrowth, spaceLeft / F32(toGrowCount));
-			F32 growTo = idealGrowth * toGrowCount <= spaceLeft ? min(maxSize, secondMinSize) : minSize + widthPerBox;
+			F32 growTo = idealGrowth * F32(toGrowCount) <= spaceLeft ? min(maxSize, secondMinSize) : minSize + widthPerBox;
 			for (U32 childIdx = 0; childIdx < growableCount; childIdx++) {
 				Box* child = growables[childIdx];
 				if (child->computedSize.y == minSize) {
-					child->computedSize.y = growTo;
-					if (child->maxSize.y != 0.0F && child->maxSize.y == growTo) {
+					if (child->maxSize.y != 0.0F && child->maxSize.y == growTo ||
+						child->sizeModeY == SIZE_MODE_PARENT_PERCENT && max(child->computedSize.y, child->parentSizePercent.y * percentageGrowUsableSpace) == growTo) {
 						growables[childIdx] = growables[--growableCount], childIdx--;
 					}
+					child->computedSize.y = growTo;
 				}
+
 			}
-			if (idealGrowth * toGrowCount > spaceLeft) {
+			if (idealGrowth * F32(toGrowCount) > spaceLeft) {
 				spaceLeft = 0.0F;
 				break;
 			}
@@ -675,11 +712,11 @@ void layout_boxes(U32 rootWidth, U32 rootHeight) {
 	}
 }
 
-void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F32 mousePos, V2F32 parentPos, F32 scale, F32 z) {
+void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F parentPos, F32 scale, F32 z) {
 	if (box->flags & BOX_FLAG_DISABLED) {
 		return;
 	}
-	V2F32 boxPos = parentPos + box->computedPos;
+	V2F boxPos = parentPos + box->computedPos;
 	Rng2F32 renderArea{ boxPos.x, boxPos.y, boxPos.x + box->computedSize.x, boxPos.y + box->computedSize.y };
 	if (box->flags & BOX_FLAG_CLIP_CHILDREN && currentClipBoxCount < MAX_CLIP_BOXES) {
 		Rng2F32 boxRange = rng_intersect(renderArea, clipBoxStack.back());
@@ -716,14 +753,16 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F32 mousePos, V
 				if (box->typedTextBuffer && box->numTypedCharacters == 0) {
 					textColor = V4F32{ textColor.x * 0.25F, textColor.y * 0.25F, textColor.z * 0.25F, textColor.w };
 				}
-				TextRenderer::draw_string_batched(tes, str, renderArea.minX + box->padding * scale, renderArea.minY + box->padding * scale, z, box->textSize * scale, textColor, clipBoxIndexStack.back() << 16);
+				F32 strHeight = TextRenderer::string_size_y(str, box->textSize * scale);
+				TextRenderer::draw_string_batched(tes, str, renderArea.minX + box->padding * scale, 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight, z, box->textSize * scale, textColor, clipBoxIndexStack.back() << 16);
 			}
 			if (box->numTypedCharacters) {
-				StrA str =StrA{ box->typedTextBuffer, box->numTypedCharacters };
+				StrA str{ box->typedTextBuffer, box->numTypedCharacters };
 				if (box->flags & BOX_FLAG_WRAP_TEXT) {
 					str = TextRenderer::wrap_text(scratchArena0, str, box->computedSize.x - box->padding * 2.0F, box->textSize);
 				}
-				TextRenderer::draw_string_batched(tes, str, renderArea.minX + box->padding * scale, renderArea.minY + box->padding * scale, z, box->textSize * scale, box->textColor.to_v4f32(), clipBoxIndexStack.back() << 16);
+				F32 strHeight = TextRenderer::string_size_y(str, box->textSize * scale);
+				TextRenderer::draw_string_batched(tes, str, renderArea.minX + box->padding * scale, 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight, z, box->textSize * scale, box->textColor.to_v4f32(), clipBoxIndexStack.back() << 16);
 			}
 		}
 	}
@@ -773,7 +812,7 @@ void draw() {
 	modificationLock.unlock_read();
 }
 
-B32 mouse_input_for_box_recurse(B32* anyContained, Box* box, V2F32 pos, Win32::MouseButton button, Win32::MouseValue state, V2F32 parentPos, F32 scale) {
+B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::MouseButton button, Win32::MouseValue state, V2F32 parentPos, F32 scale) {
 	if (box->flags & BOX_FLAG_DISABLED) {
 		return false;
 	}
@@ -840,7 +879,10 @@ bool inDialog = false;
 bool handle_mouse_action(V2F32 pos, Win32::MouseButton button, Win32::MouseValue state) {
 	if (inDialog) return false;
 	modificationLock.lock_write();
-	B32 anyContained = false;
+	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_DOWN) {
+		activeBox = BoxHandle{};
+	}
+	bool anyContained = false;
 	for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
 		if (Box* contextMenuBox = contextMenuStack.data[i].get()) {
 			mouse_input_for_box_recurse(&anyContained, contextMenuBox, pos, button, state, root->computedPos, 1.0F);
@@ -1056,24 +1098,26 @@ BoxHandle text_button(StrA text, Callback&& onClick) {
 	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
 	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
 		if (com.leftClicked) {
-			reinterpret_cast<BoxConsumer>(box->callbackAltData[0])(box);
+			box->boxConsumerCallback(box);
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
 		};
 	return box;
 }
-/*
+
 // onTextUpdated of type BoxConsumer
 template<typename Callback>
 BoxHandle text_input(StrA prompt, StrA defaultValue, Callback&& onTextUpdated) {
 	BoxHandle boxHandle = generic_box();
 	Box* box = boxHandle.unsafeBox;
-	box->flags = BOX_FLAG_CLIP_CHILDREN | BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
-	box->sizeParentPercent.x = 1.0F;
+	box->flags = BOX_FLAG_CLIP_CHILDREN | BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION | BOX_FLAG_WRAP_TEXT;
+	box->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+	box->sizeModeY = SIZE_MODE_FIT_CHILDREN;
 	box->size.x = 100.0F;
 	box->text = prompt;
 	box->typedTextBuffer = alloc_text_input();
+	defaultValue.length = min<U64>(defaultValue.length, MAX_TEXT_INPUT);
 	memcpy(box->typedTextBuffer, defaultValue.str, defaultValue.length);
 	box->numTypedCharacters = U32(defaultValue.length);
 	set_box_consumer_box_callback(box, reinterpret_cast<Callback&&>(onTextUpdated));
@@ -1085,16 +1129,19 @@ BoxHandle text_input(StrA prompt, StrA defaultValue, Callback&& onTextUpdated) {
 		if (comm.keyPressed && activeTextBox.get() == box) {
 			if (comm.charTyped && box->numTypedCharacters < MAX_TEXT_INPUT) {
 				box->typedTextBuffer[box->numTypedCharacters++] = comm.charTyped;
+			} else if (comm.keyPressed == Win32::KEY_RETURN && box->numTypedCharacters < MAX_TEXT_INPUT) {
+				box->typedTextBuffer[box->numTypedCharacters++] = '\n';
 			} else if (comm.keyPressed == Win32::KEY_BACKSPACE && box->numTypedCharacters > 0) {
 				box->numTypedCharacters--;
 			}
-			BoxConsumer(box->callbackAltData[0])(box);
+			box->boxConsumerCallback(box);
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
 	};
 	return boxHandle;
 }
+
 // onClick of type BoxConsumer
 template<typename Callback>
 BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
@@ -1105,13 +1152,14 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
 	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
 		if (com.leftClicked) {
-			reinterpret_cast<BoxConsumer>(box->callbackAltData[0])(box);
+			box->boxConsumerCallback(box);
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
 		};
 	return box;
 }
+/*
 // onClick of type BoxConsumer
 // Min and max are only hints, they do not guarantee the text value
 template<typename Callback>

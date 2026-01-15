@@ -9,6 +9,7 @@
 #include "MSDFGenerator.h"
 #include "PNG.h"
 #include "UI.h"
+#include "Level.h"
 #include "EditorUI.h"
 
 namespace StarChicken {
@@ -49,28 +50,9 @@ F64 totalTime;
 
 PlayerInfo player;
 
-VKGeometry::StaticModel worldModel;
-VKGeometry::SkeletalModel testAnimModel;
-VKGeometry::SkeletalModel playerRightHandModel;
-VKGeometry::SkeletalModel playerLeftHandModel;
-
-ArenaArrayList<VKGeometry::StaticModel*> staticModelsToRender;
-ArenaArrayList<VKGeometry::SkeletalModel*> skeletalModelsToRender;
-
-void setup_scene() {
-	player.position = V3F32{ 0.0F, 8.5F, 12.35F };
-	player.leftHand.transform.set_identity();
-	player.rightHand.transform.set_identity();
-	VKGeometry::make_static_model(&worldModel, Resources::testMesh);
-	VKGeometry::make_skeletal_model(&testAnimModel, Resources::testAnimMesh);
-	testAnimModel.transform.translate(V3F32{ 3.0F, 3.0F, 0.0F });
-	VKGeometry::make_skeletal_model(&playerRightHandModel, Resources::rightHandMesh);
-	VKGeometry::make_skeletal_model(&playerLeftHandModel, Resources::leftHandMesh);
-}
-
 void update_player(XR::OpenXRFrameInfo& openxrFrameInfo) {
-	playerRightHandModel.transform = XR::userInput.rightHand.pose;
-	playerRightHandModel.transform.add_offset(player.position).rotate_axis_angle(V3F32_NORTH, -0.25F).rotate_axis_angle(V3F32_UP, -0.07F);
+	//playerRightHandModel.transform = XR::userInput.rightHand.pose;
+	//playerRightHandModel.transform.add_offset(player.position).rotate_axis_angle(V3F32_NORTH, -0.25F).rotate_axis_angle(V3F32_UP, -0.07F);
 
 	for (U32 finger = PLAYER_FINGER_INDEX; finger < PLAYER_FINGER_PINKY; finger++) {
 		player.rightHand.fingerCloseTargets[finger] = XR::userInput.rightHand.grip;
@@ -98,35 +80,6 @@ void update_player(XR::OpenXRFrameInfo& openxrFrameInfo) {
 	}
 }
 
-void draw_static_model(VKGeometry::StaticModel& model) {
-	model.gpuMatrixIndex = VK::uniformMatricesHandler.alloc(1);
-	staticModelsToRender.push_back(&model);
-}
-
-void draw_skeletal_model(VKGeometry::SkeletalModel& model) {
-	model.gpuMatrixIndex = VK::uniformMatricesHandler.alloc(1);
-	model.skeletonMatrixOffset = VK::uniformMatricesHandler.alloc(model.mesh->skeletonData->boneCount);
-	model.skinnedVerticesOffset = VK::geometryHandler.alloc_skinned_result(model.mesh->geometry.verticesCount);
-	skeletalModelsToRender.push_back(&model);
-}
-
-void set_skeletal_model_to_default_pose(VKGeometry::SkeletalModel& model) {
-	U32 boneCount = model.mesh->skeletonData->boneCount;
-	model.poseMatrices = frameArena.alloc<M4x3F32>(boneCount);
-	for (U32 i = 0; i < boneCount; i++) {
-		model.poseMatrices[i] = model.mesh->skeletonData->bones[i].bindTransform;
-	}
-}
-
-void draw_scene() {
-	draw_static_model(worldModel);
-	set_skeletal_model_to_default_pose(playerRightHandModel);
-	set_skeletal_model_to_default_pose(testAnimModel);
-	testAnimModel.poseMatrices[1].rotate_quat(QF32{}.from_axis_angle(AxisAngleF32{ V3F32_EAST, (sinf32(F32(totalTime) * 0.75F) + 1.0F) * 0.125F }));
-	draw_skeletal_model(playerRightHandModel);
-	draw_skeletal_model(testAnimModel);
-}
-
 void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	LARGE_INTEGER perfCounter;
 	if (!QueryPerformanceCounter(&perfCounter)) {
@@ -152,6 +105,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	}
 
 	EditorUI::update();
+	Level::level.update(F32(deltaTime));
 
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 stackArenaFrame0 = stackArena.stackPtr;
@@ -165,14 +119,18 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	}
 	UI::layout_boxes(VK::desktopSwapchainData.width, VK::desktopSwapchainData.height);
 	if (openxrFrameBeginInfo.shouldRender || isInEditorMode) {
-		//draw_scene();
-		
+		Level::level.prepare_render_transforms();
+
+		DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
+		EditorUI::debug_render();
+		Rng1I32 tesWorldDebugDrawSet = tes.end_draw_set();
+
 		VkCommandBuffer cmdBuf = VK::graphicsCommandBuffer;
 
 		{ // Compute skinning
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipeline);
 			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
-			for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
+			for (Level::SkeletalModel* model : Level::level.skeletalModels) {
 				VKGeometry::GPUSkinnedModel gpuSkinnedModelData;
 				gpuSkinnedModelData.matricesOffset = model->skeletonMatrixOffset;
 				gpuSkinnedModelData.vertexOffset = model->mesh->geometry.verticesOffset;
@@ -194,34 +152,56 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
 		}
 
-		VkRenderPassBeginInfo renderPassBegin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-		renderPassBegin.renderPass = VK::mainRenderPass;
-		renderPassBegin.framebuffer = VK::mainFramebuffer.framebuffer;
-		renderPassBegin.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ VK::mainFramebuffer.framebufferWidth, VK::mainFramebuffer.framebufferHeight } };
-		renderPassBegin.clearValueCount = 2;
-		VkClearValue clearValues[2]{};
-		clearValues[0].color.float32[0] = 0.0F;
-		clearValues[0].color.float32[1] = 0.0F;
-		clearValues[0].color.float32[2] = 0.0F;
-		clearValues[0].color.float32[3] = 0.0F;
-		clearValues[1].depthStencil.depth = 0.0F;
-		clearValues[1].depthStencil.stencil = 0;
-		renderPassBegin.pClearValues = clearValues;
-		VK::vkCmdBeginRenderPass(cmdBuf, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+		VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		VK::img_barrier(cmdBuf, VK::attachments.depth.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_NONE, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+		VkRenderingInfoKHR renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO_KHR };
+		renderingInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ VK::attachments.mainWidth, VK::attachments.mainHeight } };
+		renderingInfo.layerCount = 1;
+		renderingInfo.viewMask = isInEditorMode ? 0u : 0b11u; // Two eye rendering when in VR mode
+		renderingInfo.colorAttachmentCount = 2;
+		VkRenderingAttachmentInfo colorAttachments[2];
+		VkRenderingAttachmentInfo& colorAttachment = colorAttachments[0];
+		colorAttachment = VkRenderingAttachmentInfo{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
+		colorAttachment.imageView = VK::attachments.color.imgView;
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		colorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.clearValue.color = VkClearColorValue{};
+		VkRenderingAttachmentInfo& idAttachment = colorAttachments[1];
+		idAttachment = VkRenderingAttachmentInfo{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
+		idAttachment.imageView = VK::attachments.objectId.imgView;
+		idAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		idAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
+		idAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		idAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		idAttachment.clearValue.color = VkClearColorValue{};
+		renderingInfo.pColorAttachments = colorAttachments;
+		VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
+		depthAttachment.imageView = VK::attachments.depth.imgView;
+		depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		depthAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		depthAttachment.clearValue.depthStencil.depth = 0.0F;
+		renderingInfo.pDepthAttachment = &depthAttachment;
+		VK::vkCmdBeginRenderingKHR(cmdBuf, &renderingInfo);
 
 		VkViewport viewport{};
 		viewport.x = 0.0F;
 		viewport.y = 0.0F;
-		viewport.width = F32(VK::mainFramebuffer.framebufferWidth);
-		viewport.height = F32(VK::mainFramebuffer.framebufferHeight);
+		viewport.width = F32(VK::attachments.mainWidth);
+		viewport.height = F32(VK::attachments.mainHeight);
 		viewport.minDepth = 0.0F;
 		viewport.maxDepth = 1.0F;
 		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 		VkRect2D scissor{};
 		scissor.offset.x = 0;
 		scissor.offset.y = 0;
-		scissor.extent.width = VK::mainFramebuffer.framebufferWidth;
-		scissor.extent.height = VK::mainFramebuffer.framebufferHeight;
+		scissor.extent.width = VK::attachments.mainWidth;
+		scissor.extent.height = VK::attachments.mainHeight;
 		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 
@@ -231,32 +211,140 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
 		}
 		
-		VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
-
 		{ // Draw world geometry
-			VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
-
-			for (VKGeometry::StaticModel* model : staticModelsToRender) {
-				VK::GPUModelInfo modelInfo{ model->gpuMatrixIndex, I32(model->mesh->verticesOffset + 1) };
-				VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::GPUModelInfo), &modelInfo);
-				VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 0);
-			}
-
-			for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
-				// Negate vertex offset so the shader knows to pull from the skinned vertex arrays
-				VK::GPUModelInfo modelInfo{ model->gpuMatrixIndex, -I32(model->skinnedVerticesOffset + 1) };
-				VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::GPUModelInfo), &modelInfo);
-				VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, 0, 0);
+			if (isInEditorMode) {
+				U32 camIdx = 0;
+				for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
+					if (rng_area(editor3d->viewport) == 0.0F) {
+						editor3d->gpuCameraIndex = U32_MAX;
+						continue;
+					}
+					if (camIdx < VK::uniformMatricesHandler.maxCameras) {
+						editor3d->gpuCameraIndex = camIdx;
+						viewport.x = editor3d->viewport.minX;
+						viewport.y = editor3d->viewport.minY;
+						viewport.width = editor3d->viewport.width();
+						viewport.height = editor3d->viewport.height();
+						VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+						VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
+						VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
+						Level::level.draw_models(cmdBuf, camIdx);
+						tes.draw(tesWorldDebugDrawSet, camIdx);
+					} else {
+						editor3d->gpuCameraIndex = U32_MAX;
+					}
+					camIdx++;
+				}
+			} else {
+				VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
+				VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
+				Level::level.draw_models(cmdBuf, 0);
+				tes.draw(tesWorldDebugDrawSet, 0);
 			}
 		}
+
+		VK::vkCmdEndRenderingKHR(cmdBuf); // world render pass
+
+		if (!isInEditorMode) { // Final composite (XR)
+			VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+			VK::img_barrier(cmdBuf, VK::attachments.composite.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_NONE, VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipeline);
+			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipelineLayout, 0, 1, &VK::finalCompositeDescriptorSet.descriptorSet, 0, nullptr);
+			VK::FinalCompositePushConstants compositeConstants{};
+			compositeConstants.activeObjectId = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
+			compositeConstants.outputDimensions = V2U{ VK::attachments.mainWidth, VK::attachments.mainHeight };
+			VK::vkCmdPushConstants(cmdBuf, VK::finalCompositePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(compositeConstants), &compositeConstants);
+			VK::vkCmdDispatch(cmdBuf, (VK::attachments.mainWidth + 15) / 16, (VK::attachments.mainHeight + 15) / 16, 1);
+		}
+
+		// 2D UI render pass
+		if (isInEditorMode) {
+			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		} else {
+			// The UI image will be presented, so we blit a VR view into it as a background image
+			VK::img_barrier(cmdBuf, VK::attachments.composite.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+			// Try to fit XR dimensions to desktop dimensions
+			V2F middle{ F32(VK::attachments.mainWidth) * 0.5F, F32(VK::attachments.mainHeight) * 0.5F };
+			V2F blitSourceExtent = V2F{ F32(VK::attachments.uiWidth) * 0.5F, F32(VK::attachments.uiHeight) * 0.5F };
+			blitSourceExtent *= min(middle.x / blitSourceExtent.x, middle.y / blitSourceExtent.y);
+			VK::img_blit2d(cmdBuf,
+						   VK::attachments.composite.img, Rng2I32{ max(I32(middle.x - blitSourceExtent.x), 0), max(I32(middle.y - blitSourceExtent.y), 0), min(I32(middle.x + blitSourceExtent.x), I32(VK::attachments.mainWidth)), min(I32(middle.y + blitSourceExtent.y), I32(VK::attachments.mainHeight)) },
+						   VK::attachments.uiColor.img, Rng2I32{ 0, 0, I32(VK::attachments.uiWidth), I32(VK::attachments.uiHeight) },
+						   1, VK_FILTER_NEAREST, VK_IMAGE_ASPECT_COLOR_BIT);
+			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		}
+		VK::img_barrier(cmdBuf, VK::attachments.uiDepth.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_NONE, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+		renderingInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ VK::attachments.uiWidth, VK::attachments.uiHeight } };
+		renderingInfo.layerCount = 1;
+		renderingInfo.viewMask = 0u;
+		renderingInfo.colorAttachmentCount = 1;
+		VkRenderingAttachmentInfo uiColorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
+		uiColorAttachment.imageView = VK::attachments.uiColor.imgView;
+		uiColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		uiColorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
+		uiColorAttachment.loadOp = isInEditorMode ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+		uiColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		uiColorAttachment.clearValue.color = VkClearColorValue{};
+		renderingInfo.pColorAttachments = &uiColorAttachment;
+		VkRenderingAttachmentInfo uiDepthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
+		uiDepthAttachment.imageView = VK::attachments.uiDepth.imgView;
+		uiDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		uiDepthAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
+		uiDepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		uiDepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		uiDepthAttachment.clearValue.depthStencil.depth = 0.0F;
+		renderingInfo.pDepthAttachment = &uiDepthAttachment;
+		VK::vkCmdBeginRenderingKHR(cmdBuf, &renderingInfo);
 		
-		{ // Draw UI and extras
-			EditorUI::debug_render();
-			UI::draw();
-			DynamicVertexBuffer::get_tessellator().draw();
+		scissor.offset.x = 0;
+		scissor.offset.y = 0;
+		scissor.extent.width = VK::attachments.uiWidth;
+		scissor.extent.height = VK::attachments.uiHeight;
+		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
+		viewport.x = 0.0F;
+		viewport.y = 0.0F;
+		viewport.width = F32(VK::attachments.uiWidth);
+		viewport.height = F32(VK::attachments.uiHeight);
+		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+		UI::draw();
+		Rng1I32 uiTessellatorPass = tes.end_draw_set();
+		tes.draw(uiTessellatorPass, 0);
+
+		VK::vkCmdEndRenderingKHR(cmdBuf); // 2D UI render pass
+
+		tes.end_frame();
+
+		if (isInEditorMode) { // Final composite (editor)
+			VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipeline);
+			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipelineLayout, 0, 1, &VK::finalCompositeDescriptorSet.descriptorSet, 0, nullptr);
+			VK::FinalCompositePushConstants compositeConstants{};
+			compositeConstants.activeObjectId = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
+			compositeConstants.outputDimensions = V2U{ VK::attachments.uiWidth, VK::attachments.uiHeight };
+			VK::vkCmdPushConstants(cmdBuf, VK::finalCompositePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(compositeConstants), &compositeConstants);
+			VK::vkCmdDispatch(cmdBuf, (VK::attachments.uiWidth + 15) / 16, (VK::attachments.uiHeight + 15) / 16, 1);
 		}
 
-		VK::vkCmdEndRenderPass(cmdBuf);
+		if (isInEditorMode) { // Object ID readback
+			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+			VkBufferImageCopy region{};
+			region.bufferOffset = 0;
+			region.bufferRowLength = 0; // Tightly packed
+			region.bufferImageHeight = 0;
+			region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			region.imageSubresource.mipLevel = 0;
+			region.imageSubresource.baseArrayLayer = 0;
+			region.imageSubresource.layerCount = 1;
+			region.imageOffset = VkOffset3D{ 0, 0, 0 };
+			region.imageExtent = VkExtent3D{ VK::attachments.mainWidth, VK::attachments.mainHeight, 1 };
+			VK::vkCmdCopyImageToBuffer(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK::attachments.objectIdReadbackBuffer.buffer, 1, &region);
+			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+		}
 	}
 
 	if (!isInEditorMode) {
@@ -271,44 +359,6 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	CHK_VK(VK::vkWaitForFences(VK::logicalDevice, 1, &VK::geometryCullAndDrawFence, VK_TRUE, U64_MAX));
 	CHK_VK(VK::vkResetFences(VK::logicalDevice, 1, &VK::geometryCullAndDrawFence));
 
-	{ // Update GPU model and skeleton matrices
-		for (VKGeometry::StaticModel* model : staticModelsToRender) {
-			if (model->gpuMatrixIndex != 0) {
-				VK::uniformMatricesHandler.matrixMemoryMapping[model->gpuMatrixIndex] = model->transform;
-			}
-		}
-		for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
-			U64 stackArenaFrame1 = stackArena.stackPtr;
-			if (model->gpuMatrixIndex != 0) {
-				VK::uniformMatricesHandler.matrixMemoryMapping[model->gpuMatrixIndex] = model->transform;
-			}
-			if (model->skeletonMatrixOffset != 0) {
-				U32 boneCount = model->mesh->skeletonData->boneCount;
-				M4x3F32* matrices = stackArena.alloc<M4x3F32>(boneCount);
-				if (model->poseMatrices) {
-					VKGeometry::Bone* bones = model->mesh->skeletonData->bones;
-					for (U32 i = 0; i < boneCount; i++) {
-						if (bones[i].parentIdx == VKGeometry::Bone::PARENT_INVALID_IDX) {
-							matrices[i] = model->poseMatrices[i];
-						} else {
-							matrices[i] = matrices[bones[i].parentIdx] * model->poseMatrices[i];
-						}
-					}
-					for (U32 i = 0; i < boneCount; i++) {
-						matrices[i] = matrices[i] * model->mesh->skeletonData->bones[i].invBindTransform;
-					}
-				} else {
-					for (U32 i = 0; i < boneCount; i++) {
-						matrices[i].set_identity();
-					}
-				}
-				for (U32 i = 0; i < boneCount; i++) {
-					VK::uniformMatricesHandler.matrixMemoryMapping[model->skeletonMatrixOffset + i] = matrices[i];
-				}
-			}
-			stackArena.stackPtr = stackArenaFrame1;
-		}
-	}
 	if (!isInEditorMode) {
 		// Late latch update eye poses
 		XR::update_eye_poses(&openxrFrameBeginInfo);
@@ -340,11 +390,16 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::uniformMatricesHandler.set_camera(1, rightTransform, rightProjection, rightCamPos);
 		}
 	} else {
-		PerspectiveProjection proj;
-		proj.project_perspective(0.05F, DEG_TO_TURN(120.0F), F32(Win32::framebufferHeight) / F32(Win32::framebufferWidth));
-		V3F camPos;
-		M4x3F32 view = EditorUI::editor.get_view_transform(&camPos);
-		VK::uniformMatricesHandler.set_camera(0, view, proj, camPos);
+		for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
+			if (editor3d->gpuCameraIndex != U32_MAX) {
+				PerspectiveProjection proj;
+				proj.project_perspective(0.05F, DEG_TO_TURN(editor3d->fov), editor3d->viewport.height() / editor3d->viewport.width());
+				V3F camPos;
+				M4x3F32 view = editor3d->editor.get_view_transform(&camPos);
+				VK::uniformMatricesHandler.set_camera(editor3d->gpuCameraIndex, view, proj, camPos);
+			}
+		}
+		
 	}
 	VK::uniformMatricesHandler.flush_memory();
 
@@ -360,7 +415,7 @@ void keyboard_callback(Win32::Key key, Win32::ButtonState state) {
 	UI::handle_keyboard_action(mousePos, key, state);
 	if (key == Win32::KEY_ESC && state == Win32::BUTTON_STATE_DOWN) {
 		Win32::set_mouse_captured(false);
-		EditorUI::editorFocused = false;
+		EditorUI::focusedPanel = nullptr;
 	}
 	EditorUI::key_input(key, state);
 }
@@ -368,14 +423,12 @@ void mouse_callback(Win32::MouseButton button, Win32::MouseValue state) {
 	if (UI::inDialog) {
 		return;
 	}
-	V2F32 mousePos = Win32::get_mouse();
-	if (!EditorUI::editorFocused) {
-		if (!UI::handle_mouse_action(mousePos, button, state)) {
-			if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_DOWN) {
-				Win32::set_mouse_captured(true);
-				EditorUI::editorFocused = true;
-			}
-		}
+	V2F mousePos = Win32::get_mouse();
+	if (!EditorUI::focusedPanel) {
+		UI::handle_mouse_action(mousePos, button, state);
+	}
+	if (EditorUI::focusedPanel) {
+		UI::activeBox = UI::hotBox = UI::BoxHandle{};
 	}
 	EditorUI::mouse_input(button, state, mousePos);
 }
@@ -383,11 +436,6 @@ void mouse_callback(Win32::MouseButton button, Win32::MouseValue state) {
 void do_frame() {
 	swap(&frameArena, &lastFrameArena);
 	frameArena.reset();
-	const U32 initialModelToRenderCapacity = 32;
-	staticModelsToRender.reset();
-	staticModelsToRender.reserve(initialModelToRenderCapacity);
-	skeletalModelsToRender.reset();
-	skeletalModelsToRender.reserve(initialModelToRenderCapacity);
 	if (!isInEditorMode) {
 		if (XR::currentSessionState == XR_SESSION_STATE_FOCUSED ||
 			XR::currentSessionState == XR_SESSION_STATE_SYNCHRONIZED ||
@@ -408,9 +456,6 @@ void do_frame() {
 	} else {
 		XR::OpenXRFrameInfo dummyFrameBeginInfo{};
 		draw_frame(dummyFrameBeginInfo);
-	}
-	for (VKGeometry::SkeletalModel* model : skeletalModelsToRender) {
-		model->poseMatrices = nullptr;
 	}
 }
 
@@ -452,12 +497,13 @@ U32 run_star_chicken() {
 		XR::init_openxr();
 		VK::init_vulkan(!isInEditorMode);
 		XR::create_gameplay_session();
-		VK::create_render_targets_xr();
+		VK::load_pipelines_and_descriptors();
+		VK::create_render_targets(XR::xrRenderWidth, XR::xrRenderHeight, 2);
 	} else {
 		VK::init_vulkan(!isInEditorMode);
-		VK::create_render_targets_editor();
+		VK::load_pipelines_and_descriptors();
+		VK::create_render_targets(U32(Win32::framebufferWidth), U32(Win32::framebufferHeight), 1);
 	}
-	VK::load_pipelines_and_descriptors();
 	ResourceLoading::init_textures();
 	Resources::load_resources();
 	VK::finish_startup();
@@ -469,10 +515,8 @@ U32 run_star_chicken() {
 	}
 	Win32::show_window();
 
-	setup_scene();
+	Level::build_test_level();
 	stackArena.stackPtr = stackArenaFrame0;
-	staticModelsToRender.allocator = &frameArena;
-	skeletalModelsToRender.allocator = &frameArena;
 
 	while (!shouldShutDown) {
 		if (shouldUseDesktopWindow) {

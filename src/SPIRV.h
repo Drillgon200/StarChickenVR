@@ -1012,6 +1012,12 @@ SPV_BINARY_OP(op_i_add_carry, 149)
 SPV_BINARY_OP(op_u_mul_extended, 151)
 SPV_UNARY_OP(op_bit_not, 200)
 SPV_UNARY_OP(op_logical_not, 168)
+// object1 if true, object2 if false. Componentwise.
+SpvId op_select(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId condition, SpvId object1, SpvId object2) {
+	const U32 opcode = 169, wordCount = 6;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, condition, object1, object2);
+	return resultId;
+}
 SpvId op_bitfield_insert(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId base, SpvId insert, SpvId offset, SpvId count) {
 	const U32 opcode = 201, wordCount = 7;
 	output.push_back(wordCount << 16 | opcode, resultType, resultId, base, insert, offset, count);
@@ -1119,6 +1125,16 @@ SpvId op_image_sample_implicit_lod(ArenaArrayList<SpvDword>& output, SpvId resul
 SpvId op_image_sample_explicit_lod(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId sampledImage, SpvId coordinate, ImageOperands lodImageOperand, SpvId lod) {
 	const U32 opcode = 88, wordCount = 7;
 	output.push_back(wordCount << 16 | opcode, resultType, resultId, sampledImage, coordinate, lodImageOperand, lod);
+	return resultId;
+}
+SpvId op_image_fetch(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId image, SpvId coordinate) {
+	const U32 opcode = 95, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, image, coordinate);
+	return resultId;
+}
+SpvId op_image_gather(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId image, SpvId coordinate, SpvId component) {
+	const U32 opcode = 96, wordCount = 6;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, image, coordinate, component);
 	return resultId;
 }
 SpvId op_image_read(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId image, SpvId coordinate) {
