@@ -13,7 +13,7 @@
 namespace VK {
 
 #define VK_ENABLE_VIL 0
-#define VK_ENABLE_VALIDATION_LAYERS 1
+#define VK_ENABLE_VALIDATION_LAYERS 0
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED 0
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED_SAFE_MODE 0
 
@@ -353,6 +353,7 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 	MemoryArena& stackArena = get_scratch_arena();
 	bool programCompileFailure = false;
 	MEMORY_ARENA_FRAME(stackArena) {
+		CreateDirectoryA(outputDir.c_str(stackArena), NULL);
 		const char* shaderDirFilesCStr = stracat(stackArena, shaderDir, "*\0"a).str;
 		// Look for a timestamp file (file doesn't contain anything, but we can read the last recompile time from its metadata)
 		U64 previousRecompTime = 0;
@@ -403,7 +404,7 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 
 		for (RecompileEntry& entry : toRecompile) {
 			if (entry.timestamp > previousRecompTime || shouldRecompileAll) {
-				printf("Recompiling: %%\n"a, shaderDir, entry.in);
+				printf("Recompiling: %\n"a, entry.in);
 				bool success = ShaderCompiler::compile_dsl_from_file_to_file(entry.out, entry.in, shaderDir);
 				programCompileFailure |= !success;
 			}

@@ -476,6 +476,11 @@ U32 run_star_chicken() {
 			isInEditorMode = true;
 		}
 	}
+#ifdef SC_FORCE_EDITOR_MODE
+	// This is so that the DebugEditor configuration worked when other machines pull from git
+	// Run configuration command line arguments are stored in vcxproj.user for some reason, so they don't get pushed to github
+	isInEditorMode = true;
+#endif
 
 	//MSDFGenerator::generate_msdf_image("..\\art\\test_smiley.svg"a, "..\\art\\output"a, 64, 64, 16.0F, 16.0F, 12.0F);
 	//MSDFGenerator::generate_msdf_font("..\\art\\font.svg"a, "..\\art\\debug\\font_output"a, 64, 64, PX_TO_MILLIMETER(5.0F), PX_TO_MILLIMETER(12.0F), 12.0F);
