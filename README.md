@@ -7,6 +7,9 @@ When running the project, choose the "DebugEditor" run configuration. Other conf
 
 When running for the first time, the project will throw an access violation exception. This is intended, as Star Chicken makes use of growable arena data structures that only commit memory when first accessed. Simply check the box to ignore this exception when coming from StarChickenVR and hit continue.
 
+![Render 1](readme_images/render1.jpg)
+![Render 2 Split Panels](readme_images/render2_split.jpg)
+
 ### Editor Controls
 - Left click to select, left click and drag to box select, shift to select multiple
 - Middle Mouse + Left Click to enter fly mode
