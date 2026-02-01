@@ -15,10 +15,28 @@ struct Camera {
 };
 
 struct Material {
-	U32 colorTexIdx;
-	U32 normalTexIdx;
-	U32 roughnessTexIdx;
-	F32 ior;
+	I32 baseColorIdx;
+	I32 normalMapIdx;
+	I32 armMapIdx;
+	U32 packedBaseColor;
+	U32 packedARMI;
+};
+
+[block] struct DrawData {
+	V2F screenDimensions;
+	&V4F uiClipBoxes;
+	V2U pUIVertices;
+	&M4x3F matrices;
+	&V3F positions;
+	&V2F texcoords;
+	&V3F normals;
+	&V3F tangents;
+	&U32 boneIndicesAndWeights;
+	&V3F skinnedPositions;
+	&V3F skinnedNormals;
+	&V3F skinnedTangents;
+	&Material materials;
+	&Camera cams;
 };
 
 [block] struct WorldDrawPushConstants {
@@ -26,4 +44,5 @@ struct Material {
 	I32 verticesOffset;
 	U32 camIdx;
 	U32 objId; // High bit set if selected
+	U32 materialId;
 };

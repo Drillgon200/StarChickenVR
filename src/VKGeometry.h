@@ -84,30 +84,32 @@ struct GeometryHandler {
 		const U64 alignment = VK::physicalDeviceProperties.limits.minStorageBufferOffsetAlignment;
 		const U64 indexSize = sizeof(U16);
 		F64 vertexDataSizesTotal = F64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) + F64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) + F64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) + F64(indexSize);
-		// Approximate weights for how relatively many vertices we need space for in each section.
-		// I'll come back to this later when I have actual data and set them accordingly
+		// Approximate weights for how relatively many vertices we need space for in each section, regular smoothed models seem to be roughly 80% index count, 20% vertex count
 		// I'm not actually sure if I want to keep with static allocation like this.
 		// Dynamic allocation could work better, since that could conform memory allocation to gameplay needs.
+		// Perhaps sparse buffer extensions are worth looking into, that's how I would do it CPU side anyway
 		// Anyway, I'm not going to think too hard about it now
-		F64 indicesDataScaledSize = 0.15 * (F64(indexSize) / vertexDataSizesTotal);
-		F64 geometryDataScaledSize = 0.35 * (F64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
+		//TODO vertex size optimization
+		F64 indicesDataScaledSize = 0.4 * (F64(indexSize) / vertexDataSizesTotal);
+		F64 geometryDataScaledSize = 0.1 * (F64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
 		F64 skinningDataScaledSize = 0.2 * (F64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) / vertexDataSizesTotal);
 		F64 skinningGeometryScaledSize = 0.3 * (F64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) / vertexDataSizesTotal);
+		F64 totalWeight = indicesDataScaledSize + geometryDataScaledSize + skinningDataScaledSize + skinningGeometryScaledSize;
 
-		U64 maxAllocatableIndices = min<U64>(U32_MAX, (U64(indicesDataScaledSize * F64(size)) - alignment) / indexSize);
+		U64 maxAllocatableIndices = min<U64>(U32_MAX, (U64(indicesDataScaledSize / totalWeight * F64(size)) - alignment) / indexSize);
 		indicesAllocationCap = U32(maxAllocatableIndices);
 		indicesOffset = 0;
 		// Vertices must be at most I32_MAX, since 
-		U64 maxAllocatableVertices = min<U64>(I32_MAX, (U64(geometryDataScaledSize * F64(size)) - alignment * 4) / VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE);
+		U64 maxAllocatableVertices = min<U64>(I32_MAX, (U64(geometryDataScaledSize / totalWeight * F64(size)) - alignment * 4) / VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE);
 		geometryVertexAllocationCap = U32(maxAllocatableVertices);
 		positionsOffset = ALIGN_HIGH(indicesOffset + indicesAllocationCap * indexSize, alignment);
 		texcoordsOffset = ALIGN_HIGH(positionsOffset + geometryVertexAllocationCap * sizeof(V3F32), alignment);
 		normalsOffset = ALIGN_HIGH(texcoordsOffset + geometryVertexAllocationCap * sizeof(V2F32), alignment);
 		tangentsOffset = ALIGN_HIGH(normalsOffset + geometryVertexAllocationCap * sizeof(V3F32), alignment);
-		U64 maxAllocatableSkinningIndicesAndWeights = min<U64>(I32_MAX, (U64(skinningDataScaledSize * F64(size)) - alignment) / VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE);
+		U64 maxAllocatableSkinningIndicesAndWeights = min<U64>(I32_MAX, (U64(skinningDataScaledSize / totalWeight * F64(size)) - alignment) / VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE);
 		skinningVertexAllocationCap = U32(maxAllocatableSkinningIndicesAndWeights);
 		skinDataOffset = ALIGN_HIGH(tangentsOffset + geometryVertexAllocationCap * sizeof(V3F32), alignment);
-		U64 maxAllocatableSkinnedVertices = min<U64>(I32_MAX, (U64(skinningGeometryScaledSize * F64(size)) - alignment * 3) / VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE);
+		U64 maxAllocatableSkinnedVertices = min<U64>(I32_MAX, (U64(skinningGeometryScaledSize / totalWeight * F64(size)) - alignment * 3) / VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE);
 		skinnedVertexAllocationCap = U32(maxAllocatableSkinnedVertices);
 		skinnedPositionsOffset = ALIGN_HIGH(skinDataOffset + skinningVertexAllocationCap * U64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE), alignment);
 		skinnedNormalsOffset = ALIGN_HIGH(skinnedPositionsOffset + skinnedVertexAllocationCap * sizeof(V3F32), alignment);
@@ -241,12 +243,12 @@ struct UniformMatricesHandler {
 		CHK_VK(VK::vkCreateBuffer(VK::logicalDevice, &bufferInfo, nullptr, &buffer));
 		VkMemoryRequirements memoryRequirements;
 		VK::vkGetBufferMemoryRequirements(VK::logicalDevice, buffer, &memoryRequirements);
-		if (!(memoryRequirements.memoryTypeBits & VK::hostMemoryTypeIndex)) {
+		if (!(memoryRequirements.memoryTypeBits & 1 << VK::deviceHostMappedMemoryTypeIndex)) {
 			abort("Skinning matrix buffer did not support allocation in host memory");
 		}
 		VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 		allocInfo.allocationSize = memoryRequirements.size;
-		allocInfo.memoryTypeIndex = VK::hostMemoryTypeIndex;
+		allocInfo.memoryTypeIndex = VK::deviceHostMappedMemoryTypeIndex;
 		VkMemoryAllocateFlagsInfo allocFlags{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
 		allocFlags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 		allocInfo.pNext = &allocFlags;
@@ -308,11 +310,13 @@ struct UniformMatricesHandler {
 	}
 
 	void flush_memory() {
-		VkMappedMemoryRange memoryRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
-		memoryRange.memory = memory;
-		memoryRange.offset = 0;
-		memoryRange.size = VK_WHOLE_SIZE;
-		CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryRange));
+		if (!(VK::deviceHostMappedMemoryFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+			VkMappedMemoryRange memoryRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
+			memoryRange.memory = memory;
+			memoryRange.offset = 0;
+			memoryRange.size = VK_WHOLE_SIZE;
+			CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryRange));
+		}
 	}
 
 	void reset() {

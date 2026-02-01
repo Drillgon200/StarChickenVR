@@ -115,7 +115,7 @@ struct Tessellator {
 				prevPipeline = drawCmd.pipeline;
 			}
 			renderData.verticesOffset = I32(drawCmd.vertexBufferOffset);
-			VK::vkCmdPushConstants(VK::graphicsCommandBuffer, drawCmd.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::WorldDrawPushConstants), &renderData);
+			VK::vkCmdPushConstants(VK::graphicsCommandBuffer, drawCmd.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &renderData);
 			VK::vkCmdDrawIndexed(VK::graphicsCommandBuffer, drawCmd.indexCount, 1, drawCmd.indexBufferOffset, 0, 0);
 		}
 	}
@@ -369,6 +369,86 @@ struct Tessellator {
 			3, 0, 4, 3, 4, 7
 		};
 		return add_geometry(vertices, 8, indices, 6 * 4);
+	}
+	Tessellator& debug_arrow(V3F start, V3F end, F32 arrowRadius, V4F color = V4F{ 1.0F, 0.0F, 0.0F, 1.0F }) {
+		V3F v = end - start;
+		F32 dist = length(v);
+		v /= dist;
+		M4x3F t;
+		t.x = start.x; t.y = start.y; t.z = start.z;
+		// We will construct the line along the y axis, so align the y axis with the correct direction, and the other two basis vectors don't matter as long as they're orthonormal
+		// https://box2d.org/posts/2014/02/computing-a-basis/
+		V3F b1;
+		if (absf32(v.x) > 0.57735F) {
+			b1 = V3F{ v.y, -v.x, 0.0F };
+		} else {
+			b1 = V3F{ 0.0F, v.z, -v.y };
+		}
+		b1 = normalize(b1) * arrowRadius;
+		V3F b2 = cross(v, b1);
+		t.m00 = b1.x; t.m10 = b1.y; t.m20 = b1.z;
+		t.m01 = v.x;  t.m11 = v.y;  t.m21 = v.z;
+		t.m02 = b2.x; t.m12 = b2.y; t.m22 = b2.z;
+
+		F32 headHeight = arrowRadius * 4.0F;
+		dist = max(0.0F, dist - headHeight);
+
+		U32 packedColor = pack_unorm4x8(color);
+		// I don't need this to be super high fidelity, so I'm hard coding an octagonal prism
+		VK::DebugVertex vertices[]{
+			// Body vertices
+			{ t * V3F{ 1.0F, 0.0F, 0.0F }, packedColor },
+			{ t * V3F{ 0.707F, 0.0F, 0.707F }, packedColor },
+			{ t * V3F{ 0.0F, 0.0F, 1.0F }, packedColor },
+			{ t * V3F{ -0.707F, 0.0F, 0.707F }, packedColor },
+			{ t * V3F{ -1.0F, 0.0F, 0.0F }, packedColor },
+			{ t * V3F{ -0.707F, 0.0F, -0.707F }, packedColor },
+			{ t * V3F{ 0.0F, 0.0F, -1.0F }, packedColor },
+			{ t * V3F{ 0.707F, 0.0F, -0.707F }, packedColor },
+			{ t * V3F{ 1.0F, dist, 0.0F }, packedColor },
+			{ t * V3F{ 0.707F, dist, 0.707F }, packedColor },
+			{ t * V3F{ 0.0F, dist, 1.0F }, packedColor },
+			{ t * V3F{ -0.707F, dist, 0.707F }, packedColor },
+			{ t * V3F{ -1.0F, dist, 0.0F }, packedColor },
+			{ t * V3F{ -0.707F, dist, -0.707F }, packedColor },
+			{ t * V3F{ 0.0F, dist, -1.0F }, packedColor },
+			{ t * V3F{ 0.707F, dist, -0.707F }, packedColor },
+			// Head vertices
+			{ t * V3F{ 2.0F, dist, 0.0F }, packedColor },
+			{ t * V3F{ 1.414F, dist, 1.414F }, packedColor },
+			{ t * V3F{ 0.0F, dist, 2.0F }, packedColor },
+			{ t * V3F{ -1.414F, dist, 1.414F }, packedColor },
+			{ t * V3F{ -2.0F, dist, 0.0F }, packedColor },
+			{ t * V3F{ -1.414F, dist, -1.414F }, packedColor },
+			{ t * V3F{ 0.0F, dist, -2.0F }, packedColor },
+			{ t * V3F{ 1.414F, dist, -1.414F }, packedColor },
+			{ t * V3F{ 0.0F, dist + headHeight, 0.0F }, packedColor }
+		};
+		U32 indices[]{
+			// Cylinder sides
+			0, 1, 9, 0, 9, 8,
+			1, 2, 10, 1, 10, 9,
+			2, 3, 11, 2, 11, 10,
+			3, 4, 12, 3, 12, 11,
+			4, 5, 13, 4, 13, 12,
+			5, 6, 14, 5, 14, 13,
+			6, 7, 15, 6, 15, 14,
+			7, 0, 8, 7, 8, 15,
+			// Cylinder bottom
+			0, 7, 6, 0, 6, 5, 0, 5, 4, 0, 4, 3, 0, 3, 2, 0, 2, 1,
+			// Head to cylinder connecting geometry
+			8, 9, 17, 8, 17, 16,
+			9, 10, 18, 9, 18, 17,
+			10, 11, 19, 10, 19, 18,
+			11, 12, 20, 11, 20, 19,
+			12, 13, 21, 12, 21, 20,
+			13, 14, 22, 13, 22, 21,
+			14, 15, 23, 14, 23, 22,
+			15, 8, 16, 15, 16, 23,
+			// Head
+			16, 17, 24, 17, 18, 24, 18, 19, 24, 19, 20, 24, 20, 21, 24, 21, 22, 24, 22, 23, 24, 23, 16, 24
+		};
+		return add_geometry(vertices, ARRAY_COUNT(vertices), indices, ARRAY_COUNT(indices));
 	}
 } tessellators[VK::FRAMES_IN_FLIGHT];
 

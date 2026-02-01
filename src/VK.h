@@ -13,9 +13,10 @@
 namespace VK {
 
 #define VK_ENABLE_VIL 0
-#define VK_ENABLE_VALIDATION_LAYERS 0
+#define VK_ENABLE_VALIDATION_LAYERS 1
+#define VK_ENABLE_VALIDATION_GPU_ASSISTED 0
+#define VK_ENABLE_VALIDATION_GPU_ASSISTED_SAFE_MODE 0
 
-//TODO enable gpu assisted validation, VkValidationFeaturesEXT
 const char* ENABLED_VALIDATION_LAYERS[]{
 #if VK_ENABLE_VIL != 0
 	"VK_LAYER_live_introspection",
@@ -30,6 +31,9 @@ const char* ENABLED_VALIDATION_LAYERS[]{
 const char* INSTANCE_EXTENSIONS[]{
 #if VK_DEBUG != 0	
 VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#endif
+#if VK_ENABLE_VALIDATION_GPU_ASSISTED != 0
+VK_EXT_LAYER_SETTINGS_EXTENSION_NAME,
 #endif
 VK_KHR_SURFACE_EXTENSION_NAME,
 VK_KHR_WIN32_SURFACE_EXTENSION_NAME
@@ -95,6 +99,8 @@ struct {
 	U32 uiWidth, uiHeight;
 } attachments;
 
+B32 hasCubemap;
+
 VkCommandPool graphicsCommandPools[2];
 // These two get swapped each frame so we don't overwrite one while it's in use
 VkCommandBuffer graphicsCommandBuffer;
@@ -103,6 +109,7 @@ VkCommandBuffer inFlightGraphicsCommandBuffer;
 VkFence geometryCullAndDrawFence;
 
 VkSampler linearSampler;
+VkSampler linearClampedSampler;
 
 DescriptorSet drawDataDescriptorSet;
 DescriptorSet cubemapConvolveDescriptorSet;
@@ -113,6 +120,7 @@ VkPipeline drawPipeline;
 const U32 UI_RENDER_FLAG_MSDF = 1 << 0;
 VkPipeline uiPipeline;
 VkPipeline debugPipeline;
+VkPipeline debugNoDepthPipeline;
 VkPipeline debugLinesPipeline;
 VkPipeline debugPointsPipeline;
 VkPipeline tmpBackgroundPipeline;
@@ -331,6 +339,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 		print("VK validation layer: ");
 		print(pCallbackData->pMessage);
 		print("\n");
+		if (messageSeverity > VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+			__debugbreak();
+		}
 	}
 
 	// According to spec, I should always return VK_FALSE here, VK_TRUE is reserved for layers
@@ -352,12 +363,17 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 			if (timeSuccess) {
 				previousRecompTime = U64(lastModifiedTime.dwHighDateTime) << 32ull | U64(lastModifiedTime.dwLowDateTime);
 			}
-		} else {
-			timestampFile = CreateFileA(stracat(stackArena, outputDir, "_timestamp\0"a).str, GENERIC_WRITE | FILE_WRITE_ATTRIBUTES, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		}
 		U64 maxAccessedTime = previousRecompTime;
 
 		// Search through all files in the shader directory, if it's a shader and it was modified since the last recompile, add its directory to the list
+		struct RecompileEntry {
+			StrA in;
+			StrA out;
+			U64 timestamp;
+		};
+		ArenaArrayList<RecompileEntry> toRecompile{ &stackArena };
+		bool shouldRecompileAll = false;
 		WIN32_FIND_DATAA findData;
 		HANDLE findEntry = FindFirstFileA(shaderDirFilesCStr, &findData);
 		if (findEntry != INVALID_HANDLE_VALUE) {
@@ -367,26 +383,33 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 				}
 				U64 findTime = U64(findData.ftLastWriteTime.dwHighDateTime) << 32ull | U64(findData.ftLastWriteTime.dwLowDateTime);
 				maxAccessedTime = max(maxAccessedTime, findTime);
-				if (findTime <= previousRecompTime) {
-					continue;
-				}
 				StrA fileName = StrA{ findData.cFileName, strlen(findData.cFileName) };
-				if (!fileName.ends_with(".dsl"a)) {
-					continue;
+				if (fileName.ends_with(".dsi"a) && findTime > previousRecompTime) {
+					// Quick solution to changing things in included files, just recompile everything if an include file changes
+					// Recompiling with my language is much faster than recompiling with glslang, so this shouldn't be an issue for a while
+					shouldRecompileAll = true;
 				}
-				StrA nameNoExt = fileName.prefix(-I64(".dsl"a.length));
-				StrA outputPath = stracat(stackArena, outputDir, nameNoExt, ".spv"a);
-				StrA inputPath = stracat(stackArena, shaderDir, fileName);
-				printf("Recompiling: %%\n"a, shaderDir, fileName);
-				bool success = ShaderCompiler::compile_dsl_from_file_to_file(outputPath, inputPath, shaderDir);
-				programCompileFailure |= !success;
+				if (fileName.ends_with(".dsl"a)) {
+					StrA nameNoExt = fileName.prefix(-I64(".dsl"a.length));
+					StrA outputPath = stracat(stackArena, outputDir, nameNoExt, ".spv"a);
+					StrA inputPath = stracat(stackArena, shaderDir, fileName);
+					toRecompile.push_back(RecompileEntry{ inputPath, outputPath, findTime });
+				}
 			} while (FindNextFileA(findEntry, &findData));
 			FindClose(findEntry);
 		} else {
 			print("Failed to iterate directory for shader recompilation\n");
 		}
 
-		// Close the timestamp file, a new last write time will be added to the file's metadata
+		for (RecompileEntry& entry : toRecompile) {
+			if (entry.timestamp > previousRecompTime || shouldRecompileAll) {
+				printf("Recompiling: %%\n"a, shaderDir, entry.in);
+				bool success = ShaderCompiler::compile_dsl_from_file_to_file(entry.out, entry.in, shaderDir);
+				programCompileFailure |= !success;
+			}
+		}
+
+		// Close the timestamp file, a new last write time will be added to the file's metadata. Create if not there.
 		if (timestampFile != INVALID_HANDLE_VALUE) {
 			if (!programCompileFailure) {
 				FILETIME newAccessTime{};
@@ -395,6 +418,10 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 				SetFileTime(timestampFile, nullptr, &newAccessTime, nullptr);
 			}
 			CloseHandle(timestampFile);
+		} else {
+			if (timestampFile = CreateFileA(stracat(stackArena, outputDir, "_timestamp\0"a).str, GENERIC_WRITE | FILE_WRITE_ATTRIBUTES, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)) {
+				CloseHandle(timestampFile);
+			}
 		}
 	}
 	if (programCompileFailure) {
@@ -569,6 +596,23 @@ void init_vulkan(bool useXR) {
 		VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
 	messengerCreateInfo.pfnUserCallback = debug_callback;
 	instanceCreateInfo.pNext = &messengerCreateInfo;
+#endif
+#if VK_ENABLE_VALIDATION_LAYERS != 0 && VK_ENABLE_VALIDATION_GPU_ASSISTED != 0
+	VkLayerSettingsCreateInfoEXT layerSettings{ VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT };
+	VkLayerSettingEXT validationSettings[3]{};
+	VkBool32 coreEnable = VK_FALSE;
+	VkBool32 gpuValidationEnable = VK_TRUE;
+	VkBool32 gpuValidationSafeModeEnable = VK_FALSE;
+	validationSettings[0] = VkLayerSettingEXT{ "VK_LAYER_KHRONOS_validation", "validate_core", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &coreEnable };
+	validationSettings[1] = VkLayerSettingEXT{ "VK_LAYER_KHRONOS_validation", "gpuav_enable", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &gpuValidationEnable };
+	validationSettings[2] = VkLayerSettingEXT{ "VK_LAYER_KHRONOS_validation", "gpuav_safe_mode", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &gpuValidationSafeModeEnable };
+	layerSettings.settingCount = 3;
+	layerSettings.pSettings = validationSettings;
+#if VK_DEBUG != 0
+	messengerCreateInfo.pNext = &layerSettings;
+#else
+	instanceCreateInfo.pNext = &layerSettings;
+#endif
 #endif
 	if (useXR) {
 		XrVulkanInstanceCreateInfoKHR xrInstanceCreateInfo{ XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR };
@@ -801,6 +845,10 @@ allNecessaryQueuesPresent:;
 		hostMemoryTypeIndex = deviceHostMappedMemoryTypeIndex;
 		hostMemoryFlags = deviceHostMappedMemoryFlags;
 	}
+	if (deviceHostMappedMemoryTypeIndex == U32_MAX) {
+		deviceHostMappedMemoryTypeIndex = hostMemoryTypeIndex;
+		deviceHostMappedMemoryFlags = hostMemoryFlags;
+	}
 	if (deviceMemoryTypeIndex == U32_MAX) {
 		deviceMemoryTypeIndex = hostMemoryTypeIndex;
 		deviceMemoryFlags = hostMemoryFlags;
@@ -902,11 +950,11 @@ void destroy_dedicated_image(DedicatedImage& img) {
 	}
 }
 
-VkImageView create_img_view2d(VkImage img, VkFormat format, VkImageUsageFlags usage) {
+VkImageView create_img_view(VkImage img, VkImageViewType viewType, VkFormat format, VkImageUsageFlags usage) {
 	VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 	viewInfo.flags = 0;
 	viewInfo.image = img;
-	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.viewType = viewType;
 	viewInfo.format = format;
 	viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -914,9 +962,9 @@ VkImageView create_img_view2d(VkImage img, VkFormat format, VkImageUsageFlags us
 	viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	viewInfo.subresourceRange.baseMipLevel = 0;
-	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
 	viewInfo.subresourceRange.baseArrayLayer = 0;
-	viewInfo.subresourceRange.layerCount = 1;
+	viewInfo.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
 	VkImageViewUsageCreateInfo viewUsage{ VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO };
 	viewUsage.usage = usage;
 	if (usage != 0) {
@@ -925,6 +973,9 @@ VkImageView create_img_view2d(VkImage img, VkFormat format, VkImageUsageFlags us
 	VkImageView view{};
 	CHK_VK(vkCreateImageView(logicalDevice, &viewInfo, nullptr, &view));
 	return view;
+}
+VkImageView create_img_view2d(VkImage img, VkFormat format, VkImageUsageFlags usage) {
+	return create_img_view(img, VK_IMAGE_VIEW_TYPE_2D, format, usage);
 }
 void destroy_img_view(VkImageView* view) {
 	vkDestroyImageView(logicalDevice, *view, nullptr);
@@ -1018,6 +1069,48 @@ void destroy_render_targets() {
 	destroy_img_view(&attachments.uiColorLinearView);
 	destroy_dedicated_image(attachments.uiColor);
 	destroy_dedicated_image(attachments.uiDepth);
+}
+
+void set_pbr_params(VkImageView specularCubemap, VkImageView diffuseCubemap, VkImageView trLUT) {
+	VkWriteDescriptorSet writes[3];
+	VkWriteDescriptorSet& specularWrite = writes[0];
+	specularWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	specularWrite.dstSet = drawDataDescriptorSet.descriptorSet;
+	specularWrite.dstBinding = 3; // Specular cubemap
+	specularWrite.dstArrayElement = 0;
+	specularWrite.descriptorCount = 1;
+	specularWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	VkDescriptorImageInfo specularImageInfo;
+	specularImageInfo.sampler = VK_NULL_HANDLE;
+	specularImageInfo.imageView = specularCubemap;
+	specularImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	specularWrite.pImageInfo = &specularImageInfo;
+	VkWriteDescriptorSet& diffuseWrite = writes[1];
+	diffuseWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	diffuseWrite.dstSet = drawDataDescriptorSet.descriptorSet;
+	diffuseWrite.dstBinding = 4; // Diffuse cubemap
+	diffuseWrite.dstArrayElement = 0;
+	diffuseWrite.descriptorCount = 1;
+	diffuseWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	VkDescriptorImageInfo diffuseImageInfo;
+	diffuseImageInfo.sampler = VK_NULL_HANDLE;
+	diffuseImageInfo.imageView = diffuseCubemap;
+	diffuseImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	diffuseWrite.pImageInfo = &diffuseImageInfo;
+	VkWriteDescriptorSet& lutWrite = writes[2];
+	lutWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	lutWrite.dstSet = drawDataDescriptorSet.descriptorSet;
+	lutWrite.dstBinding = 5; // TR LUT
+	lutWrite.dstArrayElement = 0;
+	lutWrite.descriptorCount = 1;
+	lutWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	VkDescriptorImageInfo lutImageInfo;
+	lutImageInfo.sampler = VK_NULL_HANDLE;
+	lutImageInfo.imageView = trLUT;
+	lutImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	lutWrite.pImageInfo = &lutImageInfo;
+	VK::vkUpdateDescriptorSets(VK::logicalDevice, 3, writes, 0, nullptr);
+	hasCubemap = true;
 }
 
 // We're going all in on builders this time. They're a really easy way to provide sensible defaults in a lightweight way
@@ -1575,15 +1668,17 @@ struct DebugVertex {
 
 void load_pipelines_and_descriptors() {
 	linearSampler = make_sampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, 4.0F);
+	linearClampedSampler = make_sampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 4.0F);
 
 	// Descriptor sets
 	drawDataDescriptorSet.init()
-		.sampler(0, VK_SHADER_STAGE_FRAGMENT_BIT)
-		.uniform_buffer(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT) // draw data
-		.sampled_image(2, VK_SHADER_STAGE_FRAGMENT_BIT) // specular cubemap
-		.sampled_image(3, VK_SHADER_STAGE_FRAGMENT_BIT) // diffuse cubemap
-		.sampled_image(4, VK_SHADER_STAGE_FRAGMENT_BIT) // TR BRDF LUT
-		.sampled_image_array_dynamic(5, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
+		.sampler(0, VK_SHADER_STAGE_FRAGMENT_BIT) // bilinear sampler
+		.sampler(1, VK_SHADER_STAGE_FRAGMENT_BIT) // bilinear clamped sampler
+		.uniform_buffer(2, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT) // draw data
+		.sampled_image(3, VK_SHADER_STAGE_FRAGMENT_BIT) // specular cubemap
+		.sampled_image(4, VK_SHADER_STAGE_FRAGMENT_BIT) // diffuse cubemap
+		.sampled_image(5, VK_SHADER_STAGE_FRAGMENT_BIT) // TR BRDF LUT
+		.sampled_image_array_dynamic(6, VK_SHADER_STAGE_FRAGMENT_BIT, ResourceLoading::MAX_TEXTURE_COUNT, ResourceLoading::currentTextureMaxCount)
 		.build();
 	cubemapConvolveDescriptorSet.init()
 		.sampler(0, VK_SHADER_STAGE_COMPUTE_BIT) // bilinear sampler
@@ -1601,41 +1696,58 @@ void load_pipelines_and_descriptors() {
 		.sampled_image(2, VK_SHADER_STAGE_COMPUTE_BIT) // ui color
 		.storage_image(3, VK_SHADER_STAGE_COMPUTE_BIT) // final composite output
 		.build();
+	
+	VK_NAME_OBJ(DESCRIPTOR_SET, drawDataDescriptorSet.descriptorSet);
+	VK_NAME_OBJ(DESCRIPTOR_SET, cubemapConvolveDescriptorSet.descriptorSet);
+	VK_NAME_OBJ(DESCRIPTOR_SET, finalCompositeDescriptorSet.descriptorSet);
 
-	VkWriteDescriptorSet drawDataDescriptorWrites[2]{};
-	VkWriteDescriptorSet& samplerDesc = drawDataDescriptorWrites[0];
-	samplerDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	samplerDesc.dstSet = drawDataDescriptorSet.descriptorSet;
-	samplerDesc.dstBinding = 0;
-	samplerDesc.dstArrayElement = 0;
-	samplerDesc.descriptorCount = 1;
-	samplerDesc.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-	VkDescriptorImageInfo imageInfo{};
-	imageInfo.sampler = linearSampler;
-	samplerDesc.pImageInfo = &imageInfo;
-	VkWriteDescriptorSet& vertexBufferDesc = drawDataDescriptorWrites[1];
-	vertexBufferDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	vertexBufferDesc.dstSet = drawDataDescriptorSet.descriptorSet;
-	vertexBufferDesc.dstBinding = 1;
-	vertexBufferDesc.dstArrayElement = 0;
-	vertexBufferDesc.descriptorCount = 1;
-	vertexBufferDesc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	VkDescriptorBufferInfo bufferInfo{ drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms) };
-	vertexBufferDesc.pBufferInfo = &bufferInfo;
-	vkUpdateDescriptorSets(logicalDevice, ARRAY_COUNT(drawDataDescriptorWrites), drawDataDescriptorWrites, 0, nullptr);
+	{ // Update draw data descriptors
+		VkWriteDescriptorSet drawDataDescriptorWrites[3]{};
+		VkWriteDescriptorSet& samplerLinearDesc = drawDataDescriptorWrites[0];
+		samplerLinearDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		samplerLinearDesc.dstSet = drawDataDescriptorSet.descriptorSet;
+		samplerLinearDesc.dstBinding = 0;
+		samplerLinearDesc.dstArrayElement = 0;
+		samplerLinearDesc.descriptorCount = 1;
+		samplerLinearDesc.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+		VkDescriptorImageInfo samplerLinearInfo{};
+		samplerLinearInfo.sampler = linearSampler;
+		samplerLinearDesc.pImageInfo = &samplerLinearInfo;
+		VkWriteDescriptorSet& samplerLinearClampedDesc = drawDataDescriptorWrites[1];
+		samplerLinearClampedDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		samplerLinearClampedDesc.dstSet = drawDataDescriptorSet.descriptorSet;
+		samplerLinearClampedDesc.dstBinding = 1;
+		samplerLinearClampedDesc.dstArrayElement = 0;
+		samplerLinearClampedDesc.descriptorCount = 1;
+		samplerLinearClampedDesc.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+		VkDescriptorImageInfo samplerClampedLinearInfo{};
+		samplerClampedLinearInfo.sampler = linearClampedSampler;
+		samplerLinearClampedDesc.pImageInfo = &samplerClampedLinearInfo;
+		VkWriteDescriptorSet& vertexBufferDesc = drawDataDescriptorWrites[2];
+		vertexBufferDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		vertexBufferDesc.dstSet = drawDataDescriptorSet.descriptorSet;
+		vertexBufferDesc.dstBinding = 2;
+		vertexBufferDesc.dstArrayElement = 0;
+		vertexBufferDesc.descriptorCount = 1;
+		vertexBufferDesc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		VkDescriptorBufferInfo bufferInfo{ drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms) };
+		vertexBufferDesc.pBufferInfo = &bufferInfo;
+		vkUpdateDescriptorSets(logicalDevice, ARRAY_COUNT(drawDataDescriptorWrites), drawDataDescriptorWrites, 0, nullptr);
+	}
+	
 
 	// Pipelines
 	drawPipelineLayout = PipelineLayoutBuilder{}.set_default()
-		.push_constant(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(WorldDrawPushConstants))
+		.push_constant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WorldDrawPushConstants))
 		.set_layout(drawDataDescriptorSet.setLayout)
 		.build();
 	drawPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "./resources/shaders/spv/pbr_surface.spv"a).build();
-
 	uiPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_UI, "./resources/shaders/spv/ui.spv"a)
 		.blending(VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
 		.build();
 
 	debugPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "./resources/shaders/spv/debug.spv"a).build();
+	debugNoDepthPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "./resources/shaders/spv/debug.spv"a).depth_test(false).depth_write(false).build();
 	debugLinesPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "./resources/shaders/spv/debug.spv"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).build();
 	debugPointsPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "./resources/shaders/spv/debug.spv"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).build();
 	tmpBackgroundPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "./resources/shaders/spv/background.spv"a).depth_test(false).depth_write(false).build();
@@ -1777,7 +1889,7 @@ FrameBeginResult begin_frame() {
 		drawData.skinnedPositions = geometryHandler.gpuAddress + geometryHandler.skinnedPositionsOffset;
 		drawData.skinnedNormals = geometryHandler.gpuAddress + geometryHandler.skinnedNormalsOffset;
 		drawData.skinnedTangents = geometryHandler.gpuAddress + geometryHandler.skinnedTangentsOffset;
-		drawData.materials = 0; //TODO materials system
+		drawData.materials = ResourceLoading::get_materials_gpu_address();
 		drawData.cameras = uniformMatricesHandler.camerasGPUAddress;
 
 		// Barrier before is not necessary because a CPU fence is waited on to ensure drawing is done before draw data updates
@@ -1854,8 +1966,10 @@ void end_frame(bool shouldRender) {
 			img_barrier(graphicsCommandBuffer, desktopSwapchainData.swapchainImages[desktopSwapchainData.swapchainImageIdx], VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_NONE_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 		}
 	}
-	
+
 	CHK_VK(vkEndCommandBuffer(graphicsCommandBuffer));
+
+	ResourceLoading::flush_materials_memory();
 
 	VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	submitInfo.waitSemaphoreCount = 0;
@@ -1900,6 +2014,7 @@ void end_vulkan() {
 	desktopSwapchainData.destroy();
 	uniformMatricesHandler.destroy();
 	geometryHandler.destroy();
+	ResourceLoading::destroy_materials();
 	ResourceLoading::cleanup_textures();
 	DynamicVertexBuffer::destroy();
 	drawDataUniformBuffer.destroy();

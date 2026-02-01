@@ -33,12 +33,14 @@ struct LevelObject {
 struct StaticModel {
 	LevelObject obj;
 	VKGeometry::StaticMesh* mesh;
+	ResourceLoading::Material* material;
 	U32 gpuMatrixIdx;
 };
 
 struct SkeletalModel {
 	LevelObject obj;
 	VKGeometry::SkeletalMesh* mesh;
+	ResourceLoading::Material* material;
 	M4x3F32* poseMatrices;
 	U32 gpuMatrixIdx;
 	U32 skinnedVerticesOffset;
@@ -177,8 +179,8 @@ struct Level {
 				continue;
 			}
 			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId };
-			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
+			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx };
+			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 0);
 		}
 
@@ -188,8 +190,8 @@ struct Level {
 			}
 			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
 			// Negate vertex offset so the shader knows to pull from the skinned vertex arrays
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, -I32(model->skinnedVerticesOffset + 1), camIdx, selectionObjId };
-			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
+			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, -I32(model->skinnedVerticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx };
+			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, 0, 0);
 		}
 	}
@@ -202,17 +204,19 @@ struct Level {
 		obj.typeGroupArrayIdx = typeArrayIdx;
 	}
 
-	void add_static_model(VKGeometry::StaticMesh& mesh, M4x3F transform) {
+	void add_static_model(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& material, M4x3F transform) {
 		StaticModel* model = staticModelAllocator.alloc();
 		init_level_object(model->obj, LEVEL_OBJECT_STATIC_MODEL, transform, staticModels.size);
 		model->mesh = &mesh;
+		model->material = &material;
 		staticModels.push_back(model);
 	}
 
-	void add_skeletal_model(VKGeometry::SkeletalMesh& mesh, M4x3F transform, M4x3F* poseMatrices) {
+	void add_skeletal_model(VKGeometry::SkeletalMesh& mesh, ResourceLoading::Material& material, M4x3F transform, M4x3F* poseMatrices) {
 		SkeletalModel* model = skeletalModelAllocator.alloc();
 		init_level_object(model->obj, LEVEL_OBJECT_SKELETAL_MODEL, transform, skeletalModels.size);
 		model->mesh = &mesh;
+		model->material = &material;
 		model->poseMatrices = poseMatrices;
 		skeletalModels.push_back(model);
 	}
@@ -228,8 +232,11 @@ Level level;
 
 void build_test_level() {
 	level.init();
-	level.add_static_model(Resources::testMesh, M4x3F{}.set_identity());
-	level.add_skeletal_model(Resources::testAnimMesh, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh));
+	level.add_static_model(Resources::testMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity());
+	level.add_skeletal_model(Resources::testAnimMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh));
+	level.add_static_model(Resources::cannonMesh, Resources::cannonMat, M4x3F{}.set_identity().translate(V3F{ 10.0F, 3.0F, 0.0F }));
+	level.add_static_model(Resources::matMesh, Resources::matMat, M4x3F{}.set_identity().translate(V3F{ -20.0F, 3.0F, 0.0F }));
+
 }
 
 }

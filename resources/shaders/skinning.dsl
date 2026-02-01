@@ -1,5 +1,6 @@
 #version 2
 #shader compute
+#include "lib.dsi"
 
 struct SkinnedModel {
 	U32 matricesOffset;
@@ -9,34 +10,7 @@ struct SkinnedModel {
 	U32 vertexCount;
 };
 
-struct M4x3F {
-	V4F row0;
-	V4F row1;
-	V4F row2;
-};
-
-struct Material {
-	U32 colorTexIdx;
-	U32 normalTexIdx;
-	U32 roughnessTexIdx;
-	F32 ior;
-};
-
-[set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
-	V2F screenDimensions;
-	&V4F uiClipBoxes;
-	V2U pUIVertices;
-	&M4x3F matrices;
-	&V3F positions;
-	&V2F texcoords;
-	&V3F normals;
-	&V3F tangents;
-	&U32 boneIndicesAndWeights;
-	&V3F skinnedPositions;
-	&V3F skinnedNormals;
-	&V3F skinnedTangents;
-	&Material materials;
-} drawData;
+[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &DrawData drawData;
 
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {

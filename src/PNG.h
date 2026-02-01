@@ -3,6 +3,8 @@
 
 namespace PNG {
 
+DEBUG_OPTIMIZE_ON
+
 struct BitReader {
 	U64 scratchValue;
 	U32* data;
@@ -923,6 +925,8 @@ B32 write_image(StrA fileName, RGBA8* pixels, U32 width, U32 height) {
 	stackArena.stackPtr = oldArenaStackPtr;
 	return fileWriteSuccess;
 }
+
+DEBUG_OPTIMIZE_OFF
 
 void init_loader() {
 	compute_crc_table();

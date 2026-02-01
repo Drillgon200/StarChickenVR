@@ -124,6 +124,10 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
 		EditorUI::debug_render();
 		Rng1I32 tesWorldDebugDrawSet = tes.end_draw_set();
+		for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
+			editor3d->debug_render();
+			editor3d->ui3DDrawSet = tes.end_draw_set();
+		};
 
 		VkCommandBuffer cmdBuf = VK::graphicsCommandBuffer;
 
@@ -205,7 +209,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 
-		if (CubemapGen::hasCubemap) {
+		if (VK::hasCubemap) {
 			// Fill in background
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
 			VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
@@ -230,6 +234,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 						VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
 						Level::level.draw_models(cmdBuf, camIdx);
 						tes.draw(tesWorldDebugDrawSet, camIdx);
+						tes.draw(editor3d->ui3DDrawSet, camIdx);
 					} else {
 						editor3d->gpuCameraIndex = U32_MAX;
 					}
@@ -392,11 +397,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	} else {
 		for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
 			if (editor3d->gpuCameraIndex != U32_MAX) {
-				PerspectiveProjection proj;
-				proj.project_perspective(0.05F, DEG_TO_TURN(editor3d->fov), editor3d->viewport.height() / editor3d->viewport.width());
-				V3F camPos;
-				M4x3F32 view = editor3d->editor.get_view_transform(&camPos);
-				VK::uniformMatricesHandler.set_camera(editor3d->gpuCameraIndex, view, proj, camPos);
+				V3F camPos = editor3d->editor.get_render_eye_pos();
+				M4x3F32 view = editor3d->editor.get_view_transform();
+				VK::uniformMatricesHandler.set_camera(editor3d->gpuCameraIndex, view, editor3d->projection, camPos);
 			}
 		}
 		
@@ -505,6 +508,7 @@ U32 run_star_chicken() {
 		VK::create_render_targets(U32(Win32::framebufferWidth), U32(Win32::framebufferHeight), 1);
 	}
 	ResourceLoading::init_textures();
+	ResourceLoading::init_materials();
 	Resources::load_resources();
 	VK::finish_startup();
 

@@ -275,6 +275,31 @@ FINLINE U64 next_power_of_two(U64 x) {
 	return 1ull << (64ull - __lzcnt64(x - 1ull));
 }
 
+bool quadratic_formula_stable(F32* results, F32 a, F32 b, F32 c) {
+	// https://math.stackexchange.com/questions/866331/numerically-stable-algorithm-for-solving-the-quadratic-equation-when-a-is-very
+	if (a == 0.0F) {
+		if (b == 0.0F) {
+			return false;
+		}
+		F32 r = -c / b;
+		results[0] = r, results[1] = r;
+		return true;
+	}
+	if (c == 0.0F) {
+		F32 r = -b / a;
+		results[0] = r, results[1] = r;
+		return true;
+	}
+	F32 discriminant = b * b - 4.0F * a * c;
+	if (discriminant < 0.0F) {
+		return false;
+	}
+	F32 r1 = (-b - signumf32(b) * sqrtf32(discriminant)) * (0.5 / a);
+	F32 r2 = c / (a * r1);
+	results[0] = r1, results[1] = r2;
+	return true;
+}
+
 #pragma pack(push, 1)
 struct V2F32 {
 	F32 x, y;
@@ -654,6 +679,52 @@ F32 signed_distance_to_segment(V2F32 pos, V2F32 linePointA, V2F32 linePointB) {
 
 F32 ray_intersection_2d(V2F32 posA, V2F32 dirA, V2F32 posB, V2F32 dirB) {
 	return cross(dirB, posB - posA) / cross(dirB, dirA);
+}
+
+//TODO test this more
+bool ray_cyliner_intersect(F32* tOut, V3F pos, V3F dir, V3F cylinderCenter, V3F cylinderTop, F32 radius) {
+	// Not exactly optimized, but it'll do
+	pos -= cylinderCenter;
+	V3F axis = cylinderTop - cylinderCenter;
+	F32 halfHeight = length(axis);
+	axis /= halfHeight;
+	// Flatten the ray against the axis perpendicular plane so we can do ray vs circle intersection
+	V3F flattenedOrigin = pos - axis * dot(pos, axis);
+	V3F flattenedDir = dir - axis * dot(dir, axis);
+	F32 a = dot(flattenedDir, flattenedDir);
+	F32 b = dot(flattenedOrigin, flattenedDir) * 2.0;
+	F32 c = dot(flattenedOrigin, flattenedOrigin);
+	F32 results[2]{};
+	if (!quadratic_formula_stable(results, a, b, c - radius * radius)) {
+		return false;
+	}
+	F32 t0 = min(results[0], results[1]);
+	F32 t1 = max(results[0], results[1]);
+	if (t0 < 0.0F || t1 < 0.0F) {
+		return false;
+	}
+	V3F hitPos = pos + dir * t0;
+	if (absf32(dot(hitPos, axis)) <= halfHeight) {
+		if (tOut) {
+			*tOut = t0;
+		}
+		return true;
+	}
+	F32 tPlane0 = (dot(pos, axis) - halfHeight) / -dot(dir, axis);
+	if (tPlane0 >= t0 && tPlane0 <= t1) {
+		if (tOut) {
+			*tOut = tPlane0;
+		}
+		return true;
+	}
+	F32 tPlane1 = (dot(pos, axis) + halfHeight) / -dot(dir, axis);
+	if (tPlane1 >= t0 && tPlane1 <= t1) {
+		if (tOut) {
+			*tOut = tPlane1;
+		}
+		return true;
+	}
+	return false;
 }
 
 DEBUG_OPTIMIZE_ON
@@ -1079,6 +1150,10 @@ struct M4x3F32 {
 		}
 		return *this;
 	}
+
+	FINLINE V3F translation() {
+		return V3F{ x, y, z };
+	}
 };
 #pragma pack(pop)
 typedef M4x3F32 M4x3F;
@@ -1276,6 +1351,13 @@ struct PerspectiveProjection {
 		F32 z = nearPlane;
 		F32 invZ = -1.0F / vec.z;
 		return V3F32{ x * invZ, y * invZ, z * invZ };
+	}
+	FINLINE V3F32 untransform(V3F32 vec) {
+		F32 invZ = vec.z / nearPlane;
+		F32 x = vec.x / invZ;
+		F32 y = vec.y / invZ;
+		F32 z = -1.0F / invZ;
+		return V3F{ (x - z * xZBias) / xScale, (y - z * yZBias) / yScale, z };
 	}
 };
 

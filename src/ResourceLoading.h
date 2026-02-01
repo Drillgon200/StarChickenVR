@@ -1,5 +1,5 @@
 #pragma once
-#include "VKGeometry_decl.h"
+#include "VKGeometry.h"
 #include "VK_decl.h"
 #include "PNG.h"
 
@@ -18,6 +18,7 @@ struct Entity {
 
 static constexpr U32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
 static constexpr U32 LAST_KNOWN_DAF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+static constexpr U32 LAST_KNOWN_DTF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
 
 void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, U32* skinningDataOffsetOut) {
 	U32 numVertices = modelFile.read_u32();
@@ -206,28 +207,43 @@ const U32 MAX_TEXTURE_COUNT = 128 * 1024;
 U32 currentTextureMaxCount = 128;
 U32 currentTextureCount = 0;
 
-enum TextureFormat : U32 {
+enum TextureFormat : U8 {
 	TEXTURE_FORMAT_NULL,
 	TEXTURE_FORMAT_RGBA_U8,
-	TEXTURE_FORMAT_RGBA_U16,
+	TEXTURE_FORMAT_RG_U8,
 	TEXTURE_FORMAT_RGBA_BC7,
+	TEXTURE_FORMAT_R9G9B9E5,
 	TEXTURE_FORMAT_COUNT
 };
-// I forgot what this enum was for. Perhaps to control mipmap generation? SRGB vs linear? I'm sure I needed it for something
-enum TextureType : U32 {
-	TEXTURE_TYPE_COLOR,
-	TEXTURE_TYPE_NORMAL_MAP,
-	TEXTURE_TYPE_MSDF
+const U32 TEXTURE_FORMAT_TEXEL_SIZE[TEXTURE_FORMAT_COUNT]{ 0, 4, 2, 16, 4 };
+enum TextureFlags : Flags16 {
+	TEXTURE_FLAG_CUBE = 0b001,
+	TEXTURE_FLAG_SRGB = 0b010,
+	TEXTURE_FLAG_MSDF = 0b100
 };
 struct Texture {
 	VkImage image;
 	VkImageView imageView;
+	Flags16 flags;
 	U32 index;
-	TextureType type;
 };
+#pragma pack(push, 1)
+struct alignas(16) DTFHeader {
+	char magic[4]; // DUCK
+	U32 version;
+	Flags16 flags;
+	TextureFormat format;
+	U8 mipCount;
+	U16 width;
+	U16 height;
+};
+#pragma pack(pop)
 
 Texture missing;
 Texture simpleWhite;
+Texture simpleBlack;
+Texture simpleNormal;
+Texture simpleARM;
 
 ArenaArrayList<Texture*> allTextures;
 ArenaArrayList<VkDeviceMemory> memoryUsed;
@@ -254,15 +270,25 @@ void alloc_texture_memory(VkDeviceMemory* memoryOut, VkDeviceSize* allocatedOffs
 	*allocatedOffsetOut = allocatedOffset;
 }
 
-void create_texture(Texture* result, void* data, U32 width, U32 height, TextureFormat format, TextureType type) {
+void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipLevels, TextureFormat format, bool isSRGB, bool isCube) {
 	Texture& tex = *result;
-	tex.type = type;
+	tex = {};
 	VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	imageCreateInfo.flags = isCube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
 	imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-	imageCreateInfo.format = type == TEXTURE_TYPE_COLOR ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+	VkFormat createFormat = VK_FORMAT_R8G8B8A8_UNORM;
+	switch (format) {
+	case TEXTURE_FORMAT_NULL: abort("Texture format cannot be null"); break;
+	case TEXTURE_FORMAT_RGBA_U8: createFormat = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM; break;
+	case TEXTURE_FORMAT_RG_U8: createFormat = isSRGB ? VK_FORMAT_R8G8_SRGB : VK_FORMAT_R8G8_UNORM; break;
+	case TEXTURE_FORMAT_RGBA_BC7: abort("BC7 not yet supported"); createFormat = isSRGB ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK; break;
+	case TEXTURE_FORMAT_R9G9B9E5: createFormat = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32; break;
+	default: abort("Unknown texture format"); break;
+	}
+	imageCreateInfo.format = createFormat;
 	imageCreateInfo.extent = VkExtent3D{ width, height, 1 };
-	imageCreateInfo.mipLevels = 1;
-	imageCreateInfo.arrayLayers = 1;
+	imageCreateInfo.mipLevels = mipLevels;
+	imageCreateInfo.arrayLayers = isCube ? 6 : 1;
 	imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 	imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 	imageCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -279,40 +305,27 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, TextureF
 	alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
 	CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, tex.image, linearBlock, memoryOffset));
 
-	VkCommandBuffer stagingCmdBuf = VK::graphicsStager.prepare_for_image_upload(width, height, sizeof(RGBA8));
+	U32 imgDataSize = width * height * TEXTURE_FORMAT_TEXEL_SIZE[format];
+	if (isCube) {
+		imgDataSize *= 6;
+	}
+	VkCommandBuffer stagingCmdBuf = VK::graphicsStager.prepare_for_image_upload(imgDataSize);
 
-	VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-	barrier.srcAccessMask = VK_ACCESS_NONE_KHR;
-	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-	barrier.srcQueueFamilyIndex = VK::graphicsFamily;
-	barrier.dstQueueFamilyIndex = VK::graphicsFamily;
-	barrier.image = tex.image;
-	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	barrier.subresourceRange.baseMipLevel = 0;
-	barrier.subresourceRange.levelCount = 1;
-	barrier.subresourceRange.baseArrayLayer = 0;
-	barrier.subresourceRange.layerCount = 1;
-	VK::vkCmdPipelineBarrier(stagingCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+	VK::img_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_NONE_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	if (data) {
-		VK::graphicsStager.upload_to_image(tex.image, data, width, height, sizeof(RGBA8), 0);
-
-		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		barrier.dstAccessMask = VK_ACCESS_NONE_KHR;
-		barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-		barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		VK::vkCmdPipelineBarrier(stagingCmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+		U32 mipWidth = width;
+		U32 mipHeight = width;
+		for (U32 mipLevel = 0; mipLevel < mipLevels; mipLevel++) {
+			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, width, height, isCube ? 6 : 1, TEXTURE_FORMAT_TEXEL_SIZE[format], mipLevel);
+			data = (Byte*)data + width * height * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6 : 1);
+			width = max(width / 2u, 1u);
+			height = max(height / 2u, 1u);
+		}
+		VK::img_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_NONE_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	}
 
-	VkImageViewCreateInfo imageViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-	imageViewCreateInfo.image = tex.image;
-	imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	imageViewCreateInfo.format = imageCreateInfo.format;
-	imageViewCreateInfo.components = VkComponentMapping{ VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
-	imageViewCreateInfo.subresourceRange = VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS };
-	CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imageViewCreateInfo, nullptr, &tex.imageView));
+	tex.imageView = VK::create_img_view(tex.image, isCube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, createFormat, 0);
 
 	allTextures.push_back(result);
 
@@ -338,17 +351,45 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, TextureF
 	currentTextureCount++;
 }
 
-void load_png(Texture* result, StrA path) {
+void load_png(Texture* result, StrA path, bool isSRGB = true) {
 	MemoryArena& stackArena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(stackArena) {
 		RGBA8* image;
 		U32 width, height;
 		PNG::read_image(stackArena, &image, &width, &height, path);
 		if (image) {
-			create_texture(result, image, width, height, TEXTURE_FORMAT_RGBA_U8, TEXTURE_TYPE_COLOR);
+			create_texture(result, image, width, height, 1, TEXTURE_FORMAT_RGBA_U8, isSRGB, false);
 		} else {
 			*result = missing;
 		}
+	}
+}
+
+void load_dtf(Texture* result, StrA path) {
+	MemoryArena& stackArena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(stackArena) {
+		stackArena.stackPtr = ALIGN_HIGH(stackArena.stackPtr, 16);
+		U32 textureFileSize;
+		Byte* textureData = read_full_file_to_arena<Byte>(&textureFileSize, stackArena, path);
+		if (textureData == nullptr) {
+			printf("Failed to read texture file: %\n"a, path);
+			abort("Failed to read texture file");
+		}
+		ByteBuf textureFile{};
+		textureFile.wrap(textureData, textureFileSize);
+		if (textureFile.read_u32() != bswap32('DUCK')) {
+			abort("Texture file header did not match DUCK");
+		}
+		if (textureFile.read_u32() < LAST_KNOWN_DAF_VERSION) {
+			abort("Texture file out of date");
+		}
+		Flags16 flags = textureFile.read_u16();
+		TextureFormat textureFormat = TextureFormat(textureFile.read_u8());
+		U32 mipCount = textureFile.read_u8();
+		U16 width = textureFile.read_u16();
+		U16 height = textureFile.read_u16();
+		create_texture(result, textureFile.bytes + textureFile.offset, width, height, mipCount, textureFormat, flags & TEXTURE_FLAG_SRGB, flags & TEXTURE_FLAG_CUBE);
+		result->flags = flags;
 	}
 }
 
@@ -360,7 +401,8 @@ void load_msdf(Texture* result, StrA path) {
 		if (file) {
 			U32 width = LOAD_LE32(file);
 			U32 height = LOAD_LE32(file + sizeof(U32));
-			create_texture(result, file + sizeof(U32) * 2, width, height, TEXTURE_FORMAT_RGBA_U8, TEXTURE_TYPE_MSDF);
+			create_texture(result, file + sizeof(U32) * 2, width, height, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+			result->flags = TEXTURE_FLAG_MSDF;
 		} else {
 			*result = missing;
 		}
@@ -379,9 +421,16 @@ void init_textures() {
 			hardcodedTextureData[y * 16 + x] = x < 8 == y < 8 ? RGBA8{ 255, 0, 255, 255 } : RGBA8{ 0, 0, 0, 255 };
 		}
 	}
-	create_texture(&missing, hardcodedTextureData, 16, 16, TEXTURE_FORMAT_RGBA_U8, TEXTURE_TYPE_COLOR);
+	create_texture(&missing, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 	memset(hardcodedTextureData, 0xFF, sizeof(hardcodedTextureData));
-	create_texture(&simpleWhite, hardcodedTextureData, 16, 16, TEXTURE_FORMAT_RGBA_U8, TEXTURE_TYPE_COLOR);
+	create_texture(&simpleWhite, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	memset(hardcodedTextureData, 0x00, sizeof(hardcodedTextureData));
+	create_texture(&simpleBlack, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	//TODO good texture packing
+	for (U32 i = 0; i < ARRAY_COUNT(hardcodedTextureData); i++) { hardcodedTextureData[i] = RGBA8{ 127, 127, 255, 255 }; };
+	create_texture(&simpleNormal, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	for (U32 i = 0; i < ARRAY_COUNT(hardcodedTextureData); i++) { hardcodedTextureData[i] = RGBA8{ 255, 255, 0, 255 }; };
+	create_texture(&simpleARM, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 }
 
 void cleanup_textures() {
@@ -394,6 +443,109 @@ void cleanup_textures() {
 		VK::vkFreeMemory(VK::logicalDevice, mem, nullptr);
 	}
 	memoryUsed.clear();
+}
+
+struct Material {
+	Texture* baseColor;
+	Texture* normalMap;
+	Texture* armMap;
+	V4F color;
+	F32 ambientOcclusion;
+	F32 roughness;
+	F32 metallic;
+	F32 ior;
+	U32 gpuIdx;
+};
+
+#pragma pack(push, 1)
+struct GPUMaterial {
+	I32 baseColorIdx;
+	I32 normalMapIdx;
+	I32 armMapIdx;
+	U32 packedBaseColor;
+	U32 packedARMI; // ambient occlusion, roughness, metallic, IOR (1.0-5.0)
+};
+#pragma pack(pop)
+
+VK::DedicatedBuffer materialsBuffer;
+const U32 maxMaterialCount = 1024;
+U32 materialCount;
+
+Material missingMaterial;
+Material basicWhiteMaterial;
+
+void material_updated(const Material& mat) {
+	GPUMaterial gpuMat{};
+	gpuMat.baseColorIdx = mat.baseColor ? mat.baseColor->index : -1;
+	gpuMat.normalMapIdx = mat.normalMap ? mat.normalMap->index : -1;
+	gpuMat.armMapIdx = mat.armMap ? mat.armMap->index : -1;
+	gpuMat.packedBaseColor = pack_unorm4x8(mat.color);
+	gpuMat.packedARMI = pack_unorm4x8(V4F{ mat.ambientOcclusion, mat.roughness, mat.metallic, clamp01((mat.ior - 1.0F) * 0.25F) });
+	((GPUMaterial*)materialsBuffer.mapping)[mat.gpuIdx] = gpuMat;
+}
+
+void create_material(Material* mat) {
+	if (materialCount == maxMaterialCount) {
+		abort("Ran out of materials");
+	}
+	U32 materialIdx = materialCount++;
+	mat->gpuIdx = materialIdx;
+	material_updated(*mat);
+}
+void create_material(Material* mat, V4F color, F32 roughness, F32 metallic) {
+	*mat = {};
+	mat->color = color;
+	mat->ambientOcclusion = 1.0F;
+	mat->roughness = roughness;
+	mat->metallic = metallic;
+	mat->ior = 1.3F;
+	return create_material(mat);
+}
+void create_material(Material* mat, Texture* baseColor, Texture* normalMap, Texture* armMap) {
+	*mat = {};
+	mat->baseColor = baseColor;
+	mat->normalMap = normalMap;
+	mat->armMap = armMap;
+	mat->color = V4F{ 1.0F, 1.0F, 1.0F, 1.0F };
+	mat->ambientOcclusion = 1.0F;
+	mat->roughness = 1.0F;
+	mat->metallic = 0.0F;
+	mat->ior = 1.3F;
+	return create_material(mat);
+}
+void create_material_from_pngs(Material* mat, StrA pathBase) {
+	Texture* textures = globalArena.alloc<Texture>(3);
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		load_png(&textures[0], stracat(arena, pathBase, "_BaseColor.png"a), true);
+		load_png(&textures[1], stracat(arena, pathBase, "_Normal.png"a), false);
+		load_png(&textures[2], stracat(arena, pathBase, "_ARM.png"a), false);
+	}
+	create_material(mat, &textures[0], &textures[1], &textures[2]);
+}
+
+VkDeviceAddress get_materials_gpu_address() {
+	return materialsBuffer.gpuAddress;
+}
+
+void flush_materials_memory() {
+	if (!(VK::deviceHostMappedMemoryFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+		VkMappedMemoryRange memoryRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
+		memoryRange.memory = materialsBuffer.memory;
+		memoryRange.offset = 0;
+		memoryRange.size = VK_WHOLE_SIZE;
+		CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryRange));
+	}
+}
+
+void init_materials(){
+	materialsBuffer.create(maxMaterialCount * sizeof(GPUMaterial), VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK::deviceHostMappedMemoryTypeIndex);
+	create_material(&missingMaterial, &missing, &simpleNormal, &simpleARM);
+	create_material(&basicWhiteMaterial, V4F{ 1.0F, 1.0F, 1.0F, 1.0F }, 1.0F, 0.0F);
+}
+
+void destroy_materials() {
+	materialsBuffer.destroy();
 }
 
 }

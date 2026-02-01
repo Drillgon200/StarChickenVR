@@ -126,7 +126,7 @@ struct Token {
 		case TOKEN_F16: return vF16 == other.vF16;
 		case TOKEN_F32: return vF32 == other.vF32;
 		case TOKEN_F64: return vF64 == other.vF64;
-		case TOKEN_IDENTIFIER: return vIdentifier == other.vIdentifier;
+		case TOKEN_IDENTIFIER: return vIdentifier == other.vIdentifier && lineNumber == other.lineNumber && columnNumber == other.columnNumber;
 		default: return true;
 		}
 	}
@@ -157,6 +157,10 @@ struct Hasher<Token> {
 		}
 		// Boost hash combine
 		hash ^= Hasher<U32>{}(val.type) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+		if (val.type == TOKEN_IDENTIFIER) {
+			hash ^= Hasher<U32>{}(val.lineNumber) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			hash ^= Hasher<U32>{}(val.columnNumber) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+		}
 		return hash;
 	}
 };
@@ -769,8 +773,11 @@ struct DSLCompiler {
 		typeAndStorageClassToPointerType.allocator = &arenaInput;
 		procedureSpvCode.allocator = &arenaInput;
 		decorationSpvCode.allocator = &arenaInput;
+		shaderSections.push_back_zeroed().init(&arenaInput, SHADER_TYPE_NONE, allScopes.size);
 		allScopes.push_back_zeroed().init(arena, ScopeContext::INVALID_PARENT_IDX, 0, 0);
 		allModifierContexts.clear();
+		allModifierContexts.push_back_zeroed().init(arena);
+		currentModifierContext = allModifierContexts.size - 1;
 		src = srcInput;
 		srcLen = srcSizeInput;
 		srcFileName = srcName;
@@ -1845,6 +1852,7 @@ struct DSLCompiler {
 					if (allScopes.data[currentScope].parentIdx != ScopeContext::INVALID_PARENT_IDX) {
 						end_scope();
 					}
+					allModifierContexts.data[currentModifierContext].shaderExecutionModel = EXECUTION_MODEL_Invalid;
 					currentShaderType = SHADER_TYPE_INTER_SHADER_INTERFACE;
 					shaderSections.push_back_zeroed().init(arena, currentShaderType, allScopes.size);
 					begin_scope();
@@ -1868,8 +1876,8 @@ struct DSLCompiler {
 				}
 			} break;
 			default: {
-				if (version == 0 || currentShaderType == SHADER_TYPE_NONE) {
-					parse_error("Must have version and shader execution model before code"a);
+				if (version == 0) {
+					parse_error("Must have version before code"a);
 					return;
 				} else {
 					parse_block();
@@ -3109,9 +3117,6 @@ struct DSLCompiler {
 				if (declarationName.opcode != TC_OP_IDENTIFIER) {
 					generation_error("Declaration name must be an identifier"a, declarationName);
 				}
-				if (shaderSections.empty()) {
-					generation_error("Must define shader section before declaring a global"a, *op);
-				}
 				if (compilerErrored) {
 					break;
 				}
@@ -3165,6 +3170,10 @@ struct DSLCompiler {
 			if (shaderSections.data[scope.shaderSectionIdx].shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE) {
 				continue;
 			}
+			if (shaderSections.data[scope.shaderSectionIdx].shaderType == SHADER_TYPE_NONE) {
+				generic_error(strafmt(*arena, "Can't have global var \"%\" outside shader"a, decl.name));
+				continue;
+			}
 			Variable* var = arena->zalloc<Variable>(1);
 			var->name = ScopedName{ decl.name, decl.scope };
 			var->type = decl.type;
@@ -3181,7 +3190,7 @@ struct DSLCompiler {
 			ArenaArrayList<Variable*>& locationGroup = shaderInterfaceLocationGroups.push_back_zeroed();
 			locationGroup.allocator = arena;
 			for (ShaderSection& shaderSection : shaderSections) {
-				if (shaderSection.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE) {
+				if (shaderSection.shaderType != SHADER_TYPE_VERTEX && shaderSection.shaderType != SHADER_TYPE_FRAGMENT) {
 					continue;
 				}
 				Variable* var = arena->zalloc<Variable>(1);
@@ -3245,6 +3254,9 @@ struct DSLCompiler {
 			}
 			ModifierContext& ctx = allModifierContexts.data[modifierCtxIdx];
 			if (ctx.isEntrypoint) {
+				if (ctx.shaderExecutionModel == EXECUTION_MODEL_Invalid) {
+					generation_error("Can't have an entrypoint outside a shader"a, tcCode.data[procTCOp.extendedOperands[0]]);
+				}
 				entrypoints.push_back(ShaderEntrypoint{ name, ctx.shaderExecutionModel, proc->id, allScopes.data[scopeIdx].shaderSectionIdx, ctx.localSizeX, ctx.localSizeY, ctx.localSizeZ});
 			}
 
@@ -4030,8 +4042,8 @@ struct DSLCompiler {
 						memberFound:;
 						} else if (prevType->typeClass == TYPE_CLASS_VECTOR) {
 							VectorType* vecType = reinterpret_cast<VectorType*>(prevType);
-							if (accessName.length > vecType->numComponents) {
-								generation_error("Vector access must not access more members than vector size"a, currentAccessArg);
+							if (accessName.length > 4) {
+								generation_error("Vector access must not access more members than V4 size"a, currentAccessArg);
 								break;
 							}
 							U32 indices[4]{};

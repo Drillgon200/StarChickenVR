@@ -40,6 +40,12 @@ struct EditorPlayer {
 			}
 		}
 	}
+	void rotation_updated() {
+		QF32 localToWorld = AxisAngleF{ { 0.0F, 1.0F, 0.0F }, -yaw }.to_qf32() * AxisAngleF { { 1.0F, 0.0F, 0.0F }, -pitch }.to_qf32();
+		forward = localToWorld * V3F{ 0.0F, 0.0F, -1.0F };
+		up      = localToWorld * V3F{ 0.0F, 1.0F,  0.0F };
+		right   = localToWorld * V3F{ 1.0F, 0.0F,  0.0F };
+	}
 	void update() {
 		V2F deltaMouse = Win32::get_raw_delta_mouse();
 		F32 sensitivity = 0.0005F;
@@ -47,10 +53,7 @@ struct EditorPlayer {
 		pitch = clamp(pitch + deltaMouse.y * sensitivity, -0.24999F, 0.24999F);
 		//pitch += deltaMouse.y * sensitivity;
 
-		QF32 localToWorld = AxisAngleF{ { 0.0F, 1.0F, 0.0F }, -yaw }.to_qf32() * AxisAngleF { { 1.0F, 0.0F, 0.0F }, -pitch }.to_qf32();
-		forward = localToWorld * V3F{ 0.0F, 0.0F, -1.0F };
-		up      = localToWorld * V3F{ 0.0F, 1.0F,  0.0F };
-		right   = localToWorld * V3F{ 1.0F, 0.0F,  0.0F };
+		rotation_updated();
 
 		F32 moveDelta = 5.0F * F32(StarChicken::deltaTime);
 		if (Win32::keyboardState[Win32::KEY_CTRL]) {
@@ -98,15 +101,74 @@ struct EditorPlayer {
 		}
 	}
 
-	M4x3F get_view_transform(V3F* camPosOut) {
+	M4x3F get_view_transform() {
 		M4x3F view; view.set_identity();
 		view.translate(V3F{ 0.0F, 0.0F, -rotateDistance });
 		view.rotate_quat(AxisAngleF{ { 0.0F, 1.0F, 0.0F }, -yaw }.to_qf32() * AxisAngleF { { 1.0F, 0.0F, 0.0F }, -pitch }.to_qf32());
 		view.translate(-pos);
-		*camPosOut = pos;
 		return view;
 	}
+
+	V3F get_render_eye_pos() {
+		return pos - forward * rotateDistance;
+	}
 };
+
+enum TranslateWidgetComponent {
+	TRANSLATE_WIDGET_COMPONENT_NONE,
+	TRANSLATE_WIDGET_COMPONENT_X_AXIS,
+	TRANSLATE_WIDGET_COMPONENT_Y_AXIS,
+	TRANSLATE_WIDGET_COMPONENT_Z_AXIS,
+	TRANSLATE_WIDGET_COMPONENT_XY_PLANE,
+	TRANSLATE_WIDGET_COMPONENT_XZ_PLANE,
+	TRANSLATE_WIDGET_COMPONENT_YZ_PLANE,
+	TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE
+};
+struct TranslateWidget {
+	M4x3F transform;
+	TranslateWidgetComponent activeComponent;
+
+	void do_mouse_over(V3F eye, V3F look) {
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
+		F32 scale = 0.125F * distance(eye, V3F{ transform.x, transform.y, transform.z });
+		F32 arrowRadius = 0.05F * scale;
+		V3F center{ transform.x, transform.y, transform.z };
+		V3F xAxis = transform.get_row(0);
+		V3F yAxis = transform.get_row(1);
+		V3F zAxis = transform.get_row(2);
+		F32 bestTime = F32_INF;
+		F32 xAxisTime{};
+		if (ray_cyliner_intersect(&xAxisTime, eye, look, center + xAxis * scale * 0.5F, center, arrowRadius * 2.0F) && xAxisTime < bestTime) {
+			bestTime = xAxisTime;
+			activeComponent = TRANSLATE_WIDGET_COMPONENT_X_AXIS;
+		}
+		F32 yAxisTime{};
+		if (ray_cyliner_intersect(&yAxisTime, eye, look, center + yAxis * scale * 0.5F, center, arrowRadius * 2.0F) && yAxisTime < bestTime) {
+			bestTime = yAxisTime;
+			activeComponent = TRANSLATE_WIDGET_COMPONENT_Y_AXIS;
+		}
+		F32 zAxisTime{};
+		if (ray_cyliner_intersect(&zAxisTime, eye, look, center + zAxis * scale * 0.5F, center, arrowRadius * 2.0F) && zAxisTime < bestTime) {
+			bestTime = zAxisTime;
+			activeComponent = TRANSLATE_WIDGET_COMPONENT_Z_AXIS;
+		}
+	}
+
+	void draw(DynamicVertexBuffer::Tessellator& tes, V3F eye) {
+		F32 scale = 0.125F * distance(eye, V3F{ transform.x, transform.y, transform.z });
+		F32 arrowRadius = 0.05F * scale;
+		V3F center{ transform.x, transform.y, transform.z };
+		V3F xAxis = transform.get_row(0);
+		V3F yAxis = transform.get_row(1);
+		V3F zAxis = transform.get_row(2);
+		tes.begin_draw(VK::debugNoDepthPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+		tes.debug_arrow(center, center + xAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
+		tes.debug_arrow(center, center + yAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
+		tes.debug_arrow(center, center + zAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS ? V4F{ 0.5F, 0.5F, 1.0F, 1.0F } : V4F{ 0.25F, 0.25F, 1.0F, 1.0F });
+		tes.end_draw();
+	}
+};
+
 
 enum PanelType {
 	PANEL_TYPE_NONE,
@@ -122,16 +184,24 @@ struct PanelEditor3D {
 	EditorPlayer editor;
 	Rng2F32 viewport;
 	F32 fov;
+	PerspectiveProjection projection;
 	U32 gpuCameraIndex;
+	Rng1I32 ui3DDrawSet;
 	V2F selectDragStart;
 	B8 isDragSelecting;
+	B8 panelContainsMouse;
+	V3F mousePickRay;
+	TranslateWidget translateWidget;
 
 	void init() {
 		V3F playerEye{ -30.0F, 8.0F, 0.0F };
 		editor.pos = playerEye;
 		editor.yaw = 0.25F;
+		editor.rotation_updated();
 		fov = 120.0F;
 		renderPanels.push_back_unique(this);
+
+		translateWidget.transform.set_identity();
 	}
 	void destroy() {
 		I64 idx = renderPanels.idx_of(this);
@@ -141,6 +211,42 @@ struct PanelEditor3D {
 		if (focusedPanel == this) {
 			focusedPanel = nullptr;
 		}
+	}
+	V3F unproject_vec(V2F screenPixCoords) {
+		V2F ndcCoords = (screenPixCoords - V2F{ viewport.minX, viewport.minY }) / V2F{ viewport.width(), viewport.height() } * 2.0F - 1.0F;
+		V3F viewSpaceVec = normalize(projection.untransform(V3F{ ndcCoords.x, ndcCoords.y, 0.5F }));
+		return viewSpaceVec.x * editor.right - viewSpaceVec.y * editor.up - viewSpaceVec.z * editor.forward;
+	}
+	V2F project_pos(V3F worldPos) {
+		worldPos -= editor.get_render_eye_pos();
+		V3F viewSpace{ dot(worldPos, editor.right), -dot(worldPos, editor.up), -dot(worldPos, editor.forward) };
+		V3F ndc = projection.transform(viewSpace);
+		return V2F{ viewport.minX + (ndc.x * 0.5F + 0.5F) * viewport.width(), viewport.minY + (ndc.y * 0.5F + 0.5F) * viewport.height() };
+	}
+	V2F vector_in_screen_space(V3F origin, V3F direction) {
+		return project_pos(origin + direction) - project_pos(origin);
+	}
+	void update() {
+		projection.project_perspective(0.05F, DEG_TO_TURN(fov), viewport.height() / viewport.width());
+
+		if (!Win32::mouseCaptured) {
+			V2F mousePos = Win32::get_mouse();
+			mousePickRay = unproject_vec(mousePos);
+			panelContainsMouse = rng_contains_point(viewport, mousePos);
+			V3F eyePos = editor.get_render_eye_pos();
+			if (panelContainsMouse) {
+				translateWidget.do_mouse_over(eyePos, mousePickRay);
+				F32 scale = 0.125F * distance(eyePos, translateWidget.transform.translation());
+				//printf("%\n"a, vector_in_screen_space(translateWidget.transform.translation(), translateWidget.transform.get_row(1) * scale));
+			} else {
+				translateWidget.activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
+			}
+		}
+	}
+	void debug_render() {
+		DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
+		V3F eyePos = editor.get_render_eye_pos();
+		translateWidget.draw(tes, eyePos);
 	}
 	void build_ui() {
 		using namespace UI;
@@ -171,8 +277,6 @@ struct PanelEditor3D {
 					I32 maxY = clamp(I32(dragArea.maxY) + 1, 0, I32(VK::attachments.mainHeight));
 					MemoryArena& arena = get_scratch_arena();
 					MEMORY_ARENA_FRAME(arena) {
-						MEMORY_BASIC_INFORMATION buffer;
-						VirtualQuery(VK::attachments.objectIdReadbackBuffer.mapping, &buffer, PAGE_SIZE);
 						U32* someData = arena.zalloc<U32>(VK::attachments.mainWidth * VK::attachments.mainHeight);
 						ArenaArrayList<U32> selectedSet{ &arena };
 						for (I32 y = minY; y <= maxY; y++) {
@@ -209,7 +313,7 @@ struct PanelEditor3D {
 				editor3d->viewport = com.renderArea;
 				Rng2F32 dragArea = make_rng2f(editor3d->selectDragStart, com.mousePos);
 				if (editor3d->isDragSelecting && rng_area(dragArea) != 0.0F) {
-					com.tessellator->ui_rect2d(dragArea.minX, dragArea.minY, dragArea.maxX, dragArea.maxY, com.renderZ, 0.0F, 0.0F, 0.0F, 0.0F, V4F{ 1.0F, 1.0F, 1.0F, 1.0F }, Resources::simpleWhite.index, 0);
+					com.tessellator->ui_rect2d(dragArea.minX, dragArea.minY, dragArea.maxX, dragArea.maxY, com.renderZ, 0.0F, 0.0F, 0.0F, 0.0F, V4F{ 1.0F, 1.0F, 1.0F, 0.75F }, Resources::simpleWhite.index, 0);
 				}
 			}
 			return ACTION_PASS;
@@ -437,6 +541,9 @@ void update() {
 	if (focusedPanel) {
 		focusedPanel->editor.update();
 	}
+	for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
+		editor3d->update();
+	};
 	using namespace UI;
 	if (Box* b7 = growableBox.get()) {
 		b7->size.x = max(1.0F, Win32::get_mouse().x);
@@ -506,6 +613,22 @@ void debug_render() {
 	V3F color = intersect ? V3F{ 0.0F, 1.0F, 0.0F } : V3F{ 1.0F, 0.0F, 0.0F };
 	boxA.debug_render(color);
 	boxB.debug_render(color);
+	DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
+	if (focusedPanel) {
+		F32 t{};
+		V3F o = focusedPanel->editor.get_render_eye_pos();
+		V3F d = focusedPanel->editor.forward;
+		bool hit = ray_cyliner_intersect(&t, o, d, V3F{ 0.0F, 2.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.2F);
+		if (hit) {
+			V3F hitPos = o + t * d;
+			tes.begin_draw(VK::debugPointsPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+			tes.pos3(hitPos.x, hitPos.y, hitPos.z).color(1.0F, 1.0F, 0.0F).end_vert();
+			tes.end_draw();
+		}
+	}
+	tes.begin_draw(VK::debugPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+	tes.debug_arrow(V3F{ 0.0F, 1.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.1F, V4F{ 0.5F, 0.5F, 1.0F, 1.0F });
+	tes.end_draw();
 }
 
 void build_test_ui() {
@@ -529,9 +652,9 @@ void build_test_ui() {
 		b6->backgroundColor = RGBA8{ 255, 255, 0, 255 };
 		Box* bi = text_button("Something"a, [](Box* box) {
 			print("Convolving...");
-			CubemapGen::equirectangular2convolved_cubemap(get_user_selected_file(globalArena));
+			CubemapGen::equirectangular2convolved_cubemap("cubemap_test/cube"a, get_user_selected_file(globalArena), true);
 			print(" complete\n");
-							  }).unsafeBox;
+		}).unsafeBox;
 		bi->padding = 2.0F;
 		Box* bj = text_input("A text input"a, ""a, [](Box* box){}).unsafeBox;
 		bj->padding = 2.0F;
@@ -612,6 +735,25 @@ void build_test_ui() {
 }
 
 void init() {
+	using namespace UI;
+	UI_WORKING_BOX(root) {
+		Box* toolbar = generic_box().unsafeBox;
+		toolbar->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+		toolbar->size.y = 16.0F;
+		toolbar->layoutDirection = LAYOUT_DIRECTION_RIGHT;
+		UI_WORKING_BOX(toolbar) {
+			UI_PADDING(2.0F)
+			text_button("File"a, [](Box* box) {
+				UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ 0.0F, 16.0F })) {
+					text_button("Cubemap Gen"a, [](Box* box) {
+						print("Convolving...");
+						CubemapGen::equirectangular2convolved_cubemap("cubemap_test/cube"a, get_user_selected_file(globalArena), true);
+						print(" complete\n");
+					});
+				}
+			});
+		}
+	}
 	Panel* panel = alloc_panel();
 	panel->uiBox = UI::alloc_box();
 	panel->uiBox.unsafeBox->flags = UI::BOX_FLAG_DONT_FIT_CHILDREN | UI::BOX_FLAG_CLIP_CHILDREN | UI::BOX_FLAG_INVISIBLE;
@@ -619,7 +761,7 @@ void init() {
 	rootPanel = panel;
 	panel->set_type(PANEL_TYPE_EDITOR_3D);
 	panel->uiBox.unsafeBox->parent = UI::root;
-	DLL_INSERT_HEAD(panel->uiBox.unsafeBox, UI::root->childFirst, UI::root->childLast, prev, next);
+	DLL_INSERT_TAIL(panel->uiBox.unsafeBox, UI::root->childFirst, UI::root->childLast, prev, next);
 
 	init_physics();
 	//build_test_ui();

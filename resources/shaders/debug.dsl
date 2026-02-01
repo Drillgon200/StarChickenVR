@@ -9,7 +9,7 @@ struct Vertex {
 	U32 color;
 };
 
-[set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
+[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &struct {
 	V2F screenDimensions;
 	&V4F uiClipBoxes;
 	V2U pUIVertices;
@@ -54,12 +54,13 @@ struct Vertex {
 #shader fragment
 
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
-[uniform, set 0, binding 2] &Image2DSampled[] textures;
+[uniform, set 0, binding 6] &Image2DSampled[] textures;
 
 [output, location 0] &V4F fragColor;
 [output, location 1] &U32 outObjId;
 
 [entrypoint] @[][] frag_main{
-	^fragColor = ^color;
+	// Multiply by 11.2 (the whitepoint) over 2.0 (the exposure bias) so the debug color looks reasonably bright after tonemapping
+	^fragColor = ^color * 5.6;
 	^outObjId = 0u;
 };

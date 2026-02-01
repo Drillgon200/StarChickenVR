@@ -14,7 +14,7 @@ struct StagingBuffer {
 	B32 submitted;
 };
 
-U32 uploadStagingBufferSize = 8 * MEGABYTE;
+U32 uploadStagingBufferSize = 16 * MEGABYTE;
 
 struct GPUUploadStager {
 	VkQueue queue;
@@ -115,8 +115,7 @@ struct GPUUploadStager {
 		}
 	}
 
-	VkCommandBuffer prepare_for_image_upload(U32 width, U32 height, U32 bytesPerTexel) {
-		U32 size = width * height * bytesPerTexel;
+	VkCommandBuffer prepare_for_image_upload(U32 size) {
 		if (size > uploadStagingBufferSize) {
 			print("Image upload was too large for staging buffer, resizing\n");
 			flush();
@@ -134,8 +133,8 @@ struct GPUUploadStager {
 		return stagingBuffer.cmdBuffer;
 	}
 
-	void upload_to_image(VkImage dst, void* src, U32 width, U32 height, U32 bytesPerTexel, U32 mipLevel) {
-		U32 size = width * height * bytesPerTexel;
+	VkCommandBuffer upload_to_image(VkImage dst, void* src, U32 width, U32 height, U32 arrayLayers, U32 bytesPerTexel, U32 mipLevel) {
+		U32 size = width * height * arrayLayers * bytesPerTexel;
 		if (size > uploadStagingBufferSize) {
 			print("Image upload was too large for staging buffer, resizing\n");
 			flush();
@@ -159,11 +158,12 @@ struct GPUUploadStager {
 		cpy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		cpy.imageSubresource.mipLevel = mipLevel;
 		cpy.imageSubresource.baseArrayLayer = 0;
-		cpy.imageSubresource.layerCount = 1;
+		cpy.imageSubresource.layerCount = arrayLayers;
 		cpy.imageOffset = VkOffset3D{ 0, 0, 0 };
 		cpy.imageExtent = VkExtent3D{ width, height, 1 };
 		VK::vkCmdCopyBufferToImage(stagingBuffer.cmdBuffer, stagingBuffer.uploadBuffer, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cpy);
 		stagingBuffer.offset += size;
+		return stagingBuffer.cmdBuffer;
 	}
 
 	void flush() {

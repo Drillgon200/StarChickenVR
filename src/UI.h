@@ -689,9 +689,9 @@ void layout_boxes(U32 rootWidth, U32 rootHeight) {
 		if (Box* contextBox = contextMenuStack.data[i].get()) {
 			layout_box(contextBox);
 			// Clamp the box inside the render area
-			contextBox->computedPos.x = -max(0.0F, contextBox->computedPos.x + contextBox->computedSize.x - F32(rootWidth));
+			contextBox->computedPos.x -= max(0.0F, contextBox->computedPos.x + contextBox->computedSize.x - F32(rootWidth));
 			contextBox->computedPos.x -= min(0.0F, contextBox->computedPos.x);
-			contextBox->computedPos.y = -max(0.0F, contextBox->computedPos.y + contextBox->computedSize.y - F32(rootHeight));
+			contextBox->computedPos.y -= max(0.0F, contextBox->computedPos.y + contextBox->computedSize.y - F32(rootHeight));
 			contextBox->computedPos.y -= min(0.0F, contextBox->computedPos.y);
 		} else {
 			for (U32 j = i; j < contextMenuStack.size; j++) {
@@ -705,9 +705,9 @@ void layout_boxes(U32 rootWidth, U32 rootHeight) {
 	if (Box* tooltipBox = tooltip.get()) {
 		layout_box(tooltipBox);
 		// Clamp the box inside the render area
-		tooltipBox->computedPos.x = -max(0.0F, tooltipBox->computedPos.x + tooltipBox->computedSize.x - F32(rootWidth));
+		tooltipBox->computedPos.x -= max(0.0F, tooltipBox->computedPos.x + tooltipBox->computedSize.x - F32(rootWidth));
 		tooltipBox->computedPos.x -= min(0.0F, tooltipBox->computedPos.x);
-		tooltipBox->computedPos.y = -max(0.0F, tooltipBox->computedPos.y + tooltipBox->computedSize.y - F32(rootHeight));
+		tooltipBox->computedPos.y -= max(0.0F, tooltipBox->computedPos.y + tooltipBox->computedSize.y - F32(rootHeight));
 		tooltipBox->computedPos.y -= min(0.0F, tooltipBox->computedPos.y);
 	}
 }
@@ -738,7 +738,7 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 			}
 			Resources::Texture& tex = box->backgroundTexture ? *box->backgroundTexture : Resources::simpleWhite;
 			U32 flags = clipBoxIndexStack.back() << 16;
-			if (tex.type == Resources::TEXTURE_TYPE_MSDF) {
+			if (tex.flags & Resources::TEXTURE_FLAG_MSDF) {
 				flags |= VK::UI_RENDER_FLAG_MSDF;
 			}
 			tes.ui_rect2d(renderArea.minX, renderArea.minY, renderArea.maxX, renderArea.maxY, z, 0.0F, 0.0F, 1.0F, 1.0F, color, tex.index, flags);
@@ -802,7 +802,7 @@ void draw() {
 	draw_box(tes, root, mousePos, root->computedPos, 1.0F, root->zOffset);
 	for (BoxHandle contextMenuHandle : contextMenuStack) {
 		if (Box* contextMenuBox = contextMenuHandle.get()) {
-			draw_box(tes, contextMenuBox, mousePos, V2F32{}, 1.0F, 2.0F);
+			draw_box(tes, contextMenuBox, mousePos, V2F32{}, 1.0F, UI_MAX_Z_OFFSET * 3 / 4);
 		}
 	}
 	if (Box* tooltipBox = tooltip.get()) {
@@ -812,7 +812,7 @@ void draw() {
 	modificationLock.unlock_read();
 }
 
-B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::MouseButton button, Win32::MouseValue state, V2F32 parentPos, F32 scale) {
+B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::MouseButton button, Win32::MouseValue state, V2F32 parentPos, F32 scale, bool isContextMenu) {
 	if (box->flags & BOX_FLAG_DISABLED) {
 		return false;
 	}
@@ -826,7 +826,7 @@ B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::
 		*anyContained = true;
 	}
 	for (Box* child = box->childFirst; child; child = child->next) {
-		if (mouse_input_for_box_recurse(anyContained, child, pos, button, state, boxPos, scale * 1.0F)) {
+		if (mouse_input_for_box_recurse(anyContained, child, pos, button, state, boxPos, scale * 1.0F, isContextMenu)) {
 			return false;
 		}
 	}
@@ -870,7 +870,7 @@ B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::
 		}
 	}
 	ActionResult result = box->actionCallback(box, comm);
-	if (result == ACTION_HANDLED && !(box->flags & BOX_FLAG_DONT_CLOSE_CONTEXT_MENU_ON_INTERACTION)) {
+	if (result == ACTION_HANDLED && isContextMenu && !(box->flags & BOX_FLAG_DONT_CLOSE_CONTEXT_MENU_ON_INTERACTION)) {
 		clear_context_menu();
 	}
 	return result == ACTION_HANDLED;
@@ -885,16 +885,16 @@ bool handle_mouse_action(V2F32 pos, Win32::MouseButton button, Win32::MouseValue
 	bool anyContained = false;
 	for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
 		if (Box* contextMenuBox = contextMenuStack.data[i].get()) {
-			mouse_input_for_box_recurse(&anyContained, contextMenuBox, pos, button, state, root->computedPos, 1.0F);
+			mouse_input_for_box_recurse(&anyContained, contextMenuBox, pos, button, state, root->computedPos, 1.0F, true);
 			if (anyContained) {
 				goto contextMenuClicked;
 			}
 		}
 	}
 	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_DOWN) {
-		context_menu(BoxHandle{}, BoxHandle{}, V2F32{});
+		clear_context_menu();
 	}
-	mouse_input_for_box_recurse(&anyContained, root, pos, button, state, root->computedPos, 1.0F);
+	mouse_input_for_box_recurse(&anyContained, root, pos, button, state, root->computedPos, 1.0F, false);
 contextMenuClicked:;
 	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_UP) {
 		activeBox = BoxHandle{};
@@ -1274,7 +1274,7 @@ BoxHandle slider_number(F32 step, Callback&& onTextUpdated) {
 }
 */
 
-BoxHandle context_menu_begin_helper() {
+Box* context_menu_begin_helper() {
 	BoxHandle dummyParent = alloc_box();
 	dummyParent.unsafeBox->flags |= BOX_FLAG_INVISIBLE;
 	workingBox = dummyParent.unsafeBox;
@@ -1283,7 +1283,7 @@ BoxHandle context_menu_begin_helper() {
 	box.unsafeBox->layoutDirection = LAYOUT_DIRECTION_RIGHT;
 	spacer(2.0F);
 	dbox();
-	return dummyParent;
+	return dummyParent.unsafeBox;
 }
 void context_menu_end_helper(BoxHandle parent, V2F32 offset) {
 	pop_box();
@@ -1292,7 +1292,7 @@ void context_menu_end_helper(BoxHandle parent, V2F32 offset) {
 	context_menu(parent, BoxHandle{ workingBox, workingBox->generation }, offset);
 }
 
-#define UI_ADD_CONTEXT_MENU(parent, offset) for (UI::BoxHandle oldWorkingBox = UI::workingBox, contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox.unsafeBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox.unsafeBox = nullptr)
+#define UI_ADD_CONTEXT_MENU(parent, offset) for (UI::Box* oldWorkingBox = UI::workingBox, * contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
 
 
 }

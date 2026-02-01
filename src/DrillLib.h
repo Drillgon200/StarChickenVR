@@ -432,6 +432,9 @@ struct ArenaArrayList {
 	}
 
 	FINLINE T& operator[](I64 pos) const {
+		if (pos < 0 || pos >= size) {
+			__debugbreak();
+		}
 		return data[pos < 0 ? size + pos : pos];
 	}
 
@@ -1487,6 +1490,22 @@ bool write_data_to_file(StrA fileName, const void* data, U32 numBytes) {
 	}
 	stackArena.stackPtr = oldArenaPtr;
 	return success;
+}
+
+typedef HANDLE File;
+File open_file_for_writing(StrA fileName) {
+	HANDLE file{};
+	MemoryArena& stackArena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(stackArena) {
+		file = CreateFileA(fileName.c_str(stackArena), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	}
+	return file == INVALID_HANDLE_VALUE ? 0 : file;
+}
+bool write_file(File file, const void* data, U32 numBytes) {
+	return !!WriteFile(file, data, numBytes, 0, NULL);
+}
+void close_file(File file) {
+	CloseHandle(file);
 }
 
 bool run_program_and_wait(U32* exitCodeOut, StrA programName, StrA commandLine) {

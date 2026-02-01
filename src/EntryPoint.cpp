@@ -17,7 +17,6 @@ extern "C" void __stdcall mainCRTStartup() {
 	U32 result = failToInitializeDrillLib;
 	if (drill_lib_init()) {
 		PNG::init_loader();
-
 #ifdef TESTING_ENABLE
 		StarChickenTests::run_all();
 #else

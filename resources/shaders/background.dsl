@@ -49,7 +49,7 @@ struct Material {
 };
 
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
-[set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
+[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &struct {
 	V2F screenDimensions;
 	&V4F uiClipBoxes;
 	V2U pUIVertices;
@@ -65,25 +65,8 @@ struct Material {
 	&Material materials;
 	&Camera cams;
 } drawData;
-[uniform, set 0, binding 2] &ImageCubeSampled backgroundCube;
-[uniform, set 0, binding 3] &ImageCubeSampled diffuseCube;
-
-//TODO do some actual research into tonemappers
-// https://64.github.io/tonemapping/
-@[V3F mapped][V3F x] uncharted2_tonemap_partial{
-    F32 A{ 0.15 };
-    F32 B{ 0.50 };
-    F32 C{ 0.10 };
-    F32 D{ 0.20 };
-    F32 E{ 0.02 };
-    F32 F{ 0.30 };
-    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
-};
-@[V3F mapped][V3F v] uncharted2_filmic{
-    F32 exposureBias{ 2.0 };
-    V3F whitePoint{ 11.2 };
-    return uncharted2_tonemap_partial(v * exposureBias) / uncharted2_tonemap_partial(whitePoint);
-};
+[uniform, set 0, binding 3] &ImageCubeSampled backgroundCube;
+[uniform, set 0, binding 4] &ImageCubeSampled diffuseCube;
 
 [entrypoint] @[][] frag_main{
 	I32 viewIdx{ ^passViewIndex };
@@ -94,7 +77,6 @@ struct Material {
 	worldDirection = worldDirection.x * cam.worldToView.row0.xyz + worldDirection.y * cam.worldToView.row1.xyz + worldDirection.z * cam.worldToView.row2.xyz;
 	worldDirection = V3F(worldDirection.x, -worldDirection.y, worldDirection.z);
 
-	//^outFragColor = V4F(uncharted2_filmic((^backgroundCube)[^bilinearSampler, worldDirection, 1.0].rgb), 1.0);
-	^outFragColor = V4F(uncharted2_filmic((^diffuseCube)[^bilinearSampler, worldDirection, 0.0].rgb), 1.0);
+	^outFragColor = V4F((^diffuseCube)[^bilinearSampler, worldDirection, 0.0].rgb, 1.0);
 	^outObjId = 0u;
 };

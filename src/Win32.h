@@ -377,7 +377,7 @@ void error_box(const char* msg) {
 
 void poll_events() {
 	MSG message{};
-	//TODO: PeekMessageA blocks when the user resizes or moves the window around, stopping my render loop. This isn't ideal.
+	//TODO PeekMessageA blocks when the user resizes or moves the window around, stopping my render loop. This isn't ideal.
 	while (pPeekMessageA(&message, NULL, 0, 0, PM_REMOVE)) {
 		pTranslateMessage(&message);
 		pDispatchMessageA(&message);

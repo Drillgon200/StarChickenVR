@@ -38,15 +38,12 @@ VkDeviceMemory equirectImageMemory;
 VkImage equirectImage;
 VkImageView equirectImageView;
 
-B32 hasCubemap;
-
 const U32 CUBEMAP_SPECULAR_RES = 512;
 const U32 CUBEMAP_DIFFUSE_RES = 64;
 const U32 BRDF_LUT_RES = 512;
 
-// At some point I'll refactor this code to support multiple cubemaps, but this is good enough for now
 void init() {
-	imageCPUBuffer.create(max<U32>(CUBEMAP_SPECULAR_RES * CUBEMAP_SPECULAR_RES * 4 * 6 * 2, 2048 * 2048 * 4 * 4), VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostMemoryTypeIndex);
+	imageCPUBuffer.create(max<U32>(CUBEMAP_SPECULAR_RES * CUBEMAP_SPECULAR_RES * 4 * 6 * 2 + BRDF_LUT_RES * BRDF_LUT_RES * 4, 2048 * 2048 * 4 * 4), VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostCachedMemoryTypeIndex);
 
 	U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
 	{ // Create cubemap images
@@ -133,46 +130,6 @@ void init() {
 		imgViewInfo.image = trLUTImg;
 		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &trLUTImgView));
 	}
-	{ // Write cubemap to descriptor set
-		VkWriteDescriptorSet writes[3];
-		VkWriteDescriptorSet& specularWrite = writes[0];
-		specularWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		specularWrite.dstSet = VK::drawDataDescriptorSet.descriptorSet;
-		specularWrite.dstBinding = 2; // Specular cubemap
-		specularWrite.dstArrayElement = 0;
-		specularWrite.descriptorCount = 1;
-		specularWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		VkDescriptorImageInfo specularImageInfo;
-		specularImageInfo.sampler = VK_NULL_HANDLE;
-		specularImageInfo.imageView = cubeTRConvRGBImgView;
-		specularImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-		specularWrite.pImageInfo = &specularImageInfo;
-		VkWriteDescriptorSet& diffuseWrite = writes[1];
-		diffuseWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		diffuseWrite.dstSet = VK::drawDataDescriptorSet.descriptorSet;
-		diffuseWrite.dstBinding = 3; // Diffuse cubemap
-		diffuseWrite.dstArrayElement = 0;
-		diffuseWrite.descriptorCount = 1;
-		diffuseWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		VkDescriptorImageInfo diffuseImageInfo;
-		diffuseImageInfo.sampler = VK_NULL_HANDLE;
-		diffuseImageInfo.imageView = cubeCosConvRGBImgView;
-		diffuseImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-		diffuseWrite.pImageInfo = &diffuseImageInfo;
-		VkWriteDescriptorSet& lutWrite = writes[2];
-		lutWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		lutWrite.dstSet = VK::drawDataDescriptorSet.descriptorSet;
-		lutWrite.dstBinding = 4; // TR LUT
-		lutWrite.dstArrayElement = 0;
-		lutWrite.descriptorCount = 1;
-		lutWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		VkDescriptorImageInfo lutImageInfo;
-		lutImageInfo.sampler = VK_NULL_HANDLE;
-		lutImageInfo.imageView = trLUTImgView;
-		lutImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-		lutWrite.pImageInfo = &lutImageInfo;
-		VK::vkUpdateDescriptorSets(VK::logicalDevice, 3, writes, 0, nullptr);
-	}
 
 	VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 	poolInfo.queueFamilyIndex = VK::graphicsFamily;
@@ -208,11 +165,11 @@ void destroy() {
 	imageCPUBuffer.destroy();
 }
 
-void equirectangular2convolved_cubemap(StrA name) {
+void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writeTRLut) {
 	MemoryArena& arena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(arena) {
 		U32 count = 0;
-		F32* data = read_full_file_to_arena<F32>(&count, arena, name);
+		F32* data = read_full_file_to_arena<F32>(&count, arena, srcEquirect);
 		if (data) {
 			using namespace VK;
 			U32 width = 1024;
@@ -480,7 +437,7 @@ void equirectangular2convolved_cubemap(StrA name) {
 			}
 			
 			
-			U32 cubemapTotalSize = 0;
+			U32 cubemapSpecularTotalSize = 0;
 			{ // Get convolved image back into host memory
 				VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
 				barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -498,11 +455,14 @@ void equirectangular2convolved_cubemap(StrA name) {
 				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 				barrier.image = cubeCosConvImg;
 				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+				barrier.image = trLUTImg;
+				barrier.subresourceRange.layerCount = 1;
+				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
 				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
 				for (U32 i = 0; i < cubeMipLevels; i++) {
 					VkBufferImageCopy cubeRegion{};
-					cubeRegion.bufferOffset = cubemapTotalSize;
+					cubeRegion.bufferOffset = cubemapSpecularTotalSize;
 					// 0 means tightly packed
 					cubeRegion.bufferRowLength = 0;
 					cubeRegion.bufferImageHeight = 0;
@@ -514,10 +474,10 @@ void equirectangular2convolved_cubemap(StrA name) {
 					U32 res = max((CUBEMAP_SPECULAR_RES >> i), 1u);
 					cubeRegion.imageExtent = VkExtent3D{ res, res, 1 };
 					vkCmdCopyImageToBuffer(convolveCmdBuf, cubeTRConvImg, VK_IMAGE_LAYOUT_GENERAL, imageCPUBuffer.buffer, 1, &cubeRegion);
-					cubemapTotalSize += res * res * sizeof(U32) * 6;
+					cubemapSpecularTotalSize += res * res * sizeof(U32) * 6;
 				}
 				VkBufferImageCopy cubeRegion{};
-				cubeRegion.bufferOffset = cubemapTotalSize;
+				cubeRegion.bufferOffset = cubemapSpecularTotalSize;
 				// 0 means tightly packed
 				cubeRegion.bufferRowLength = 0;
 				cubeRegion.bufferImageHeight = 0;
@@ -528,6 +488,18 @@ void equirectangular2convolved_cubemap(StrA name) {
 				cubeRegion.imageOffset = VkOffset3D{ 0, 0, 0 };
 				cubeRegion.imageExtent = VkExtent3D{ CUBEMAP_DIFFUSE_RES, CUBEMAP_DIFFUSE_RES, 1 };
 				vkCmdCopyImageToBuffer(convolveCmdBuf, cubeCosConvImg, VK_IMAGE_LAYOUT_GENERAL, imageCPUBuffer.buffer, 1, &cubeRegion);
+				VkBufferImageCopy trLUTRegion{};
+				trLUTRegion.bufferOffset = cubemapSpecularTotalSize + CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32);
+				// 0 means tightly packed
+				trLUTRegion.bufferRowLength = 0;
+				trLUTRegion.bufferImageHeight = 0;
+				trLUTRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				trLUTRegion.imageSubresource.mipLevel = 0;
+				trLUTRegion.imageSubresource.baseArrayLayer = 0;
+				trLUTRegion.imageSubresource.layerCount = 1;
+				trLUTRegion.imageOffset = VkOffset3D{ 0, 0, 0 };
+				trLUTRegion.imageExtent = VkExtent3D{ BRDF_LUT_RES, BRDF_LUT_RES, 1 };
+				vkCmdCopyImageToBuffer(convolveCmdBuf, trLUTImg, VK_IMAGE_LAYOUT_GENERAL, imageCPUBuffer.buffer, 1, &trLUTRegion);
 			}
 
 			CHK_VK(vkEndCommandBuffer(convolveCmdBuf));
@@ -549,18 +521,61 @@ void equirectangular2convolved_cubemap(StrA name) {
 				vkDestroyImage(logicalDevice, equirectImage, nullptr);
 				vkFreeMemory(logicalDevice, equirectImageMemory, nullptr);
 			}
-			write_data_to_file("cubemap_test/convolved.dat"a, imageCPUBuffer.mapping, cubemapTotalSize);
-			write_data_to_file("cubemap_test/convolved_diffuse.dat"a, (char*)imageCPUBuffer.mapping + cubemapTotalSize, CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32));
-			
-			RGBA8* colors = arena.alloc<RGBA8>(CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES);
+			if (File file = open_file_for_writing(stracat(arena, dstPath, "_specular.dtf"a))) {
+				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
+				ResourceLoading::DTFHeader header{};
+				memcpy(header.magic, "DUCK", 4);
+				header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+				header.flags = ResourceLoading::TEXTURE_FLAG_CUBE;
+				header.format = ResourceLoading::TEXTURE_FORMAT_R9G9B9E5;
+				header.mipCount = cubeMipLevels;
+				header.width = CUBEMAP_SPECULAR_RES;
+				header.height = CUBEMAP_SPECULAR_RES;
+				write_file(file, &header, sizeof(header));
+				void* specularData = imageCPUBuffer.mapping;
+				write_file(file, specularData, cubemapSpecularTotalSize);
+				close_file(file);
+			}
+			if (File file = open_file_for_writing(stracat(arena, dstPath, "_diffuse.dtf"a))) {
+				ResourceLoading::DTFHeader header{};
+				memcpy(header.magic, "DUCK", 4);
+				header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+				header.flags = ResourceLoading::TEXTURE_FLAG_CUBE;
+				header.format = ResourceLoading::TEXTURE_FORMAT_R9G9B9E5;
+				header.mipCount = 1;
+				header.width = CUBEMAP_DIFFUSE_RES;
+				header.height = CUBEMAP_DIFFUSE_RES;
+				write_file(file, &header, sizeof(header));
+				void* specularData = (char*)imageCPUBuffer.mapping + cubemapSpecularTotalSize;
+				write_file(file, specularData, CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32));
+				close_file(file);
+			}
+			if (writeTRLut) {
+				// The TR LUT is kind of hacked in here because I only have to do it once, and I'm just keeping the code around in case I have to debug or change it
+				if (File file = open_file_for_writing(stracat(arena, dstPath, "_trowbridge_reitz_lut.dtf"a))) {
+					ResourceLoading::DTFHeader header{};
+					memcpy(header.magic, "DUCK", 4);
+					header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+					header.flags = 0;
+					header.format = ResourceLoading::TEXTURE_FORMAT_RG_U8;
+					header.mipCount = 1;
+					header.width = BRDF_LUT_RES;
+					header.height = BRDF_LUT_RES;
+					write_file(file, &header, sizeof(header));
+					void* specularData = (char*)imageCPUBuffer.mapping + cubemapSpecularTotalSize + CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32);
+					write_file(file, specularData, BRDF_LUT_RES * BRDF_LUT_RES * sizeof(U32));
+					close_file(file);
+				}
+			}
+
+			/*RGBA8* colors = arena.alloc<RGBA8>(CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES);
 			for (U32 layer = 0; layer < 6; layer++) {
 				for (U32 i = 0; i < CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES; i++) {
-					U32 packed = ((U32*)((char*)imageCPUBuffer.mapping + cubemapTotalSize + layer * CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * sizeof(U32)))[i];
+					U32 packed = ((U32*)((char*)imageCPUBuffer.mapping + cubemapSpecularTotalSize + layer * CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * sizeof(U32)))[i];
 					colors[i] = tonemap_E5B9G9R9(packed);
 				}
 				PNG::write_image(strafmt(arena, "cubemap_test/diffuse_%.png"a, layer), colors, CUBEMAP_DIFFUSE_RES, CUBEMAP_DIFFUSE_RES);
-			}
-			hasCubemap = true;
+			}*/
 		}
 	}
 }

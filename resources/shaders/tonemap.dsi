@@ -14,3 +14,6 @@
     V3F whitePoint{ 11.2 };
     return uncharted2_tonemap_partial(v * exposureBias) / uncharted2_tonemap_partial(whitePoint);
 };
+@[V3F srgb][V3F x] to_srgb{
+	return select(x > V3F(0.00031308), 1.055 * pow(x, V3F(1.0 / 2.4)) - 0.055, 12.92 * x);
+};

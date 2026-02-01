@@ -1,12 +1,6 @@
 #version 2
 #shader vertex
-
-// I really need to add includes or imports to this language
-struct M4x3F {
-	V4F row0;
-	V4F row1;
-	V4F row2;
-};
+#include "lib.dsi"
 
 struct Vertex {
 	V3F pos;
@@ -16,28 +10,7 @@ struct Vertex {
 	U32 flags;
 };
 
-struct Material {
-	U32 colorTexIdx;
-	U32 normalTexIdx;
-	U32 roughnessTexIdx;
-	F32 ior;
-};
-
-[set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
-	V2F screenDimensions;
-	&V4F uiClipBoxes;
-	V2U pUIVertices;
-	&M4x3F matrices;
-	&V3F positions;
-	&V2F texcoords;
-	&V3F normals;
-	&V3F tangents;
-	&U32 boneIndicesAndWeights;
-	&V3F skinnedPositions;
-	&V3F skinnedNormals;
-	&V3F skinnedTangents;
-	&Material materials;
-} drawData;
+[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &DrawData drawData;
 [push_constant, block] &struct {
 	U32 transformIdx;
 	I32 verticesOffset;
@@ -73,7 +46,7 @@ struct Material {
 #shader fragment
 
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
-[uniform, set 0, binding 5] &Image2DSampled[] textures;
+[uniform, set 0, binding 6] &Image2DSampled[] textures;
 
 [output, location 0] &V4F fragColor;
 

@@ -208,6 +208,8 @@ extern VKStaging::GPUUploadStager graphicsStager;
 extern VKGeometry::GeometryHandler geometryHandler;
 extern VKGeometry::UniformMatricesHandler uniformMatricesHandler;
 
+extern B32 hasCubemap;
+
 void vulkan_failure(VkResult result, const char* msg);
 
 struct DedicatedBuffer {
@@ -259,7 +261,7 @@ struct DedicatedBuffer {
 			gpuAddress = 0;
 		}
 
-		if (memoryTypeIndex == hostMemoryTypeIndex || memoryTypeIndex == hostCachedMemoryTypeIndex) {
+		if (memoryTypeIndex == hostMemoryTypeIndex || memoryTypeIndex == hostCachedMemoryTypeIndex || memoryTypeIndex == deviceHostMappedMemoryTypeIndex) {
 			CHK_VK(vkMapMemory(logicalDevice, memory, 0, capacity, 0, reinterpret_cast<void**>(&mapping)));
 		}
 	}
@@ -309,6 +311,7 @@ struct WorldDrawPushConstants {
 	I32 verticesOffset;
 	U32 camIdx;
 	U32 objId; // High bit set if object is selected
+	U32 materialId;
 };
 struct FinalCompositePushConstants {
 	U32 activeObjectId;
