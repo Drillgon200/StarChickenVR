@@ -174,13 +174,19 @@ struct Level {
 	}
 
 	void draw_models(VkCommandBuffer cmdBuf, U32 camIdx) {
+		VK::DrawPushData drawData{ .drawSet = VK::defaultDrawDescriptorSet };
+		VK_PUSH_MEMBER(cmdBuf, drawData, drawSet);
 		for (StaticModel* model : staticModels) {
 			if (model->obj.flags & LevelObject::INVISIBLE) {
 				continue;
 			}
 			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx };
-			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
+			drawData.drawConstants.transformIdx = model->gpuMatrixIdx;
+			drawData.drawConstants.verticesOffset = I32(model->mesh->verticesOffset + 1);
+			drawData.drawConstants.camIdx = camIdx;
+			drawData.drawConstants.objId = selectionObjId;
+			drawData.drawConstants.materialId = model->material->gpuIdx;
+			VK_PUSH_MEMBER(cmdBuf, drawData, drawConstants);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 0);
 		}
 
@@ -190,8 +196,12 @@ struct Level {
 			}
 			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
 			// Negate vertex offset so the shader knows to pull from the skinned vertex arrays
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, -I32(model->skinnedVerticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx };
-			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
+			drawData.drawConstants.transformIdx = model->gpuMatrixIdx;
+			drawData.drawConstants.verticesOffset =  -I32(model->skinnedVerticesOffset + 1);
+			drawData.drawConstants.camIdx = camIdx;
+			drawData.drawConstants.objId = selectionObjId;
+			drawData.drawConstants.materialId = model->material->gpuIdx;
+			VK_PUSH_MEMBER(cmdBuf, drawData, drawConstants);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, 0, 0);
 		}
 	}

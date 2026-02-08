@@ -10,7 +10,7 @@ namespace ShaderCompilerTests {
 void run_shader_compile_test(StrA shaderCode) {
 	U32 numCompiledDwords = 0;
 	F64 timeTaken = current_time_seconds();
-	SPIRV::SpvDword* result = ShaderCompiler::compile_dsl(&numCompiledDwords, shaderCode);
+	SPIRV::SpvDword* result = ShaderCompiler::compile_dsl(&numCompiledDwords, shaderCode, "src"a, ""a);
 	timeTaken = current_time_seconds() - timeTaken;
 	TEST_EXPECT(result);
 	U32 validationExitCode = U32_MAX;
@@ -19,7 +19,7 @@ void run_shader_compile_test(StrA shaderCode) {
 		CreateDirectoryA(".\\spv_test_output", NULL);
 		write_data_to_file(".\\spv_test_output\\dsl2.spv"a, result, numCompiledDwords * sizeof(SPIRV::SpvDword));
 		U32 exitCode = 0;
-		if (run_program_and_wait(&exitCode, "spirv-val.exe"a, "--target-env vulkan1.2 --scalar-block-layout .\\spv_test_output\\dsl2.spv"a)) {
+		if (run_program_and_wait(&exitCode, "spirv-val.exe"a, "--target-env vulkan1.4 --scalar-block-layout .\\spv_test_output\\dsl2.spv"a)) {
 			validationExitCode = exitCode;
 		} else {
 			print("SPIR-V Validator not found, compiler result not validated\n"a);
@@ -33,95 +33,48 @@ void run_shader_compile_test(StrA shaderCode) {
 void solo_test() {
 	run_shader_compile_test(R"(
 #version 2
-#shader vertex
-#extension multiview
+#shader compute
 
-struct M4x3F {
-	V4F row0;
-	V4F row1;
-	V4F row2;
-};
-
-[set 0, binding 1, uniform_buffer, restrict, nonwritable, block] &struct {
-	V2F screenDimensions;
-	&V4F uiClipBoxes;
-	V2U pUIVertices;
-	&M4x3F matrices;
-	&V3F positions;
-	&V2F texcoords;
-	&V3F normals;
-	&V3F tangents;
-	&U32 boneIndicesAndWeights;
-	&V3F skinnedPositions;
-	&V3F skinnedNormals;
-	&V3F skinnedTangents;
-} drawData;
+[input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
-	U32 transformIdx;
-	I32 verticesOffset;
-} modelData;
+	V2U outputDimensions;
+	U32 inputCube;
+	U32 inputMipLevel;
+	U32 outputCube;
+} pushData;
 
-[input, builtin VertexIndex] &I32 inVertexIndex;
-[input, builtin ViewIndex] &I32 inViewIndex;
-
-[output, builtin Position] &V4F outPosition;
-[output, location 0] &V3F passPos;
-[output, location 1] &V3F passNormal;
-
-[entrypoint] @[][] vert_main{
-	I32 vertIdx{ ^inVertexIndex + modelData.verticesOffset };
-	V4F pos{ 0.0 };
-	V3F norm{ 0.0 };
-	if vertIdx > 0 {
-		vertIdx = vertIdx - 1;
-		pos = V4F(drawData.positions[vertIdx], 1.0);
-		norm = drawData.normals[vertIdx];
-	} else {
-		vertIdx = vertIdx - 1;
-		pos = V4F(drawData.positions[vertIdx], 1.0);
-		norm = drawData.normals[vertIdx];
-		/*
-		vertIdx = -vertIdx - 1;
-		pos = V4F(drawData.skinnedPositions[vertIdx], 1.0);
-		norm = drawData.skinnedNormals[vertIdx];
-		*/
-	};
-	I32 viewIdx{ ^inViewIndex };
-	M4x3F modelMat{ drawData.matrices[3/*modelData.transformIdx*/] };
-	V4F transformedPos{
-		dot(pos, modelMat.row0),
-		dot(pos, modelMat.row1),
-		dot(pos, modelMat.row2),
-		1.0F
-	};
-	V3F transformedNorm{
-		dot(norm, modelMat.row0.xyz),
-		dot(norm, modelMat.row1.xyz),
-		dot(norm, modelMat.row2.xyz)
-	};
-	transformedPos = pos;
-	M4x3F viewProj{ drawData.matrices[/*viewIdx + */1] };
-	F32 x{ dot(transformedPos, viewProj.row0) };
-	F32 y{ dot(transformedPos, viewProj.row1) };
-	F32 z{ 0.05F }; // Near plane
-	// row2 is actually row3 in  this case, since the matrix is a ProjectiveTransformMatrix
-	F32 w{ dot(transformedPos, viewProj.row2) };
-	^outPosition = V4F(x, -y, z, w);
-	^passPos = transformedPos.xyz;
-	^passNormal = transformedNorm;
+@[U32 packed][V3F x] pack_E5B9G9R9{
+	// The 5 bit exponent has no explicit 1 and has a bias of 15
+	V3I significand{ I32(f32_significand(x.r) * 512.0), I32(f32_significand(x.g) * 512.0), I32(f32_significand(x.b) * 512.0) };
+	V3I exponent{ f32_exponent(x.r), f32_exponent(x.g), f32_exponent(x.b) };
+	// We'll just choose the max here, I think it's more important to represent the high numbers accurately
+	I32 newExponent{ clamp(max(exponent.x, max(exponent.y, exponent.z)), -15, 16) };
+	V3I expDiff{ newExponent - exponent };
+	// Try to fit each significand to the chosen exponent.
+	// If positive difference, shift down by at most 9 (don't want to accidentally get undefined results with a big difference).
+	// If negative difference (only the case when the original exponent was bigger than 5 bits), shift up by 1, causing it to be clamped to 511.
+	V3I newSignificand{ min(V3I(511), significand >>> clamp(expDiff, V3I(0), V3I(9)) << clamp(-expDiff, V3I(0), V3I(1))) };
+	return U32(newExponent + 15) << 27u |
+		U32(newSignificand.b) << 18u |
+		U32(newSignificand.g) << 9u |
+		U32(newSignificand.r);
 };
 
-//---------------------------------------------------------//
-#shader fragment
+[entrypoint, localsize 16 16 1] @[][] compute_main{
+	V2U outputCoord{ globalInvocationId.xy };
+	U32 faceIdx{ globalInvocationId.z };
+	V2U outputDim{ pushData.outputDimensions };
+	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
+		return;
+	};
+	V3F texCoord{ (V2F(outputCoord) + 0.5) / V2F(outputDim), F32(faceIdx) };
+	Sampler bilinearSampler{ 0u };
+	V3F color{ Image2DArraySampled(pushData.inputCube)[bilinearSampler, texCoord, F32(pushData.inputMipLevel)].rgb };
+	// Unfortunately I have to clamp the brightness to not require a huge number of samples to avoid banding for bright objects like the sun.
+	// Perhaps I should create a high quality cubemap pre-processor mode that spends several minutes calculating millions of samples per pixel
+	color = min(color, V3F(500.0));
 
-[output, location 0] &V4F outFragColor;
-[input, location 0] &V3F passPosition;
-[input, location 1] &V3F passNormal;
-
-[entrypoint] @[][] frag_main{
-	//^outFragColor = V4F(1.0, 0.0, 0.0, 1.0);
-	V3F lightDir{ 0.57735026919F, 0.57735026919F, 0.57735026919F };
-	^outFragColor = V4F(V3F(dot(normalize(^passNormal), lightDir) * 0.5F + 0.5F), 1.0F);
+	write_image(ImageU32CubeStorageR32UI(pushData.outputCube), V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
 };
 )"a);
 }

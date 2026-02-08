@@ -1,26 +1,19 @@
 #version 2
 #shader compute
 
-[set 0, binding 0, uniform] &Sampler bilinearSampler;
-// Write out image in VK_FORMAT_E5B9G9R9_UFLOAT_PACK32
-// I need to write a BC6H compressor at some point
-[set 0, binding 1, uniform] &ImageU32CubeStorageR32UI outputImage;
-[set 0, binding 3, uniform] &Image2DSampled inputImageEquirect;
-
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
-	V2U inputDimensions;
 	V2U outputDimensions;
-	F32 roughness;
-	U32 outputIdx;
-	U32 inputIdx;
-} pushConstants;
+	U32 inputImgEquirect;
+	U32 outputImgCube;
+} pushData;
 
 @[V3F color][V3F direction] sample_equirect{
 	F32 y{ asin(direction.y) * 0.31830988618 + 0.5 };
 	V2F horizontal{ normalize(direction.xz) };
 	F32 x{ atan2(horizontal.y, horizontal.x) * 0.31830988618 * 0.5 + 0.5 };
-	return (^inputImageEquirect)[^bilinearSampler, V2F(x, y), 0.0F].rgb;
+	Sampler bilinearSampler{ 0u };
+	return Image2DSampled(pushData.inputImgEquirect)[bilinearSampler, V2F(x, y), 0.0F].rgb;
 };
 
 @[U32 packed][V3F x] pack_E5B9G9R9{
@@ -43,7 +36,7 @@
 [entrypoint, localsize 16 16 1] @[][] compute_main{
 	V2U outputCoord{ globalInvocationId.xy };
 	U32 faceIdx{ globalInvocationId.z };
-	V2U outputDim{ pushConstants.outputDimensions };
+	V2U outputDim{ pushData.outputDimensions };
 	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
 		return;
 	};
@@ -57,5 +50,5 @@
 		else { V3F(-faceDir.x, faceDir.y, -1.0) } // -Z
 	};
 	dir = normalize(dir);
-	write_image(^outputImage, V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(sample_equirect(dir))));
+	write_image(ImageU32CubeStorageR32UI(pushData.outputImgCube), V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(sample_equirect(dir))));
 };

@@ -189,7 +189,8 @@ enum TypeClass : U16 {
 	TYPE_CLASS_POINTER,
 	TYPE_CLASS_IMAGE,
 	TYPE_CLASS_SAMPLER,
-	TYPE_CLASS_SAMPLED_IMAGE
+	TYPE_CLASS_SAMPLED_IMAGE,
+	TYPE_CLASS_UNIFORM_BUFFER
 };
 struct PointerType;
 struct Type {
@@ -243,6 +244,7 @@ struct Hasher<ArrayTypeInfo> {
 		return hash;
 	}
 };
+struct UniformBufferType;
 struct StructType {
 	struct Member {
 		StrA name;
@@ -253,6 +255,7 @@ struct StructType {
 	};
 	Type type;
 	ArenaArrayList<Member> members;
+	UniformBufferType* uniformBufferType;
 	TCId structTCCodeStart;
 	U32 scopeIdx;
 	U32 modifierCtxIdx;
@@ -285,6 +288,10 @@ struct ImageType {
 	U32 sampled : 2; // 0 = only known at runtime, 1 = compatible with sampling operations, 2 = compatible with read/write operations
 	ImageFormat format;
 	Type* sampledImageType;
+};
+struct UniformBufferType {
+	Type type;
+	StructType* structBase;
 };
 
 // A scoped name acts as a unique identifier for a variable.
@@ -753,6 +760,23 @@ struct DSLCompiler {
 	// Used for instructions that return structs, such as AddCarry, UMulExtended, and FrexpStruct
 	SpvId twoU32StructTypeId;
 	SpvId oneF32OneI32StructTypeId;
+	SpvId untypedPointerUniformConstantTypeId;
+	SpvId untypedPointerUniformTypeId;
+	// Since we apparently can't create void type images in Vulkan, we pick an existing image type if we can, otherwise create one
+	ImageType* randomImageType;
+	SpvId placeholderImageTypeId;
+	SpvId placeholderUniformBufferTypeId;
+	SpvId placeholderImageArrayTypeId;
+	SpvId placeholderBufferArrayTypeId;
+	ArrayType* samplerArrayType;
+	SpvId imageDescriptorSizeId;
+	SpvId bufferDescriptorSizeId;
+	SpvId imageDescriptorIsBiggerId;
+	SpvId resourceDescriptorSizeId;
+
+	SpvId samplerHeap;
+	SpvId resourceHeap;
+
 	SpvId glsl450InstructionSet;
 
 	DLSCompileErrorCallback errorCallback;
@@ -2357,6 +2381,25 @@ struct DSLCompiler {
 		allTypes.push_back(samplerType);
 		scope.typeNameToType.insert(samplerType->typeName, samplerType);
 
+		ADD_MULTI_OP_UNARY_OPERATOR("Sampler.<init>"a, samplerType, u32Id, \
+			SpvId samplerPtr = op_untyped_access_chain_khr(codeOutput, compiler.untypedPointerUniformConstantTypeId, compiler.nextSpvId++, compiler.samplerArrayType->type.id, compiler.samplerHeap, &params[0], 1);\
+			return (op_load(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, samplerPtr, nullptr, 0));\
+		);
+
+		untypedPointerUniformConstantTypeId = nextSpvId++;
+		untypedPointerUniformTypeId = nextSpvId++;
+		samplerHeap = nextSpvId++;
+		resourceHeap = nextSpvId++;
+		placeholderImageTypeId = nextSpvId++;
+		placeholderUniformBufferTypeId = nextSpvId++;
+		placeholderImageArrayTypeId = nextSpvId++;
+		placeholderBufferArrayTypeId = nextSpvId++;
+		samplerArrayType = get_array_of(defaultTypeSampler, -1);
+		imageDescriptorSizeId = nextSpvId++;
+		bufferDescriptorSizeId = nextSpvId++;
+		imageDescriptorIsBiggerId = nextSpvId++;
+		resourceDescriptorSizeId = nextSpvId++;
+
 #undef ADD_V4_CTORS
 #undef ADD_V3_CTORS
 #undef ADD_V2_CTORS
@@ -2597,6 +2640,19 @@ struct DSLCompiler {
 				enabledExtensions.runtimeDescriptorArray = true;
 			}
 			return arrType;
+		}
+	}
+	UniformBufferType* get_uniform_buffer_for(StructType* structType) {
+		UniformBufferType* existingUniformBufferType = structType->uniformBufferType;
+		if (existingUniformBufferType) {
+			return existingUniformBufferType;
+		} else {
+			UniformBufferType* uniformBufferType = arena->zalloc<UniformBufferType>(1);
+			uniformBufferType->structBase = structType;
+			structType->uniformBufferType = uniformBufferType;
+			uniformBufferType->type.typeClass = TYPE_CLASS_UNIFORM_BUFFER;
+			allTypes.push_back(&uniformBufferType->type);
+			return uniformBufferType;
 		}
 	}
 	SpvId load_val_ptr(Type** resultType, SpvId val, PointerType* type){
@@ -2910,12 +2966,28 @@ struct DSLCompiler {
 								return op_image_fetch(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, params[0], params[1]);
 							} }));
 						}
-						
 					}
 					ImageType* resultType = arena->alloc<ImageType>(1);
 					*resultType = imageType;
 					allTypes.push_back(&resultType->type);
 					allScopes.data[0].typeNameToType.insert(name, &resultType->type);
+
+					randomImageType = resultType;
+
+					SpvId* argTypes = arena->alloc<SpvId>(1);
+					argTypes[0] = defaultTypeU32->id;
+					ProcedureType signature{ ProcedureIdentifier{ stracat(*arena, name, ".<init>"a), argTypes, 1}, &resultType->type};
+					allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+						SpvId imagePtr = op_untyped_access_chain_khr(codeOutput, compiler.untypedPointerUniformConstantTypeId, compiler.nextSpvId++, compiler.placeholderImageArrayTypeId, compiler.resourceHeap, &params[0], 1);
+						return op_load(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, imagePtr, nullptr, 0);
+					} }));
+					argTypes = arena->alloc<SpvId>(1);
+					argTypes[0] = defaultTypeI32->id;
+					signature = ProcedureType{ ProcedureIdentifier{ stracat(*arena, name, ".<init>"a), argTypes, 1}, &resultType->type};
+					allScopes.data[0].procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {
+						SpvId imagePtr = op_untyped_access_chain_khr(codeOutput, compiler.untypedPointerUniformConstantTypeId, compiler.nextSpvId++, compiler.placeholderImageArrayTypeId, compiler.resourceHeap, &params[0], 1);
+						return op_load(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, imagePtr, nullptr, 0);
+					} }));
 
 					foundType = &resultType->type;
 				}
@@ -3139,6 +3211,7 @@ struct DSLCompiler {
 	void type_checking_bytecode_to_spirv() {
 		ArenaArrayList<SpvId> callArgs{ arena };
 		ArenaArrayList<SpvId> callTypes{ arena };
+		ArenaArrayList<Type*> callTypePtrs{ arena };
 		ArenaArrayList<SpvDword> memoryOperandArgs{ arena };
 		ArenaArrayList<VarDeclaration> varDeclarations{ arena };
 		callArgs.reserve(64);
@@ -3790,7 +3863,7 @@ struct DSLCompiler {
 				case TC_OP_SUBSCRIPT: {
 					TCOp& toCall = tcCode.data[op->extendedOperands[0]];
 					U32 numArgs = op->extendedOperandsLength - 1;
-					Type* calledType = load_type(tcCode.data[op->extendedOperands[0]]);
+					Type* calledType = load_type(toCall);
 					if (op->opcode == TC_OP_SUBSCRIPT && calledType) {
 						if (numArgs > 1) {
 							generation_error("Array declaration must not have more than one size"a, *op);
@@ -3822,6 +3895,34 @@ struct DSLCompiler {
 						op->variable->type = calledType;
 						op->variable->id = argId;
 						break;
+					}
+					if (op->opcode == TC_OP_CALL && toCall.opcode == TC_OP_IDENTIFIER && toCall.vIdentifier == "UniformBuffer"a) {
+						Type* type = load_type(tcCode.data[op->extendedOperands[1]]);
+						if (!type) {
+							generation_error("Uniform buffer must have underlying struct type"a, *op);
+							break;
+						}
+						if (type->typeClass != TYPE_CLASS_STRUCT) {
+							generation_error("Uniform buffer construction requires a struct"a, *op);
+							break;
+						}
+						op->resultValueClass = VALUE_CLASS_TYPE;
+						op->type = &get_uniform_buffer_for((StructType*)type)->type;
+						break;
+					}
+					if (op->opcode == TC_OP_CALL && calledType && calledType->typeClass == TYPE_CLASS_UNIFORM_BUFFER) {
+						Type* arg1Type;
+						SpvId heapIdx = load_val(&arg1Type, tcCode.data[op->extendedOperands[1]]);
+						if (arg1Type && arg1Type == defaultTypeU32) {
+							PointerType* resultPtrType = get_pointer_to(&((UniformBufferType*)calledType)->structBase->type, STORAGE_CLASS_UNIFORM);
+							SpvId buffer = op_untyped_access_chain_khr(procedureSpvCode, untypedPointerUniformConstantTypeId, nextSpvId++, placeholderBufferArrayTypeId, resourceHeap, &heapIdx, 1);
+							SpvId bufferPtr = op_buffer_pointer_ext(procedureSpvCode, resultPtrType->type.id, nextSpvId++, buffer);
+							op->resultValueClass = VALUE_CLASS_RUNTIME_VALUE;
+							op->variable = arena->zalloc<Variable>(1);
+							op->variable->type = &resultPtrType->type;
+							op->variable->id = bufferPtr;
+							break;
+						}
 					}
 
 					U32 namedVarScope = U32_MAX;
@@ -4102,16 +4203,8 @@ struct DSLCompiler {
 				} break;
 				case TC_OP_DECLARE: {
 					TCOp& typeTCOp = tcCode.data[op->extendedOperands[0]];
-					Type* type = nullptr;
-					if (typeTCOp.resultValueClass == VALUE_CLASS_TYPE) {
-						type = typeTCOp.type;
-					} else if (typeTCOp.opcode == TC_OP_IDENTIFIER) {
-						type = allScopes.data[currentScope].find_type(allScopes.data, typeTCOp.vIdentifier);
-						if (!type) {
-							generation_error(strafmt(*arena, "No type exists with name: %"a, typeTCOp.vIdentifier), typeTCOp);
-							break;
-						}
-					} else {
+					Type* type = load_type(typeTCOp);
+					if (!type) {
 						generation_error("Could not resolve type for object creation"a, typeTCOp);
 						break;
 					}
@@ -4120,8 +4213,10 @@ struct DSLCompiler {
 					U32 argsLength = op->extendedOperandsLength - 2;
 					callArgs.clear();
 					callTypes.clear();
+					callTypePtrs.clear();
 					callArgs.reserve(argsLength);
 					callTypes.reserve(argsLength);
+					callTypePtrs.reserve(argsLength);
 					for (U32 i = 0; i < argsLength; i++) {
 						TCOp& arg = tcCode.data[args[i]];
 						Type* spvType = nullptr;
@@ -4129,8 +4224,17 @@ struct DSLCompiler {
 						if (spvArg != SPV_NULL_ID) {
 							callArgs.push_back(spvArg);
 							callTypes.push_back(spvType->id);
+							callTypePtrs.push_back(spvType);
 						} else {
 							generation_error("Constituent must be a value"a, arg);
+						}
+					}
+					if (type->typeClass == TYPE_CLASS_POINTER && callArgs.size == 1 && callTypePtrs.data[0]->typeClass == TYPE_CLASS_POINTER) {
+						// Storage class type inference because I couldn't figure out a smooth way to handle this otherwise.
+						PointerType* declaredType = (PointerType*)type;
+						PointerType* assignedType = (PointerType*)callTypePtrs.data[0];
+						if (declaredType->pointedAt == assignedType->pointedAt) {
+							type = &assignedType->type;
 						}
 					}
 					//TODO handle array init
@@ -4441,6 +4545,8 @@ struct DSLCompiler {
 
 		op_capability(finalCode, CAPABILITY_SHADER);
 		op_capability(finalCode, CAPABILITY_VULKAN_MEMORY_MODEL);
+		op_capability(finalCode, CAPABILITY_DESCRIPTOR_HEAP_EXT);
+		op_capability(finalCode, CAPABILITY_UNTYPED_POINTERS_KHR);
 		if (enabledExtensions.multiview)                           op_capability(finalCode, CAPABILITY_MULTIVIEW);
 		if (enabledExtensions.physicalStorageBuffer)               op_capability(finalCode, CAPABILITY_PHYSICAL_STORAGE_BUFFER_ADDRESSES);
 		if (enabledExtensions.runtimeDescriptorArray)              op_capability(finalCode, CAPABILITY_RUNTIME_DESCRIPTOR_ARRAY);
@@ -4449,6 +4555,8 @@ struct DSLCompiler {
 		if (enabledExtensions.demoteToHelperInvocation)            op_capability(finalCode, CAPABILITY_DEMOTE_TO_HELPER_INVOCATION);
 		if (enabledExtensions.storageImageExtendedFormats)         op_capability(finalCode, CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS);
 
+		op_extension(finalCode, "SPV_KHR_untyped_pointers"a);
+		op_extension(finalCode, "SPV_EXT_descriptor_heap"a);
 		if (enabledExtensions.multiview) op_extension(finalCode, "SPV_KHR_multiview"a);
 
 		op_ext_inst_import(finalCode, glsl450InstructionSet, "GLSL.std.450"a);
@@ -4457,14 +4565,17 @@ struct DSLCompiler {
 
 		for (ShaderEntrypoint& entry : entrypoints) {
 			ShaderSection& shaderSection = shaderSections.data[entry.shaderSectionIdx];
-			if (shaderSection.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE) {
+			if (shaderSection.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE || shaderSection.shaderType == SHADER_TYPE_NONE) {
 				continue;
 			}
-			SpvId* globalVarIds = arena->alloc<U32>(shaderSection.globals.size);
-			for (U32 i = 0; i < shaderSection.globals.size; i++) {
+			SpvId* globalVarIds = arena->alloc<U32>(shaderSection.globals.size + 2);
+			U32 i = 0;
+			for (; i < shaderSection.globals.size; i++) {
 				globalVarIds[i] = shaderSection.globals.data[i].var->id;
 			}
-			op_entry_point(finalCode, entry.executionModel, entry.id, entry.name, globalVarIds, shaderSection.globals.size);
+			globalVarIds[i++] = samplerHeap;
+			globalVarIds[i++] = resourceHeap;
+			op_entry_point(finalCode, entry.executionModel, entry.id, entry.name, globalVarIds, shaderSection.globals.size + 2);
 		}
 
 		for (ShaderEntrypoint& entry : entrypoints) {
@@ -4563,8 +4674,15 @@ struct DSLCompiler {
 				op_decorate(finalCode, var->id, DECORATION_LOCATION, &decoratedLocation, 1);
 			}
 		}
+		U32 builtInResourceHeap = BUILTIN_RESOURCE_HEAP_EXT;
+		U32 builtInSamplerHeap = BUILTIN_SAMPLER_HEAP_EXT;
+		op_decorate(finalCode, resourceHeap, DECORATION_BUILTIN, &builtInResourceHeap, 1);
+		op_decorate(finalCode, samplerHeap, DECORATION_BUILTIN, &builtInSamplerHeap, 1);
+		op_decorate_id(finalCode, placeholderImageArrayTypeId, DECORATION_ARRAY_STRIDE_ID_EXT, &resourceDescriptorSizeId, 1);
+		op_decorate_id(finalCode, placeholderBufferArrayTypeId, DECORATION_ARRAY_STRIDE_ID_EXT, &resourceDescriptorSizeId, 1);
 
 		// Type declarations, constants, global variables here
+		emit_type_definition(finalCode, defaultTypeVoid);
 		emit_type_definition(finalCode, defaultTypeBool);
 		emit_type_definition(finalCode, defaultTypeI32);
 		emit_type_definition(finalCode, defaultTypeU32);
@@ -4592,9 +4710,26 @@ struct DSLCompiler {
 			default: generation_error("Supposed literal did not have literal type"a, constantOp); break;
 			}
 		}
-
 		for (Type* type : allTypes) {
 			emit_type_definition(finalCode, type);
+		}
+		{ // Types for descriptor heap arrays
+			if (randomImageType) {
+				placeholderImageTypeId = randomImageType->type.id;
+			} else {
+				op_type_image(finalCode, placeholderImageTypeId, defaultTypeU32->id, DIMENSIONALITY_2D, 2, 0, 0, 1, IMAGE_FORMAT_UNKNOWN);
+			}
+			op_type_buffer_ext(finalCode, placeholderUniformBufferTypeId, STORAGE_CLASS_UNIFORM);
+			op_constant_size_of_ext(finalCode, defaultTypeU32->id, imageDescriptorSizeId, placeholderImageTypeId);
+			op_constant_size_of_ext(finalCode, defaultTypeU32->id, bufferDescriptorSizeId, placeholderUniformBufferTypeId);
+			U32 greaterOp[]{ imageDescriptorSizeId, bufferDescriptorSizeId };
+			op_spec_constant_op(finalCode, defaultTypeBool->id, imageDescriptorIsBiggerId, 172, greaterOp, ARRAY_COUNT(greaterOp));
+			U32 selectOp[]{ imageDescriptorIsBiggerId, imageDescriptorSizeId, bufferDescriptorSizeId };
+			op_spec_constant_op(finalCode, defaultTypeU32->id, resourceDescriptorSizeId, 169, selectOp, ARRAY_COUNT(selectOp));
+			op_type_runtime_array(finalCode, placeholderImageArrayTypeId, placeholderImageTypeId);
+			op_type_runtime_array(finalCode, placeholderBufferArrayTypeId, placeholderUniformBufferTypeId);
+			op_type_untyped_pointer_khr(finalCode, untypedPointerUniformConstantTypeId, STORAGE_CLASS_UNIFORM_CONSTANT);
+			op_type_untyped_pointer_khr(finalCode, untypedPointerUniformTypeId, STORAGE_CLASS_UNIFORM);
 		}
 		SpvId twoU32TypeMembers[2]{ defaultTypeU32->id, defaultTypeU32->id };
 		op_type_struct(finalCode, twoU32StructTypeId, twoU32TypeMembers, 2);
@@ -4607,6 +4742,9 @@ struct DSLCompiler {
 			}
 			op_type_function(finalCode, procedureTypeToSpvId.values[i], key.returnType->id, key.identifier.argTypes, key.identifier.numArgs);
 		}
+
+		op_untyped_variable_khr(finalCode, untypedPointerUniformConstantTypeId, resourceHeap, STORAGE_CLASS_UNIFORM_CONSTANT);
+		op_untyped_variable_khr(finalCode, untypedPointerUniformConstantTypeId, samplerHeap, STORAGE_CLASS_UNIFORM_CONSTANT);
 		for (ShaderSection& section : shaderSections) {
 			if (section.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE) {
 				continue;

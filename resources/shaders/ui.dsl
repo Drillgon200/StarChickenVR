@@ -10,17 +10,14 @@ struct Vertex {
 	U32 flags;
 };
 
-[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &DrawData drawData;
-[push_constant, block] &struct {
-	U32 transformIdx;
-	I32 verticesOffset;
-} modelData;
+[push_constant, block] &DrawPushData pushData;
 
 [input, builtin VertexIndex] &I32 vertexIndex;
 [output, builtin Position] &V4F outPosition;
 
 [entrypoint] @[][] vert_main {
-	&Vertex vertexBuffer{ (&Vertex)(v2u_u64_add(drawData.pUIVertices, U32(modelData.verticesOffset))) };
+	&DrawData drawData{ UniformBuffer(DrawData)(pushData.drawSet.drawDataUniformBuffer) };
+	&Vertex vertexBuffer{ (&Vertex)(v2u_u64_add(drawData.pUIVertices, U32(pushData.drawConstants.verticesOffset))) };
 	Vertex vert{ vertexBuffer[^vertexIndex] };
 	^pos = vert.pos.xy;
 	^texcoord = vert.tex;
@@ -45,9 +42,6 @@ struct Vertex {
 
 #shader fragment
 
-[uniform, set 0, binding 0] &Sampler bilinearSampler;
-[uniform, set 0, binding 6] &Image2DSampled[] textures;
-
 [output, location 0] &V4F fragColor;
 
 @[F32 result][F32 a, F32 b, F32 c] median{
@@ -61,7 +55,8 @@ struct Vertex {
 };
 
 @[V4F result][F32 screenPxRange, V2F coord] sample_color{
-	V4F msdf{ (^textures)[nonuniform ^texidx][^bilinearSampler, coord] };
+	Sampler bilinearSampler{ 0u };
+	V4F msdf{ Image2DSampled(^texidx)[bilinearSampler, coord] };
 	F32 val{ median(msdf.r, msdf.g, msdf.b) };
 	// Setting the cutoff to something a bit smaller makes the font look more bold,
 	// but it also takes care of some artifacts I don't feel like fixing
@@ -86,6 +81,7 @@ struct Vertex {
 		};
 		^fragColor = val;
 	} else {
-		^fragColor = (^textures)[nonuniform ^texidx][^bilinearSampler, ^texcoord] * ^color;
+		Sampler bilinearSampler{ 0u };
+		^fragColor = Image2DSampled(^texidx)[bilinearSampler, ^texcoord] * ^color;
 	};
 };

@@ -72,7 +72,10 @@ void load_resources() {
 	load_dtf(&trowbridgeReitzBRDFLut, "./resources/textures/trowbridge_reitz_lut.dtf"a);
 	load_dtf(&specularCubemap, "./resources/textures/city_specular.dtf"a);
 	load_dtf(&diffuseCubemap, "./resources/textures/city_diffuse.dtf"a);
-	VK::set_pbr_params(specularCubemap.imageView, diffuseCubemap.imageView, trowbridgeReitzBRDFLut.imageView);
+	VK::defaultDrawDescriptorSet.brdfLUT = trowbridgeReitzBRDFLut.index;
+	VK::defaultDrawDescriptorSet.diffuseCubemap = diffuseCubemap.index;
+	VK::defaultDrawDescriptorSet.specularCubemap = specularCubemap.index;
+	VK::hasCubemap = true;
 
 	load_png(&uiIncrementLeft, "resources/textures/ui_increment_left.png"a);
 	load_png(&uiIncrementRight, "resources/textures/ui_increment_right.png"a);

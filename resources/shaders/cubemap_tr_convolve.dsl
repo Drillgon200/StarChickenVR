@@ -1,18 +1,14 @@
 #version 2
 #shader compute
 
-[set 0, binding 0, uniform] &Sampler bilinearSampler;
-[set 0, binding 2, uniform] &ImageCubeSampled inputImageCube;
-[set 0, binding 5, uniform] &ImageU32CubeStorageR32UI[17] outputs;
-
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
 	V2U inputDimensions;
 	V2U outputDimensions;
+	U32 inputImg;
+	U32 outputImg;
 	F32 roughness;
-	U32 outputIdx;
-	U32 inputIdx;
-} pushConstants;
+} pushData;
 
 @[V2F r][U32 i, U32 n] hammersley{
     U32 bits{ i };
@@ -146,8 +142,8 @@
 [entrypoint, localsize 16 16 1] @[][] compute_main{
 	V2U outputCoord{ globalInvocationId.xy };
 	U32 faceIdx{ globalInvocationId.z };
-	V2U inputDim{ pushConstants.inputDimensions };
-	V2U outputDim{ pushConstants.outputDimensions };
+	V2U inputDim{ pushData.inputDimensions };
+	V2U outputDim{ pushData.outputDimensions };
 	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
 		return;
 	};
@@ -174,11 +170,14 @@
 	V3F norm{ dir };
 	V3F eye{ dir };
 
-	F32 roughness{ pushConstants.roughness };
+	F32 roughness{ pushData.roughness };
 	roughness = roughness * roughness;
 
 	// Not accurate for every texel, but the mip level selection doesn't need to be accurate anyway.
 	F32 rcpTexelSolidAngle{ (F32(inputDim.x) * F32(inputDim.y) * 6.0) / (4.0 * 3.1415926535) };
+
+	Sampler bilinearSampler{ 0u };
+	ImageCubeSampled inputCube{ pushData.inputImg };
 
 	V3F color{ 0.0, 0.0, 0.0 };
 	U32 sampleCount{ 16384u };
@@ -213,23 +212,21 @@
 			F32 p{ normal_distribution_trowbridge_reitz(nDotH, roughness) * nDotH / (4.0 * vDotH) };
 			F32 sampleSolidAngle{ 1.0 / max(p * F32(sampleCount), 0.0001) };
 			F32 mipLevel{ 0.5 * log2(sampleSolidAngle * rcpTexelSolidAngle) };
-			color = color + (^inputImageCube)[^bilinearSampler, toLight, mipLevel].rgb * (vDotH / nDotH);
+			color = color + inputCube[bilinearSampler, toLight, mipLevel].rgb * (vDotH / nDotH);
 		};
 	};
 	color = color / F32(sampleCount);
-	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
+	write_image(ImageU32CubeStorageR32UI(pushData.outputImg), V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
 
 	// This code is just for debug visualization, don't mind the potential data races
 	/*
-	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(0u));
+	write_image(ImageU32CubeStorageR32UI(pushData.outputImg), V3U(outputCoord, faceIdx), V4U(0u));
 	for U32 n{ 0 }; n < sampleCount; n = n + 1u {
 		V2F coord{ golden_ratio_grid(n, sampleCount) };
 		coord = quasirandom2d(n);
 		coord = hammersley(n, sampleCount);
 		coord = uniform_grid(n, sampleCount);
-		write_image((^outputs)[pushConstants.outputIdx], V3U(U32(coord.x * F32(outputDim.x)), U32(coord.y * F32(outputDim.y)), faceIdx), V4U(pack_E5B9G9R9(V3F(1.0))));
+		write_image(ImageU32CubeStorageR32UI(pushData.outputImg), V3U(U32(coord.x * F32(outputDim.x)), U32(coord.y * F32(outputDim.y)), faceIdx), V4U(pack_E5B9G9R9(V3F(1.0))));
 	};
 	*/
-	
-	
 };

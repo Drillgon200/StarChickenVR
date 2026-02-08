@@ -161,7 +161,7 @@ struct GPUUploadStager {
 		cpy.imageSubresource.layerCount = arrayLayers;
 		cpy.imageOffset = VkOffset3D{ 0, 0, 0 };
 		cpy.imageExtent = VkExtent3D{ width, height, 1 };
-		VK::vkCmdCopyBufferToImage(stagingBuffer.cmdBuffer, stagingBuffer.uploadBuffer, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cpy);
+		VK::vkCmdCopyBufferToImage(stagingBuffer.cmdBuffer, stagingBuffer.uploadBuffer, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &cpy);
 		stagingBuffer.offset += size;
 		return stagingBuffer.cmdBuffer;
 	}
@@ -173,7 +173,7 @@ struct GPUUploadStager {
 				VkMappedMemoryRange memoryInvalidateRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
 				memoryInvalidateRange.memory = memory;
 				memoryInvalidateRange.offset = VkDeviceSize(currentBufferIdx) * uploadStagingBufferSize;
-				memoryInvalidateRange.size = min<VkDeviceSize>(ALIGN_HIGH(stagingBuffer.offset, VK::physicalDeviceProperties.limits.nonCoherentAtomSize), uploadStagingBufferSize);
+				memoryInvalidateRange.size = min<VkDeviceSize>(ALIGN_HIGH(stagingBuffer.offset, VK::physicalDeviceProperties.properties.limits.nonCoherentAtomSize), uploadStagingBufferSize);
 				CHK_VK(VK::vkFlushMappedMemoryRanges(VK::logicalDevice, 1, &memoryInvalidateRange));
 			}
 

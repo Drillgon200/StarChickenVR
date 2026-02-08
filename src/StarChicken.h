@@ -133,15 +133,18 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 
 		{ // Compute skinning
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipeline);
-			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 			for (Level::SkeletalModel* model : Level::level.skeletalModels) {
-				VKGeometry::GPUSkinnedModel gpuSkinnedModelData;
-				gpuSkinnedModelData.matricesOffset = model->skeletonMatrixOffset;
-				gpuSkinnedModelData.vertexOffset = model->mesh->geometry.verticesOffset;
-				gpuSkinnedModelData.skinnedVerticesOffset = model->skinnedVerticesOffset;
-				gpuSkinnedModelData.skinningDataOffset = model->mesh->skinningDataOffset;
-				gpuSkinnedModelData.vertexCount = model->mesh->geometry.verticesCount;
-				VK::vkCmdPushConstants(cmdBuf, VK::skinningPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel), &gpuSkinnedModelData);
+				VKGeometry::GPUSkinningPushData skinningPushData{
+					.model = VKGeometry::GPUSkinnedModel{
+						.matricesOffset = model->skeletonMatrixOffset,
+						.vertexOffset = model->mesh->geometry.verticesOffset,
+						.skinnedVerticesOffset = model->skinnedVerticesOffset,
+						.skinningDataOffset = model->mesh->skinningDataOffset,
+						.vertexCount = model->mesh->geometry.verticesCount
+					},
+					.drawDataUniformBuffer = VK::defaultDrawDescriptorSet.drawDataUniformBuffer
+				};
+				VK_PUSH_STRUCT(cmdBuf, skinningPushData, 0);
 				VK::vkCmdDispatch(cmdBuf, (model->mesh->geometry.verticesCount + 255) / 256, 1, 1);
 			}
 
@@ -156,9 +159,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
 		}
 
-		VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-		VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-		VK::img_barrier(cmdBuf, VK::attachments.depth.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_NONE, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+		VK::img_init_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		VK::img_init_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+		VK::img_init_barrier(cmdBuf, VK::attachments.depth.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
 		VkRenderingInfoKHR renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO_KHR };
 		renderingInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ VK::attachments.mainWidth, VK::attachments.mainHeight } };
@@ -169,7 +172,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		VkRenderingAttachmentInfo& colorAttachment = colorAttachments[0];
 		colorAttachment = VkRenderingAttachmentInfo{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
 		colorAttachment.imageView = VK::attachments.color.imgView;
-		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		colorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -177,7 +180,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		VkRenderingAttachmentInfo& idAttachment = colorAttachments[1];
 		idAttachment = VkRenderingAttachmentInfo{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
 		idAttachment.imageView = VK::attachments.objectId.imgView;
-		idAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		idAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		idAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 		idAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		idAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -185,7 +188,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		renderingInfo.pColorAttachments = colorAttachments;
 		VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
 		depthAttachment.imageView = VK::attachments.depth.imgView;
-		depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		depthAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		depthAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -193,28 +196,16 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		renderingInfo.pDepthAttachment = &depthAttachment;
 		VK::vkCmdBeginRenderingKHR(cmdBuf, &renderingInfo);
 
-		VkViewport viewport{};
-		viewport.x = 0.0F;
-		viewport.y = 0.0F;
-		viewport.width = F32(VK::attachments.mainWidth);
-		viewport.height = F32(VK::attachments.mainHeight);
-		viewport.minDepth = 0.0F;
-		viewport.maxDepth = 1.0F;
-		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
-		VkRect2D scissor{};
-		scissor.offset.x = 0;
-		scissor.offset.y = 0;
-		scissor.extent.width = VK::attachments.mainWidth;
-		scissor.extent.height = VK::attachments.mainHeight;
-		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
-		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+		VK::vkCmdSetViewport(cmdBuf, 0, 1, ptr(VkViewport{
+			.x = 0.0F,
+			.y = 0.0F,
+			.width = F32(VK::attachments.mainWidth),
+			.height = F32(VK::attachments.mainHeight),
+			.minDepth = 0.0F,
+			.maxDepth = 1.0F
+		}));
+		VK::vkCmdSetScissor(cmdBuf, 0, 1, ptr(VkRect2D{ .offset = { 0, 0 }, .extent = { VK::attachments.mainWidth, VK::attachments.mainHeight } }));
 
-		if (VK::hasCubemap) {
-			// Fill in background
-			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
-			VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
-		}
-		
 		{ // Draw world geometry
 			if (isInEditorMode) {
 				U32 camIdx = 0;
@@ -225,11 +216,24 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 					}
 					if (camIdx < VK::uniformMatricesHandler.maxCameras) {
 						editor3d->gpuCameraIndex = camIdx;
-						viewport.x = editor3d->viewport.minX;
-						viewport.y = editor3d->viewport.minY;
-						viewport.width = editor3d->viewport.width();
-						viewport.height = editor3d->viewport.height();
-						VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+						VK::vkCmdSetViewport(cmdBuf, 0, 1, ptr(VkViewport{
+							.x = editor3d->viewport.minX,
+							.y = editor3d->viewport.minY,
+							.width = editor3d->viewport.width(),
+							.height = editor3d->viewport.height(),
+							.minDepth = 0.0F,
+							.maxDepth = 1.0F
+						}));
+						if (VK::hasCubemap) {
+							// Fill in background
+							VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
+							VK::BackgroundPushData backgroundPushData{
+								.drawSet = VK::defaultDrawDescriptorSet,
+								.camIdx = editor3d->gpuCameraIndex
+							};
+							VK_PUSH_STRUCT(cmdBuf, backgroundPushData, 0);
+							VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+						}
 						VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 						VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
 						Level::level.draw_models(cmdBuf, camIdx);
@@ -241,6 +245,16 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 					camIdx++;
 				}
 			} else {
+				if (VK::hasCubemap) {
+					// Fill in background
+					VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
+					VK::BackgroundPushData backgroundPushData{
+						.drawSet = VK::defaultDrawDescriptorSet,
+						.camIdx = 0
+					};
+					VK_PUSH_STRUCT(cmdBuf, backgroundPushData, 0);
+					VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+				}
 				VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 				VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
 				Level::level.draw_models(cmdBuf, 0);
@@ -251,24 +265,27 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		VK::vkCmdEndRenderingKHR(cmdBuf); // world render pass
 
 		if (!isInEditorMode) { // Final composite (XR)
-			VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
-			VK::img_barrier(cmdBuf, VK::attachments.composite.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_NONE, VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+			VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+			VK::img_init_barrier(cmdBuf, VK::attachments.composite.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipeline);
-			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipelineLayout, 0, 1, &VK::finalCompositeDescriptorSet.descriptorSet, 0, nullptr);
-			VK::FinalCompositePushConstants compositeConstants{};
+			VK::FinalCompositePushData compositeConstants{};
+			compositeConstants.sceneColor = VK::attachments.color.descriptorIdx;
+			compositeConstants.sceneIds = VK::attachments.objectId.descriptorIdx;
+			compositeConstants.uiColor = VK::attachments.uiColor.descriptorIdx;
+			compositeConstants.compositeOutput = VK::attachments.compositeLinearDescriptor;
 			compositeConstants.activeObjectId = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
 			compositeConstants.outputDimensions = V2U{ VK::attachments.mainWidth, VK::attachments.mainHeight };
-			VK::vkCmdPushConstants(cmdBuf, VK::finalCompositePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(compositeConstants), &compositeConstants);
+			VK_PUSH_STRUCT(cmdBuf, compositeConstants, 0);
 			VK::vkCmdDispatch(cmdBuf, (VK::attachments.mainWidth + 15) / 16, (VK::attachments.mainHeight + 15) / 16, 1);
 		}
 
 		// 2D UI render pass
 		if (isInEditorMode) {
-			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+			VK::img_init_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT);
 		} else {
 			// The UI image will be presented, so we blit a VR view into it as a background image
-			VK::img_barrier(cmdBuf, VK::attachments.composite.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+			VK::img_barrier(cmdBuf, VK::attachments.composite.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+			VK::img_init_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 			// Try to fit XR dimensions to desktop dimensions
 			V2F middle{ F32(VK::attachments.mainWidth) * 0.5F, F32(VK::attachments.mainHeight) * 0.5F };
 			V2F blitSourceExtent = V2F{ F32(VK::attachments.uiWidth) * 0.5F, F32(VK::attachments.uiHeight) * 0.5F };
@@ -277,9 +294,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 						   VK::attachments.composite.img, Rng2I32{ max(I32(middle.x - blitSourceExtent.x), 0), max(I32(middle.y - blitSourceExtent.y), 0), min(I32(middle.x + blitSourceExtent.x), I32(VK::attachments.mainWidth)), min(I32(middle.y + blitSourceExtent.y), I32(VK::attachments.mainHeight)) },
 						   VK::attachments.uiColor.img, Rng2I32{ 0, 0, I32(VK::attachments.uiWidth), I32(VK::attachments.uiHeight) },
 						   1, VK_FILTER_NEAREST, VK_IMAGE_ASPECT_COLOR_BIT);
-			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT);
 		}
-		VK::img_barrier(cmdBuf, VK::attachments.uiDepth.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_NONE, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+		VK::img_init_barrier(cmdBuf, VK::attachments.uiDepth.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
 		renderingInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ VK::attachments.uiWidth, VK::attachments.uiHeight } };
 		renderingInfo.layerCount = 1;
@@ -287,7 +304,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		renderingInfo.colorAttachmentCount = 1;
 		VkRenderingAttachmentInfo uiColorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
 		uiColorAttachment.imageView = VK::attachments.uiColor.imgView;
-		uiColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		uiColorAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		uiColorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 		uiColorAttachment.loadOp = isInEditorMode ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 		uiColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -295,7 +312,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		renderingInfo.pColorAttachments = &uiColorAttachment;
 		VkRenderingAttachmentInfo uiDepthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
 		uiDepthAttachment.imageView = VK::attachments.uiDepth.imgView;
-		uiDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		uiDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		uiDepthAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 		uiDepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		uiDepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -303,17 +320,15 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		renderingInfo.pDepthAttachment = &uiDepthAttachment;
 		VK::vkCmdBeginRenderingKHR(cmdBuf, &renderingInfo);
 		
-		scissor.offset.x = 0;
-		scissor.offset.y = 0;
-		scissor.extent.width = VK::attachments.uiWidth;
-		scissor.extent.height = VK::attachments.uiHeight;
-		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
-		viewport.x = 0.0F;
-		viewport.y = 0.0F;
-		viewport.width = F32(VK::attachments.uiWidth);
-		viewport.height = F32(VK::attachments.uiHeight);
-		VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
-		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+		VK::vkCmdSetViewport(cmdBuf, 0, 1, ptr(VkViewport{
+			.x = 0.0F,
+			.y = 0.0F,
+			.width = F32(VK::attachments.uiWidth),
+			.height = F32(VK::attachments.uiHeight),
+			.minDepth = 0.0F,
+			.maxDepth = 1.0F
+		}));
+		VK::vkCmdSetScissor(cmdBuf, 0, 1, ptr(VkRect2D{ .offset = { 0, 0 }, .extent = { VK::attachments.uiWidth, VK::attachments.uiHeight } }));
 		UI::draw();
 		Rng1I32 uiTessellatorPass = tes.end_draw_set();
 		tes.draw(uiTessellatorPass, 0);
@@ -323,20 +338,23 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		tes.end_frame();
 
 		if (isInEditorMode) { // Final composite (editor)
-			VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+			VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+			VK::img_barrier(cmdBuf, VK::attachments.uiColor.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipeline);
-			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::finalCompositePipelineLayout, 0, 1, &VK::finalCompositeDescriptorSet.descriptorSet, 0, nullptr);
-			VK::FinalCompositePushConstants compositeConstants{};
+			VK::FinalCompositePushData compositeConstants{};
+			compositeConstants.sceneColor = VK::attachments.color.descriptorIdx;
+			compositeConstants.sceneIds = VK::attachments.objectId.descriptorIdx;
+			compositeConstants.uiColor = VK::attachments.uiColor.descriptorIdx;
+			compositeConstants.compositeOutput = VK::attachments.uiColorLinearDescriptor;
 			compositeConstants.activeObjectId = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
 			compositeConstants.outputDimensions = V2U{ VK::attachments.uiWidth, VK::attachments.uiHeight };
-			VK::vkCmdPushConstants(cmdBuf, VK::finalCompositePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(compositeConstants), &compositeConstants);
+			VK_PUSH_STRUCT(cmdBuf, compositeConstants, 0);
 			VK::vkCmdDispatch(cmdBuf, (VK::attachments.uiWidth + 15) / 16, (VK::attachments.uiHeight + 15) / 16, 1);
 		}
 
 		if (isInEditorMode) { // Object ID readback
-			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 			VkBufferImageCopy region{};
 			region.bufferOffset = 0;
 			region.bufferRowLength = 0; // Tightly packed
@@ -347,8 +365,8 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			region.imageSubresource.layerCount = 1;
 			region.imageOffset = VkOffset3D{ 0, 0, 0 };
 			region.imageExtent = VkExtent3D{ VK::attachments.mainWidth, VK::attachments.mainHeight, 1 };
-			VK::vkCmdCopyImageToBuffer(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK::attachments.objectIdReadbackBuffer.buffer, 1, &region);
-			VK::img_barrier(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+			VK::vkCmdCopyImageToBuffer(cmdBuf, VK::attachments.objectId.img, VK_IMAGE_LAYOUT_GENERAL, VK::attachments.objectIdReadbackBuffer.buffer, 1, &region);
+			VK::buffer_barrier(cmdBuf, VK::attachments.objectIdReadbackBuffer.buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
 		}
 	}
 

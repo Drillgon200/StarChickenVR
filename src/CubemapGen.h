@@ -16,27 +16,58 @@ VK::DedicatedBuffer imageCPUBuffer;
 
 // The base cubemap, downsampled with the typical 2x2 box filter
 VkImage cubeImg;
-VkImageView cubeU32ImgViews[VK::MAX_MIP_LEVEL];
-VkImageView cubeRGBImgView;
-VkImageView cubeArrayRGBImgView;
+U32 cubeU32ImgDescriptors[VK::MAX_MIP_LEVEL];
+U32 cubeRGBImgDescriptor;
+U32 cubeArrayRGBImgDescriptor;
 
 // Convolved with the Trowbridge-Reitz BRDF
 VkImage cubeTRConvImg;
-VkImageView cubeTRConvU32ImgViews[VK::MAX_MIP_LEVEL];
-VkImageView cubeTRConvRGBImgView;
+U32 cubeTRConvU32ImgDescriptors[VK::MAX_MIP_LEVEL];
+U32 cubeTRConvRGBImgDescriptor;
 
 // Convolved with a simple cosine hemisphere weight for lambert shading
 // I couldn't find a good way to resolve Oren Nayar's view dependence, and it goes to lambert when view == normal anyway 
 VkImage cubeCosConvImg;
-VkImageView cubeCosConvU32ImgView;
-VkImageView cubeCosConvRGBImgView;
+U32 cubeCosConvU32ImgDescriptor;
+U32 cubeCosConvRGBImgDescriptor;
 
 VkImage trLUTImg;
-VkImageView trLUTImgView;
+U32 trLUTImgDescriptor;
 
 VkDeviceMemory equirectImageMemory;
 VkImage equirectImage;
-VkImageView equirectImageView;
+U32 equirectImageDescriptor;
+
+#pragma pack(push, 1)
+struct CubemapFromEquirectPushData {
+	V2U outputDimensions;
+	U32 inputImgEquirect;
+	U32 outputImgCube;
+};
+struct CubeMipGenPushData {
+	V2U outputDimensions;
+	U32 inputCube;
+	U32 inputMipLevel;
+	U32 outputCube;
+};
+struct BRDFLUTPushData {
+	V2U outputDimensions;
+	U32 outputTRLut;
+};
+struct CosConvolvePushData {
+	V2U inputDimensions;
+	V2U outputDimensions;
+	U32 inputImgCube;
+	U32 outputImg;
+};
+struct TRConvolvePushData {
+	V2U inputDimensions;
+	V2U outputDimensions;
+	U32 inputImg;
+	U32 outputImg;
+	F32 roughness;
+};
+#pragma pack(pop)
 
 const U32 CUBEMAP_SPECULAR_RES = 512;
 const U32 CUBEMAP_DIFFUSE_RES = 64;
@@ -70,74 +101,30 @@ void init() {
 		imgInfo.format = VK_FORMAT_R8G8_UNORM;
 		CHK_VK(VK::vkCreateImage(VK::logicalDevice, &imgInfo, nullptr, &trLUTImg));
 
+		ResourceLoading::alloc_and_bind_texture_memory(cubeImg);
+		ResourceLoading::alloc_and_bind_texture_memory(cubeTRConvImg);
+		ResourceLoading::alloc_and_bind_texture_memory(cubeCosConvImg);
+		ResourceLoading::alloc_and_bind_texture_memory(trLUTImg);
 
-		VkMemoryRequirements memoryRequirements;
-		VK::vkGetImageMemoryRequirements(VK::logicalDevice, cubeImg, &memoryRequirements);
-		VkDeviceMemory linearBlock;
-		VkDeviceSize memoryOffset;
-		ResourceLoading::alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
-		CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, cubeImg, linearBlock, memoryOffset));
-
-		VK::vkGetImageMemoryRequirements(VK::logicalDevice, cubeTRConvImg, &memoryRequirements);
-		ResourceLoading::alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
-		CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, cubeTRConvImg, linearBlock, memoryOffset));
-
-		VK::vkGetImageMemoryRequirements(VK::logicalDevice, cubeCosConvImg, &memoryRequirements);
-		ResourceLoading::alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
-		CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, cubeCosConvImg, linearBlock, memoryOffset));
-
-		VK::vkGetImageMemoryRequirements(VK::logicalDevice, trLUTImg, &memoryRequirements);
-		ResourceLoading::alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
-		CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, trLUTImg, linearBlock, memoryOffset));
-
-		VkImageViewCreateInfo imgViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-		imgViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-		imgViewInfo.format = VK_FORMAT_R32_UINT;
-		imgViewInfo.components = VkComponentMapping{ VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
-		imgViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		imgViewInfo.subresourceRange.levelCount = 1;
-		imgViewInfo.subresourceRange.baseArrayLayer = 0;
-		imgViewInfo.subresourceRange.layerCount = 6;
 		for (U32 i = 0; i < cubeMipLevels; i++) {
-			imgViewInfo.subresourceRange.baseMipLevel = i;
-			imgViewInfo.image = cubeImg;
-			CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeU32ImgViews[i]));
-			imgViewInfo.image = cubeTRConvImg;
-			CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeTRConvU32ImgViews[i]));
+			cubeU32ImgDescriptors[i] = VK::descriptorHeap.make_image(cubeImg, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_R32_UINT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, i, 1, 0, 6, 0);
+			cubeTRConvU32ImgDescriptors[i] = VK::descriptorHeap.make_image(cubeTRConvImg, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_R32_UINT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, i, 1, 0, 6, 0);
 		}
-		imgViewInfo.subresourceRange.baseMipLevel = 0;
-		imgViewInfo.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-		imgViewInfo.image = cubeCosConvImg;
-		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeCosConvU32ImgView));
-		imgViewInfo.format = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32;
-		VkImageViewUsageCreateInfo rgbViewUsage{ VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO };
-		rgbViewUsage.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-		imgViewInfo.pNext = &rgbViewUsage;
-		imgViewInfo.image = cubeImg;
-		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeRGBImgView));
-		imgViewInfo.image = cubeTRConvImg;
-		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeTRConvRGBImgView));
-		imgViewInfo.image = cubeCosConvImg;
-		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeCosConvRGBImgView));
-		imgViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-		imgViewInfo.image = cubeImg;
-		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &cubeArrayRGBImgView));
-
-		imgViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imgViewInfo.format = VK_FORMAT_R8G8_UNORM;
-		imgViewInfo.subresourceRange.layerCount = 1;
-		imgViewInfo.pNext = nullptr;
-		imgViewInfo.image = trLUTImg;
-		CHK_VK(VK::vkCreateImageView(VK::logicalDevice, &imgViewInfo, nullptr, &trLUTImgView));
+		cubeCosConvU32ImgDescriptor = VK::descriptorHeap.make_image(cubeCosConvImg, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_R32_UINT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, 0);
+		cubeRGBImgDescriptor = VK::descriptorHeap.make_image(cubeImg, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_E5B9G9R9_UFLOAT_PACK32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 6, VK_IMAGE_USAGE_SAMPLED_BIT);
+		cubeTRConvRGBImgDescriptor = VK::descriptorHeap.make_image(cubeTRConvImg, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_E5B9G9R9_UFLOAT_PACK32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 6, VK_IMAGE_USAGE_SAMPLED_BIT);
+		cubeCosConvRGBImgDescriptor = VK::descriptorHeap.make_image(cubeCosConvImg, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_E5B9G9R9_UFLOAT_PACK32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 6, VK_IMAGE_USAGE_SAMPLED_BIT);
+		cubeArrayRGBImgDescriptor = VK::descriptorHeap.make_image(cubeImg, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_E5B9G9R9_UFLOAT_PACK32, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 6, VK_IMAGE_USAGE_SAMPLED_BIT);
+		trLUTImgDescriptor = VK::descriptorHeap.make_storage_image(trLUTImg, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8_UNORM);
 	}
 
-	VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
-	poolInfo.queueFamilyIndex = VK::graphicsFamily;
-	CHK_VK(VK::vkCreateCommandPool(VK::logicalDevice, &poolInfo, nullptr, &convolveCommandPool));
-	VkCommandBufferAllocateInfo cmdBufInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-	cmdBufInfo.commandPool = convolveCommandPool;
-	cmdBufInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	cmdBufInfo.commandBufferCount = 1;
+	CHK_VK(VK::vkCreateCommandPool(VK::logicalDevice, ptr(VkCommandPoolCreateInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = VK::graphicsFamily }), nullptr, &convolveCommandPool));
+	VkCommandBufferAllocateInfo cmdBufInfo{
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.commandPool = convolveCommandPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
 	CHK_VK(VK::vkAllocateCommandBuffers(VK::logicalDevice, &cmdBufInfo, &convolveCmdBuf));
 
 	VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -147,17 +134,6 @@ void init() {
 void destroy() {
 	VK::vkDestroyFence(VK::logicalDevice, convolveCompleteFence, nullptr);
 	VK::vkDestroyCommandPool(VK::logicalDevice, convolveCommandPool, nullptr);
-	U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
-	for (U32 i = 0; i < cubeMipLevels; i++) {
-		VK::vkDestroyImageView(VK::logicalDevice, cubeU32ImgViews[i], nullptr);
-		VK::vkDestroyImageView(VK::logicalDevice, cubeTRConvU32ImgViews[i], nullptr);
-	}
-	VK::vkDestroyImageView(VK::logicalDevice, cubeCosConvU32ImgView, nullptr);
-	VK::vkDestroyImageView(VK::logicalDevice, cubeRGBImgView, nullptr);
-	VK::vkDestroyImageView(VK::logicalDevice, cubeTRConvRGBImgView, nullptr);
-	VK::vkDestroyImageView(VK::logicalDevice, cubeArrayRGBImgView, nullptr);
-	VK::vkDestroyImageView(VK::logicalDevice, cubeCosConvRGBImgView, nullptr);
-	VK::vkDestroyImageView(VK::logicalDevice, trLUTImgView, nullptr);
 	VK::vkDestroyImage(VK::logicalDevice, cubeImg, nullptr);
 	VK::vkDestroyImage(VK::logicalDevice, cubeTRConvImg, nullptr);
 	VK::vkDestroyImage(VK::logicalDevice, cubeCosConvImg, nullptr);
@@ -176,7 +152,7 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 			U32 height = 512;
 			if (width * height * 4 * 4 >= imageCPUBuffer.capacity) {
 				imageCPUBuffer.destroy();
-				imageCPUBuffer.create(width * height * 4 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostMemoryTypeIndex);
+				imageCPUBuffer.create(width * height * 4 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::hostCachedMemoryTypeIndex);
 			}
 			{ // Create source image
 				VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -200,264 +176,98 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 				CHK_VK(vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &equirectImageMemory));
 				CHK_VK(vkBindImageMemory(logicalDevice, equirectImage, equirectImageMemory, 0));
 
-				VkImageViewCreateInfo imgViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-				imgViewInfo.image = equirectImage;
-				imgViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-				imgViewInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-				imgViewInfo.components = VkComponentMapping{ VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
-				imgViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-				imgViewInfo.subresourceRange.baseMipLevel = 0;
-				imgViewInfo.subresourceRange.levelCount = 1;
-				imgViewInfo.subresourceRange.baseArrayLayer = 0;
-				imgViewInfo.subresourceRange.layerCount = 1;
-				CHK_VK(vkCreateImageView(logicalDevice, &imgViewInfo, nullptr, &equirectImageView));
+				equirectImageDescriptor = descriptorHeap.make_sampled_image(equirectImage, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT);
 			}
 
-			{ // Update descriptor set
-				VkWriteDescriptorSet write[5 + MAX_MIP_LEVEL * 3];
-				U32 writeCount = 0;
-				VkWriteDescriptorSet& samplerWrite = write[writeCount++];
-				samplerWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-				samplerWrite.dstSet = cubemapConvolveDescriptorSet.descriptorSet;
-				samplerWrite.dstBinding = 0; // binding 0 is bilinear sampler
-				samplerWrite.descriptorCount = 1;
-				samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-				VkDescriptorImageInfo samplerInfo{};
-				samplerInfo.sampler = linearSampler;
-				samplerWrite.pImageInfo = &samplerInfo;
-
-				VkWriteDescriptorSet& equirectWrite = write[writeCount++];
-				equirectWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-				equirectWrite.dstSet = cubemapConvolveDescriptorSet.descriptorSet;
-				equirectWrite.dstBinding = 3; // binding 3 is equirect input
-				equirectWrite.descriptorCount = 1;
-				equirectWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-				VkDescriptorImageInfo equirectImageInfo;
-				equirectImageInfo.sampler = VK_NULL_HANDLE;
-				equirectImageInfo.imageView = equirectImageView;
-				equirectImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				equirectWrite.pImageInfo = &equirectImageInfo;
-
-				VkWriteDescriptorSet& cubeInputWrite = write[writeCount++];
-				cubeInputWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-				cubeInputWrite.dstSet = cubemapConvolveDescriptorSet.descriptorSet;
-				cubeInputWrite.dstBinding = 2; // binding 2 is cube input
-				cubeInputWrite.descriptorCount = 1;
-				cubeInputWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-				VkDescriptorImageInfo cubeImageInfo{};
-				cubeImageInfo.imageView = cubeRGBImgView;
-				cubeImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-				cubeInputWrite.pImageInfo = &cubeImageInfo;
-
-				VkWriteDescriptorSet& arrayLayersInputWrite = write[writeCount++];
-				arrayLayersInputWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-				arrayLayersInputWrite.dstSet = cubemapConvolveDescriptorSet.descriptorSet;
-				arrayLayersInputWrite.dstBinding = 4; // binding 4 is cube array layers input
-				arrayLayersInputWrite.descriptorCount = 1;
-				arrayLayersInputWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-				VkDescriptorImageInfo arrayLayersImageInfo{};
-				arrayLayersImageInfo.imageView = cubeArrayRGBImgView;
-				arrayLayersImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-				arrayLayersInputWrite.pImageInfo = &arrayLayersImageInfo;
-				
-				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
-				VkDescriptorImageInfo cubeMipInfo[MAX_MIP_LEVEL]{};
-				VkDescriptorImageInfo cubeTRConvMipInfo[MAX_MIP_LEVEL]{};
-				VkDescriptorImageInfo cubeEONConvMipInfo[MAX_MIP_LEVEL]{};
-				for (U32 i = 0; i < cubeMipLevels; i++) {
-					VkWriteDescriptorSet& cubeMipWrite = write[writeCount++];
-					cubeMipWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-					cubeMipWrite.dstSet = cubemapConvolveDescriptorSet.descriptorSet;
-					cubeMipWrite.dstBinding = 1; // binding 1 is mip output
-					cubeMipWrite.dstArrayElement = i;
-					cubeMipWrite.descriptorCount = 1;
-					cubeMipWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-					
-					cubeMipInfo[i].imageView = cubeU32ImgViews[i];
-					cubeMipInfo[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-					cubeMipWrite.pImageInfo = &cubeMipInfo[i];
-
-					VkWriteDescriptorSet& cubeTRConvMipWrite = write[writeCount++];
-					cubeTRConvMipWrite = cubeMipWrite;
-					cubeTRConvMipWrite.dstBinding = 5; // binding 5 is convolution output
-					cubeTRConvMipInfo[i].imageView = cubeTRConvU32ImgViews[i];
-					cubeTRConvMipInfo[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-					cubeTRConvMipWrite.pImageInfo = &cubeTRConvMipInfo[i];
-
-					VkWriteDescriptorSet& cubeEONConvMipWrite = write[writeCount++];
-					cubeEONConvMipWrite = cubeMipWrite;
-					cubeEONConvMipWrite.dstBinding = 6; // binding 6 is EON convolution output
-					cubeEONConvMipInfo[i].imageView = cubeCosConvU32ImgView;
-					cubeEONConvMipInfo[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-					cubeEONConvMipWrite.pImageInfo = &cubeEONConvMipInfo[i];
-				}
-
-				VkWriteDescriptorSet& trLutWrite = write[writeCount++];
-				trLutWrite = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-				trLutWrite.dstSet = cubemapConvolveDescriptorSet.descriptorSet;
-				trLutWrite.dstBinding = 7; // binding 7 is tr LUT output
-				trLutWrite.descriptorCount = 1;
-				trLutWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-				VkDescriptorImageInfo trLutImageInfo{};
-				trLutImageInfo.imageView = trLUTImgView;
-				trLutImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-				trLutWrite.pImageInfo = &trLutImageInfo;
-
-				vkUpdateDescriptorSets(logicalDevice, writeCount, write, 0, nullptr);
-			}
+			CHK_VK(vkBeginCommandBuffer(convolveCmdBuf, ptr(VkCommandBufferBeginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT })));
 			
-			VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-			beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-			CHK_VK(vkBeginCommandBuffer(convolveCmdBuf, &beginInfo));
+			img_init_barrier(convolveCmdBuf, equirectImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+			img_init_barrier(convolveCmdBuf, cubeImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+			img_init_barrier(convolveCmdBuf, cubeTRConvImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+			img_init_barrier(convolveCmdBuf, cubeCosConvImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
+			img_init_barrier(convolveCmdBuf, trLUTImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
 
-			
-			{ // Transition image layouts
-				VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-				barrier.srcAccessMask = VK_ACCESS_NONE_KHR;
-				barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-				barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-				barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-				barrier.srcQueueFamilyIndex = graphicsFamily;
-				barrier.dstQueueFamilyIndex = graphicsFamily;
-				barrier.image = equirectImage;
-				barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-				barrier.subresourceRange.baseMipLevel = 0;
-				barrier.subresourceRange.levelCount = 1;
-				barrier.subresourceRange.baseArrayLayer = 0;
-				barrier.subresourceRange.layerCount = 1;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-				barrier.srcAccessMask = VK_ACCESS_NONE_KHR;
-				barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-				barrier.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-				barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-				barrier.image = cubeImg;
-				barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-				barrier.subresourceRange.layerCount = 6;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-				barrier.image = cubeTRConvImg;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-				barrier.image = cubeCosConvImg;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-				barrier.subresourceRange.layerCount = 1;
-				barrier.image = trLUTImg;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-			}
 			{ // Copy equirect to GPU
 				memcpy(imageCPUBuffer.mapping, data, width * height * 4 * sizeof(F32));
 				imageCPUBuffer.invalidate_mapped();
-				VkBufferImageCopy copy{};
-				copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-				copy.imageSubresource.mipLevel = 0;
-				copy.imageSubresource.baseArrayLayer = 0;
-				copy.imageSubresource.layerCount = 1;
-				copy.imageExtent = VkExtent3D{ width, height, 1 };
-				vkCmdCopyBufferToImage(convolveCmdBuf, imageCPUBuffer.buffer, equirectImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-				VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-				barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-				barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-				barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-				barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				barrier.srcQueueFamilyIndex = graphicsFamily;
-				barrier.dstQueueFamilyIndex = graphicsFamily;
-				barrier.image = equirectImage;
-				barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-				barrier.subresourceRange.baseMipLevel = 0;
-				barrier.subresourceRange.levelCount = 1;
-				barrier.subresourceRange.baseArrayLayer = 0;
-				barrier.subresourceRange.layerCount = 1;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+				VkBufferImageCopy copy{
+					.imageSubresource = VkImageSubresourceLayers{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.mipLevel = 0,
+						.baseArrayLayer = 0,
+						.layerCount = 1
+					},
+					.imageExtent = VkExtent3D{ width, height, 1 }
+				};
+				vkCmdCopyBufferToImage(convolveCmdBuf, imageCPUBuffer.buffer, equirectImage, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
+				img_barrier(convolveCmdBuf, equirectImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 			}
 
-			vkCmdBindDescriptorSets(convolveCmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, cubemapComputePipelineLayout, 0, 1, &cubemapConvolveDescriptorSet.descriptorSet, 0, nullptr);
 			{ // Copy base from equirect
 				vkCmdBindPipeline(convolveCmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, cubemapFromEquirectPipeline);
-				CubemapPipelineInfo copyEquirectInfo{};
-				copyEquirectInfo.inputDim = V2U{ width, height };
-				copyEquirectInfo.outputDim = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES };
-				vkCmdPushConstants(convolveCmdBuf, cubemapComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo), &copyEquirectInfo);
+				CubemapFromEquirectPushData fromEquirectPushData{
+					.outputDimensions = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES },
+					.inputImgEquirect = equirectImageDescriptor,
+					.outputImgCube = cubeU32ImgDescriptors[0]
+				};
+				VK_PUSH_STRUCT(convolveCmdBuf, fromEquirectPushData, 0);
 				vkCmdDispatch(convolveCmdBuf, (CUBEMAP_SPECULAR_RES + 15) / 16, (CUBEMAP_SPECULAR_RES + 15) / 16, 6);
 			}
 			{ // Generate mips
 				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
 				vkCmdBindPipeline(convolveCmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, cubemapMipgenPipeline);
 				for (U32 i = 1; i < cubeMipLevels; i++) {
-					VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-					barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-					barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-					barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-					barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-					barrier.srcQueueFamilyIndex = graphicsFamily;
-					barrier.dstQueueFamilyIndex = graphicsFamily;
-					barrier.image = cubeImg;
-					barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-					barrier.subresourceRange.baseMipLevel = i - 1;
-					barrier.subresourceRange.levelCount = 1;
-					barrier.subresourceRange.baseArrayLayer = 0;
-					barrier.subresourceRange.layerCount = 1;
-					vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+					img_barrier(convolveCmdBuf, cubeImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 
 					U32 res = max((CUBEMAP_SPECULAR_RES >> i), 1u);
-					CubemapPipelineInfo mipgenInfo{};
-					mipgenInfo.outputDim = V2U{ res, res };
-					mipgenInfo.inputIdx = i - 1;
-					mipgenInfo.outputIdx = i;
-					vkCmdPushConstants(convolveCmdBuf, cubemapComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo), &mipgenInfo);
+					CubeMipGenPushData mipGenPushData{
+						.outputDimensions = V2U{ res, res },
+						.inputCube = cubeArrayRGBImgDescriptor,
+						.inputMipLevel = i - 1,
+						.outputCube = cubeU32ImgDescriptors[i]
+					};
+					VK_PUSH_STRUCT(convolveCmdBuf, mipGenPushData, 0);
 					vkCmdDispatch(convolveCmdBuf, (res + 15) / 16, (res + 15) / 16, 6);
 				}
 			}
 			{ // Generate TR BRDF LUT
 				vkCmdBindPipeline(convolveCmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, brdfTRLutPipeline);
-				CubemapPipelineInfo lutInfo{};
-				lutInfo.outputDim = V2U{ BRDF_LUT_RES, BRDF_LUT_RES };
-				vkCmdPushConstants(convolveCmdBuf, cubemapComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo), &lutInfo);
-				vkCmdDispatch(convolveCmdBuf, (lutInfo.outputDim.x + 15) / 16, (lutInfo.outputDim.y + 15) / 16, 1);
+				BRDFLUTPushData trLutPushData{ .outputDimensions = V2U{ BRDF_LUT_RES, BRDF_LUT_RES }, .outputTRLut = trLUTImgDescriptor };
+				VK_PUSH_STRUCT(convolveCmdBuf, trLutPushData, 0);
+				vkCmdDispatch(convolveCmdBuf, (BRDF_LUT_RES + 15) / 16, (BRDF_LUT_RES + 15) / 16, 1);
 			}
 			{ // Do convolution from mips to final map
 				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
 				vkCmdBindPipeline(convolveCmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, cubemapTRConvolvePipeline);
 				for (U32 i = 0; i < cubeMipLevels; i++) {
 					U32 res = max((CUBEMAP_SPECULAR_RES >> i), 1u);
-					CubemapPipelineInfo convolveInfo{};
-					convolveInfo.inputDim = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES };
-					convolveInfo.outputDim = V2U{ res, res };
-					convolveInfo.roughness = max(0.01F, F32(i) / F32(cubeMipLevels - 1));
-					convolveInfo.outputIdx = i;
-					vkCmdPushConstants(convolveCmdBuf, cubemapComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo), &convolveInfo);
+					TRConvolvePushData trConvolvePushData{
+						.inputDimensions = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES },
+						.outputDimensions = V2U{ res, res },
+						.inputImg = cubeRGBImgDescriptor,
+						.outputImg = cubeTRConvU32ImgDescriptors[i],
+						.roughness = max(0.01F, F32(i) / F32(cubeMipLevels - 1))
+					};
+					VK_PUSH_STRUCT(convolveCmdBuf, trConvolvePushData, 0);
 					vkCmdDispatch(convolveCmdBuf, (res + 15) / 16, (res + 15) / 16, 6);
 				}
 				vkCmdBindPipeline(convolveCmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, cubemapCosConvolvePipeline);
-				CubemapPipelineInfo convolveInfo{};
-				convolveInfo.inputDim = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES };
-				convolveInfo.outputDim = V2U{ CUBEMAP_DIFFUSE_RES, CUBEMAP_DIFFUSE_RES };
-				convolveInfo.roughness = 1.0F;
-				convolveInfo.outputIdx = 0;
-				vkCmdPushConstants(convolveCmdBuf, cubemapComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo), &convolveInfo);
-				vkCmdDispatch(convolveCmdBuf, (convolveInfo.outputDim.x + 15) / 16, (convolveInfo.outputDim.y + 15) / 16, 6);
+				CosConvolvePushData cosConvolvePushData{
+					.inputDimensions = V2U{ CUBEMAP_SPECULAR_RES, CUBEMAP_SPECULAR_RES },
+					.outputDimensions = V2U{ CUBEMAP_DIFFUSE_RES, CUBEMAP_DIFFUSE_RES },
+					.inputImgCube = cubeRGBImgDescriptor,
+					.outputImg = cubeCosConvU32ImgDescriptor
+				};
+				VK_PUSH_STRUCT(convolveCmdBuf, cosConvolvePushData, 0);
+				vkCmdDispatch(convolveCmdBuf, (CUBEMAP_DIFFUSE_RES + 15) / 16, (CUBEMAP_DIFFUSE_RES + 15) / 16, 6);
 			}
 			
 			
 			U32 cubemapSpecularTotalSize = 0;
 			{ // Get convolved image back into host memory
-				VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-				barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-				barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-				barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-				barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-				barrier.srcQueueFamilyIndex = graphicsFamily;
-				barrier.dstQueueFamilyIndex = graphicsFamily;
-				barrier.image = cubeTRConvImg;
-				barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-				barrier.subresourceRange.baseMipLevel = 0;
-				barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-				barrier.subresourceRange.baseArrayLayer = 0;
-				barrier.subresourceRange.layerCount = 6;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-				barrier.image = cubeCosConvImg;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-				barrier.image = trLUTImg;
-				barrier.subresourceRange.layerCount = 1;
-				vkCmdPipelineBarrier(convolveCmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+				VK::img_barrier(convolveCmdBuf, cubeTRConvImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+				VK::img_barrier(convolveCmdBuf, cubeCosConvImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+				VK::img_barrier(convolveCmdBuf, trLUTImg, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 
 				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
 				for (U32 i = 0; i < cubeMipLevels; i++) {
@@ -500,6 +310,7 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 				trLUTRegion.imageOffset = VkOffset3D{ 0, 0, 0 };
 				trLUTRegion.imageExtent = VkExtent3D{ BRDF_LUT_RES, BRDF_LUT_RES, 1 };
 				vkCmdCopyImageToBuffer(convolveCmdBuf, trLUTImg, VK_IMAGE_LAYOUT_GENERAL, imageCPUBuffer.buffer, 1, &trLUTRegion);
+				VK::buffer_barrier(convolveCmdBuf, imageCPUBuffer.buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
 			}
 
 			CHK_VK(vkEndCommandBuffer(convolveCmdBuf));
@@ -517,7 +328,7 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 			printf("Time taken: %\n"a, current_time_seconds() - t0);
 
 			{ // Destroy source image
-				vkDestroyImageView(logicalDevice, equirectImageView, nullptr);
+				descriptorHeap.free_slot(equirectImageDescriptor);
 				vkDestroyImage(logicalDevice, equirectImage, nullptr);
 				vkFreeMemory(logicalDevice, equirectImageMemory, nullptr);
 			}
@@ -563,7 +374,7 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 					header.height = BRDF_LUT_RES;
 					write_file(file, &header, sizeof(header));
 					void* specularData = (char*)imageCPUBuffer.mapping + cubemapSpecularTotalSize + CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32);
-					write_file(file, specularData, BRDF_LUT_RES * BRDF_LUT_RES * sizeof(U32));
+					write_file(file, specularData, BRDF_LUT_RES * BRDF_LUT_RES * sizeof(RG8));
 					close_file(file);
 				}
 			}

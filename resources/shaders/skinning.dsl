@@ -10,21 +10,21 @@ struct SkinnedModel {
 	U32 vertexCount;
 };
 
-[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &DrawData drawData;
-
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
 	SkinnedModel skinnedModel;
-} pushConstants;
+	U32 drawDataUniformBuffer;
+} pushData;
 
 [entrypoint, localsize 256 1 1] @[][] compute_main{
 	U32 vertexIndex{ globalInvocationId.x };
-	SkinnedModel model{ pushConstants.skinnedModel };
+	SkinnedModel model{ pushData.skinnedModel };
 	if vertexIndex >= model.vertexCount {
 		return;
 	};
 	U32 vertIndex{ model.vertexOffset + vertexIndex };
 	U32 skinningIndex{ (model.skinningDataOffset + vertexIndex) * 2u };
+	&DrawData drawData{ UniformBuffer(DrawData)(pushData.drawDataUniformBuffer) };
 	U32 indices{ drawData.boneIndicesAndWeights[skinningIndex] };
 	V4F weights{ unpack_unorm4x8(drawData.boneIndicesAndWeights[skinningIndex + 1u]) };
 	V4F inPos  { drawData.positions[vertIndex], 1.0 };

@@ -79,8 +79,6 @@ namespace VK {
 	OP(vkEndCommandBuffer)\
 	OP(vkQueueSubmit)\
 	OP(vkDeviceWaitIdle)\
-	OP(vkCreateImageView)\
-	OP(vkDestroyImageView)\
 	OP(vkResetCommandPool)\
 	OP(vkQueueWaitIdle)\
 	OP(vkCmdBindPipeline)\
@@ -93,9 +91,7 @@ namespace VK {
 	OP(vkDestroyShaderModule)\
 	OP(vkCmdSetViewport)\
 	OP(vkCmdSetScissor)\
-	OP(vkCmdPushConstants)\
-	OP(vkCreateDescriptorPool)\
-	OP(vkCreateDescriptorSetLayout)\
+	OP(vkCmdPushDataEXT)\
 	OP(vkAllocateMemory)\
 	OP(vkCreateBuffer)\
 	OP(vkCreateBufferView)\
@@ -125,12 +121,7 @@ namespace VK {
 	OP(vkGetBufferMemoryRequirements)\
 	OP(vkGetImageMemoryRequirements)\
 	OP(vkCmdBlitImage)\
-	OP(vkAllocateDescriptorSets)\
-	OP(vkDestroyDescriptorSetLayout)\
-	OP(vkDestroyDescriptorPool)\
-	OP(vkCmdBindDescriptorSets)\
 	OP(vkCmdDispatch)\
-	OP(vkUpdateDescriptorSets)\
 	OP(vkQueuePresentKHR)\
 	OP(vkGetFenceStatus)\
 	OP(vkAcquireNextImageKHR)\
@@ -145,7 +136,13 @@ namespace VK {
 	OP(vkCmdUpdateBuffer)\
 	OP(vkCmdBeginRenderingKHR)\
 	OP(vkCmdEndRenderingKHR)\
-	OP(vkCmdClearAttachments)
+	OP(vkCmdClearAttachments)\
+	OP(vkWriteSamplerDescriptorsEXT)\
+	OP(vkWriteResourceDescriptorsEXT)\
+	OP(vkCmdBindSamplerHeapEXT)\
+	OP(vkCmdBindResourceHeapEXT)\
+	OP(vkCreateImageView)\
+	OP(vkDestroyImageView)
 
 #if VK_DEBUG != 0
 #define VK_DEBUG_DEVICE_FUNCTIONS
@@ -159,6 +156,9 @@ VK_DEBUG_INSTANCE_FUNCTIONS
 VK_DEVICE_FUNCTIONS
 VK_DEBUG_DEVICE_FUNCTIONS
 #undef OP
+
+#define VK_PUSH_MEMBER(cmdBuf, pushData, memberName) VK::vkCmdPushDataEXT(cmdBuf, ptr(VkPushDataInfoEXT{ .sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT, .offset = OFFSET_OF(decltype(pushData), memberName), .data = VkHostAddressRangeConstEXT{ &(pushData).memberName, sizeof((pushData).memberName) } }))
+#define VK_PUSH_STRUCT(cmdBuf, pushData, offsetBytes) VK::vkCmdPushDataEXT(cmdBuf, ptr(VkPushDataInfoEXT{ .sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT, .offset = (offsetBytes), .data = VkHostAddressRangeConstEXT{ &(pushData), sizeof(pushData) } }))
 
 const U32 FRAMES_IN_FLIGHT = 2;
 
@@ -194,7 +194,8 @@ extern VkMemoryPropertyFlags hostCachedMemoryFlags;
 extern VkMemoryPropertyFlags deviceMemoryFlags;
 extern VkMemoryPropertyFlags deviceHostMappedMemoryFlags;
 
-extern VkPhysicalDeviceProperties physicalDeviceProperties;
+extern VkPhysicalDeviceProperties2 physicalDeviceProperties;
+extern VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties;
 
 extern U32 graphicsFamily;
 extern U32 transferFamily;
@@ -290,6 +291,150 @@ struct DedicatedBuffer {
 	}
 };
 
+struct DescriptorHeap {
+	U32 nextDescriptor;
+	U32 capacity;
+	U32 samplerNextDescriptor;
+	U32 samplerCapacity;
+	ArenaArrayList<U32> freeDescriptorSlots;
+	U32 descriptorSizeBytes;
+	U32 samplerSizeBytes;
+	Byte* hostHeap;
+	Byte* hostSamplerHeap;
+	DedicatedBuffer deviceHeap;
+	U32 deviceHeapReservedRangeSize;
+	DedicatedBuffer deviceSamplerHeap;
+	U32 deviceSamplerHeapReservedRangeSize;
+
+	void init(U32 initialCapacity, U32 initialSamplerCapacity) {
+		capacity = initialCapacity;
+		samplerCapacity = initialSamplerCapacity;
+		descriptorSizeBytes = max(descriptorHeapProperties.imageDescriptorSize, descriptorHeapProperties.bufferDescriptorSize);
+		samplerSizeBytes = max(descriptorHeapProperties.samplerDescriptorSize, descriptorHeapProperties.samplerDescriptorAlignment);
+		deviceHeapReservedRangeSize = descriptorHeapProperties.minResourceHeapReservedRange;
+		deviceSamplerHeapReservedRangeSize = descriptorHeapProperties.minSamplerHeapReservedRange;
+		
+		hostHeap = globalArena.zalloc_aligned<Byte>(capacity * descriptorSizeBytes, max(descriptorHeapProperties.bufferDescriptorAlignment, descriptorHeapProperties.imageDescriptorAlignment));
+		hostSamplerHeap = globalArena.zalloc_aligned<Byte>(samplerCapacity * descriptorSizeBytes, descriptorHeapProperties.samplerDescriptorAlignment);
+		deviceHeap.create(capacity * descriptorSizeBytes + deviceHeapReservedRangeSize * FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, deviceHostMappedMemoryTypeIndex);
+		deviceSamplerHeap.create(samplerCapacity * samplerSizeBytes + deviceSamplerHeapReservedRangeSize * FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, deviceHostMappedMemoryTypeIndex);
+	}
+
+	void destroy() {
+		deviceHeap.destroy();
+		deviceSamplerHeap.destroy();
+	}
+
+	U32 alloc_slot() {
+		if (freeDescriptorSlots.empty()) {
+			//TODO resize
+			RUNTIME_ASSERT(nextDescriptor < capacity, "Need more descriptors");
+			return nextDescriptor++;
+		} else {
+			return freeDescriptorSlots.pop_back();
+		}
+	}
+	void free_slot(U32 slot) {
+		freeDescriptorSlots.push_back(slot);
+	}
+
+	void bind(VkCommandBuffer cmdBuf) {
+		vkCmdBindSamplerHeapEXT(cmdBuf, ptr(VkBindHeapInfoEXT{
+			.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
+			.heapRange = VkDeviceAddressRangeEXT{ deviceSamplerHeap.gpuAddress, deviceSamplerHeap.capacity },
+			.reservedRangeOffset = samplerCapacity * samplerSizeBytes + currentFrameInFlight * deviceSamplerHeapReservedRangeSize,
+			.reservedRangeSize = deviceSamplerHeapReservedRangeSize
+		}));
+		vkCmdBindResourceHeapEXT(cmdBuf, ptr(VkBindHeapInfoEXT{
+			.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
+			.heapRange = VkDeviceAddressRangeEXT{ deviceHeap.gpuAddress, deviceHeap.capacity },
+			.reservedRangeOffset = capacity * descriptorSizeBytes + currentFrameInFlight * deviceHeapReservedRangeSize,
+			.reservedRangeSize = deviceHeapReservedRangeSize
+		}));
+	}
+
+	U32 make_uniform_buffer(VkDeviceAddress address, VkDeviceSize size) {
+		U32 slot = samplerNextDescriptor++;
+		RUNTIME_ASSERT(slot < capacity, "Need more resource slots");
+		VkResourceDescriptorInfoEXT buffer{
+			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
+			.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.data = VkResourceDescriptorDataEXT{
+				.pAddressRange = ptr(VkDeviceAddressRangeEXT{ address, size })
+			},
+		};
+		CHK_VK(vkWriteResourceDescriptorsEXT(logicalDevice, 1, &buffer, ptr(VkHostAddressRangeEXT{ hostHeap + slot * descriptorSizeBytes, descriptorSizeBytes })));
+		memcpy((Byte*)deviceHeap.mapping + slot * descriptorSizeBytes, hostHeap + slot * descriptorSizeBytes, descriptorSizeBytes);
+		return slot;
+	}
+
+	U32 make_image(VkImage img, VkImageViewType viewType, VkFormat format, VkDescriptorType type, VkImageAspectFlags aspect, U32 mipLevel, U32 levelCount, U32 baseArrayLayer, U32 layerCount, VkImageUsageFlags separateUsage) {
+		U32 slot = samplerNextDescriptor++;
+		RUNTIME_ASSERT(slot < capacity, "Need more resource slots");
+		VkImageViewUsageCreateInfo viewUsage{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
+			.usage = separateUsage
+		};
+		VkResourceDescriptorInfoEXT sampledImage{
+			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
+			.type = type,
+			.data = VkResourceDescriptorDataEXT{
+				.pImage = ptr(VkImageDescriptorInfoEXT{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT,
+					.pView = ptr(VkImageViewCreateInfo{
+						.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+						.pNext = separateUsage == 0 ? nullptr : &viewUsage,
+						.image = img,
+						.viewType = viewType,
+						.format = format,
+						.subresourceRange = VkImageSubresourceRange{
+							.aspectMask = aspect,
+							.baseMipLevel = mipLevel,
+							.levelCount = levelCount,
+							.baseArrayLayer = baseArrayLayer,
+							.layerCount = layerCount
+						}
+					}),
+					.layout = VK_IMAGE_LAYOUT_GENERAL
+				})
+			}
+		};
+		CHK_VK(vkWriteResourceDescriptorsEXT(logicalDevice, 1, &sampledImage, ptr(VkHostAddressRangeEXT{ hostHeap + slot * descriptorSizeBytes, descriptorSizeBytes })));
+		memcpy((Byte*)deviceHeap.mapping + slot * descriptorSizeBytes, hostHeap + slot * descriptorSizeBytes, descriptorSizeBytes);
+		return slot;
+	}
+
+	U32 make_sampled_image(VkImage img, VkImageViewType viewType, VkFormat format) {
+		return make_image(img, viewType, format, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS, 0);
+	}
+
+	U32 make_storage_image(VkImage img, VkImageViewType viewType, VkFormat format) {
+		return make_image(img, viewType, format, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS, 0);
+	}
+
+	U32 make_sampler(VkFilter filter, VkSamplerMipmapMode mipmapMode, VkSamplerAddressMode addressMode, F32 anisotropy) {
+		anisotropy = clamp(anisotropy, 1.0F, physicalDeviceProperties.properties.limits.maxSamplerAnisotropy);
+		VkSamplerCreateInfo samplerInfo{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = filter,
+			.minFilter = filter,
+			.mipmapMode = mipmapMode,
+			.addressModeU = addressMode,
+			.addressModeV = addressMode,
+			.addressModeW = addressMode,
+			.anisotropyEnable = anisotropy == 1.0F ? VK_FALSE : VK_TRUE,
+			.maxAnisotropy = anisotropy,
+			.minLod = 0.0F,
+			.maxLod = VK_LOD_CLAMP_NONE,
+		};
+		U32 samplerSlot = samplerNextDescriptor++;
+		RUNTIME_ASSERT(samplerSlot < samplerCapacity, "Need more samplers");
+		CHK_VK(vkWriteSamplerDescriptorsEXT(logicalDevice, 1, &samplerInfo, ptr(VkHostAddressRangeEXT{ hostSamplerHeap + samplerSlot * samplerSizeBytes, samplerSizeBytes })));
+		memcpy((Byte*)deviceSamplerHeap.mapping + samplerSlot * samplerSizeBytes, hostSamplerHeap + samplerSlot * samplerSizeBytes, samplerSizeBytes);
+		return samplerSlot;
+	}
+} descriptorHeap;
+
 enum RenderPass {
 	RENDER_PASS_WORLD,
 	RENDER_PASS_WORLD_NO_ID,
@@ -306,23 +451,34 @@ struct GPUCameraMatrices {
 	V3F position;
 	V3F direction;
 };
-struct WorldDrawPushConstants {
+struct WorldDrawConstants {
 	U32 transformIdx;
 	I32 verticesOffset;
 	U32 camIdx;
 	U32 objId; // High bit set if object is selected
 	U32 materialId;
 };
-struct FinalCompositePushConstants {
+struct DrawDescriptorSet {
+	U32 drawDataUniformBuffer;
+	U32 specularCubemap;
+	U32 diffuseCubemap;
+	U32 brdfLUT;
+} defaultDrawDescriptorSet;
+struct DrawPushData {
+	DrawDescriptorSet drawSet;
+	WorldDrawConstants drawConstants;
+};
+struct BackgroundPushData {
+	DrawDescriptorSet drawSet;
+	U32 camIdx;
+};
+struct FinalCompositePushData {
+	U32 sceneColor;
+	U32 sceneIds;
+	U32 uiColor;
+	U32 compositeOutput;
 	U32 activeObjectId;
 	V2U outputDimensions;
-};
-struct CubemapPipelineInfo {
-	V2U inputDim;
-	V2U outputDim;
-	F32 roughness;
-	U32 outputIdx;
-	U32 inputIdx;
 };
 struct DrawDataUniforms {
 	V2F screenDimensions;
@@ -345,41 +501,8 @@ struct DrawDataUniforms {
 struct DedicatedImage {
 	VkImage img;
 	VkImageView imgView;
+	U32 descriptorIdx;
 	VkDeviceMemory memory;
-};
-
-struct DescriptorSet {
-	// I'm just going to always create these together.
-	// I won't have that many descriptor sets because of the bindless architecture, and this simplifies a lot
-	VkDescriptorSetLayout setLayout;
-	VkDescriptorSet descriptorSet;
-	VkDescriptorPool descriptorPool;
-
-	static constexpr U32 MAX_LAYOUT_BINDINGS = 16;
-	VkDescriptorSetLayoutBinding bindings[MAX_LAYOUT_BINDINGS];
-	VkDescriptorBindingFlags bindingFlags[MAX_LAYOUT_BINDINGS];
-	U32 bindingCount;
-	U32 variableDescriptorCountMax;
-	B32 updateAfterBind;
-
-	DescriptorSet& init();
-
-	DescriptorSet& basic_binding(U32 bindingIndex, VkShaderStageFlags stageFlags, VkDescriptorType descriptorType, U32 descriptorCount, VkDescriptorBindingFlags flags);
-	DescriptorSet& storage_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
-	DescriptorSet& uniform_buffer(U32 bindingIndex, VkShaderStageFlags stageFlags);
-	DescriptorSet& sampler(U32 bindingIndex, VkShaderStageFlags stageFlags);
-	DescriptorSet& sampled_image_array_dynamic(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 maxArraySize, U32 arraySize);
-	DescriptorSet& sampled_image_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 arraySize);
-	DescriptorSet& storage_image_array(U32 bindingIndex, VkShaderStageFlags stageFlags, U32 arraySize);
-	DescriptorSet& storage_image(U32 bindingIdx, VkShaderStageFlags stageFlags);
-	DescriptorSet& sampled_image(U32 bindingIdx, VkShaderStageFlags stageFlags);
-
-	void build();
-
-	// Should only be called before rendering anything in the current frame
-	void change_dynamic_array_length(U32 newDescriptorCount);
-
-	U32 current_dynamic_array_length();
 };
 
 extern XrSwapchainData xrSwapchainData;

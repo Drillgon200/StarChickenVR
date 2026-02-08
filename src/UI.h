@@ -789,7 +789,7 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 void draw() {
 	modificationLock.lock_read();
 	DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
-	tes.begin_draw(VK::uiPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_QUADS);
+	tes.begin_draw(VK::uiPipeline, DynamicVertexBuffer::DRAW_MODE_QUADS);
 	tes.set_clip_boxes(clipBoxBuffers[VK::currentFrameInFlight].gpuAddress);
 	Rng2F32 infRange = { -F32_LARGE, -F32_LARGE, F32_LARGE, F32_LARGE };
 	reinterpret_cast<Rng2F32*>(clipBoxBuffers[VK::currentFrameInFlight].mapping)[0] = infRange;

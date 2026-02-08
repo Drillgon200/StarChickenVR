@@ -7,7 +7,6 @@ namespace DynamicVertexBuffer {
 
 struct DrawCommand {
 	VkPipeline pipeline;
-	VkPipelineLayout pipelineLayout;
 	U32 vertexBufferOffset;
 	U32 indexBufferOffset;
 	U32 vertexCount;
@@ -74,7 +73,7 @@ struct Tessellator {
 		return buffer.gpuAddress;
 	}
 
-	void begin_draw(VkPipeline pipeline, VkPipelineLayout pipelineLayout, DrawMode mode) {
+	void begin_draw(VkPipeline pipeline, DrawMode mode) {
 		if (isCurrentlyDrawing) {
 			abort("Already drawing something, end that draw first");
 		}
@@ -84,7 +83,6 @@ struct Tessellator {
 		currentVertexByteCount = ALIGN_HIGH(currentVertexByteCount, 16);
 		DrawCommand& drawCmd = drawCommands.push_back();
 		drawCmd.pipeline = pipeline;
-		drawCmd.pipelineLayout = pipelineLayout;
 		drawCmd.indexBufferOffset = currentIndexByteCount / sizeof(U32);
 		drawCmd.vertexBufferOffset = currentVertexByteCount;
 		drawCmd.vertexCount = 0;
@@ -103,19 +101,19 @@ struct Tessellator {
 		return result;
 	}
 	void draw(Rng1I32 drawRange, U32 camIdx) {
-		VK::WorldDrawPushConstants renderData{};
-		renderData.camIdx = camIdx;
+		VK::DrawPushData renderData{ .drawSet = VK::defaultDrawDescriptorSet };
+		renderData.drawConstants.camIdx = camIdx;
 		VK::vkCmdBindIndexBuffer(VK::graphicsCommandBuffer, buffer.buffer, vertexCapacity, VK_INDEX_TYPE_UINT32);
+		VK_PUSH_MEMBER(VK::graphicsCommandBuffer, renderData, drawSet);
 		VkPipeline prevPipeline = VK_NULL_HANDLE;
 		for (I32 drawCmdIdx = drawRange.minX; drawCmdIdx < drawRange.maxX; drawCmdIdx++) {
 			DrawCommand& drawCmd = drawCommands.data[drawCmdIdx];
 			if (drawCmd.pipeline != prevPipeline) {
 				VK::vkCmdBindPipeline(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawCmd.pipeline);
-				VK::vkCmdBindDescriptorSets(VK::graphicsCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawCmd.pipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 				prevPipeline = drawCmd.pipeline;
 			}
-			renderData.verticesOffset = I32(drawCmd.vertexBufferOffset);
-			VK::vkCmdPushConstants(VK::graphicsCommandBuffer, drawCmd.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &renderData);
+			renderData.drawConstants.verticesOffset = I32(drawCmd.vertexBufferOffset);
+			VK_PUSH_MEMBER(VK::graphicsCommandBuffer, renderData, drawConstants);
 			VK::vkCmdDrawIndexed(VK::graphicsCommandBuffer, drawCmd.indexCount, 1, drawCmd.indexBufferOffset, 0, 0);
 		}
 	}

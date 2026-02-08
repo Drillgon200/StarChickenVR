@@ -22,7 +22,7 @@ struct Material {
 	U32 packedARMI;
 };
 
-[block] struct DrawData {
+struct DrawData {
 	V2F screenDimensions;
 	&V4F uiClipBoxes;
 	V2U pUIVertices;
@@ -39,10 +39,22 @@ struct Material {
 	&Camera cams;
 };
 
-[block] struct WorldDrawPushConstants {
+struct WorldDrawConstants {
 	U32 transformIdx;
 	I32 verticesOffset;
 	U32 camIdx;
 	U32 objId; // High bit set if selected
 	U32 materialId;
+};
+
+struct DrawDescriptorSet {
+	U32 drawDataUniformBuffer;
+	U32 specularCubemap;
+	U32 diffuseCubemap;
+	U32 brdfLUT;
+};
+
+[block] struct DrawPushData {
+	DrawDescriptorSet drawSet;
+	WorldDrawConstants drawConstants;
 };

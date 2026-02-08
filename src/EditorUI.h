@@ -161,7 +161,7 @@ struct TranslateWidget {
 		V3F xAxis = transform.get_row(0);
 		V3F yAxis = transform.get_row(1);
 		V3F zAxis = transform.get_row(2);
-		tes.begin_draw(VK::debugNoDepthPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+		tes.begin_draw(VK::debugNoDepthPipeline, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
 		tes.debug_arrow(center, center + xAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
 		tes.debug_arrow(center, center + yAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
 		tes.debug_arrow(center, center + zAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS ? V4F{ 0.5F, 0.5F, 1.0F, 1.0F } : V4F{ 0.25F, 0.25F, 1.0F, 1.0F });
@@ -621,12 +621,12 @@ void debug_render() {
 		bool hit = ray_cyliner_intersect(&t, o, d, V3F{ 0.0F, 2.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.2F);
 		if (hit) {
 			V3F hitPos = o + t * d;
-			tes.begin_draw(VK::debugPointsPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+			tes.begin_draw(VK::debugPointsPipeline, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
 			tes.pos3(hitPos.x, hitPos.y, hitPos.z).color(1.0F, 1.0F, 0.0F).end_vert();
 			tes.end_draw();
 		}
 	}
-	tes.begin_draw(VK::debugPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+	tes.begin_draw(VK::debugPipeline, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
 	tes.debug_arrow(V3F{ 0.0F, 1.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.1F, V4F{ 0.5F, 0.5F, 1.0F, 1.0F });
 	tes.end_draw();
 }

@@ -1,15 +1,11 @@
 #version 2
 #shader compute
 
-[set 0, binding 7, uniform] &ImageCubeStorageRG8 outputTR;
-
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
-	V2U inputDimensions;
 	V2U outputDimensions;
-	// This is only used for the cubemap convolution part
-	F32 roughness;
-} pushConstants;
+	U32 outputTRLut;
+} pushData;
 
 @[F32 maskShadow][F32 nDotL, F32 nDotV, F32 roughness] masking_shadowing_trowbridge_reitz{
 	// https://jcgt.org/published/0003/02/03/paper.pdf
@@ -109,7 +105,7 @@
 [entrypoint, localsize 16 16 1] @[][] compute_main{
 	V2U outputCoord{ globalInvocationId.xy };
 	U32 faceIdx{ globalInvocationId.z };
-	V2U outputDim{ pushConstants.outputDimensions };
+	V2U outputDim{ pushData.outputDimensions };
 	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
 		return;
 	};
@@ -179,5 +175,5 @@
 			int2 = int2 + (1.0 - fresnel) * brdfPart;
 		};
 	};
-	write_image(^outputTR, V3U(outputCoord, faceIdx), V4F(V2F(int1, int2) / F32(sampleCount), 0.0, 1.0));
+	write_image(ImageCubeStorageRG8(pushData.outputTRLut), V3U(outputCoord, faceIdx), V4F(V2F(int1, int2) / F32(sampleCount), 0.0, 1.0));
 };

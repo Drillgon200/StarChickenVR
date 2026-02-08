@@ -413,7 +413,7 @@ void do_timestep(F32 dt, U32 iterations, F32 alpha, F32 beta, F32 gamma, U32 thr
 
 void debug_render() {
 	DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
-	tes.begin_draw(VK::debugLinesPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+	tes.begin_draw(VK::debugLinesPipeline, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
 	for (PositionConstraint& c : constraints) {
 		V3F a = points.data[c.constrained].pos;
 		V3F b = c.relative == -1 ? c.offset : points.data[c.relative].pos;
@@ -422,7 +422,7 @@ void debug_render() {
 	}
 	tes.end_draw();
 
-	tes.begin_draw(VK::debugPointsPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+	tes.begin_draw(VK::debugPointsPipeline, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
 	for (Point& p : points) {
 		tes.pos3(p.pos.x, p.pos.y, p.pos.z).color(1.0F, 0.0F, 0.0F).end_vert();
 	}

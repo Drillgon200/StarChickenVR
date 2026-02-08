@@ -1398,8 +1398,12 @@ DEBUG_OPTIMIZE_ON
 struct RGBA8 {
 	U8 r, g, b, a;
 
-	B32 operator==(const RGBA8& other) {
+	bool operator==(const RGBA8& other) {
 		return r == other.r && g == other.g && b == other.b && a == other.a;
+	}
+	// Apparently in C++ 20 you have to have a != operator or it synthesizes an expression with the parameters reversed and causes a similar conversions error???
+	bool operator!=(const RGBA8& other) {
+		return r != other.r || g != other.g || b != other.b || a != other.a;
 	}
 	V4F32 to_v4f32() {
 		F32 scale = 1.0F / 255.0F;
@@ -1415,8 +1419,11 @@ RGBA8 V4F32::to_rgba8() {
 struct RGB8 {
 	U8 r, g, b;
 
-	B32 operator==(const RGB8& other) {
+	bool operator==(const RGB8& other) {
 		return r == other.r && g == other.g && b == other.b;
+	}
+	bool operator!=(const RGB8& other) {
+		return r != other.r || g != other.g || b != other.b;
 	}
 	RGB8 operator+(RGB8 other) {
 		return RGB8{ U8(r + other.r), U8(g + other.g), U8(b + other.b) };
@@ -1431,8 +1438,11 @@ struct RGB8 {
 struct RG8 {
 	U8 r, g;
 
-	B32 operator==(RG8 other) {
+	bool operator==(const RG8& other) {
 		return r == other.r && g == other.g;
+	}
+	bool operator!=(const RG8& other) {
+		return r != other.r || g != other.g;
 	}
 	RGBA8 to_rgba8() {
 		return RGBA8{ r, 0, 0, g };
@@ -1441,8 +1451,11 @@ struct RG8 {
 struct R8 {
 	U8 r;
 
-	B32 operator==(R8 other) {
+	bool operator==(R8 other) {
 		return r == other.r;
+	}
+	bool operator!=(R8 other) {
+		return r != other.r;
 	}
 	RGBA8 to_rgba8() {
 		return RGBA8{ r, 0, 0, 255 };

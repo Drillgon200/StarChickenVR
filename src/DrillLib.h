@@ -119,6 +119,12 @@ FINLINE void swap(T* a, T* b) {
 
 DEBUG_OPTIMIZE_OFF
 
+// Thanks Aidan, cool trick
+template<typename T>
+T* ptr(T&& x) {
+	return &x;
+}
+
 namespace SerializeTools {
 void serialize_f64(char* dstBuffer, U32* dstBufferSize, F64 startValue);
 bool is_whitespace(char c);
@@ -206,6 +212,16 @@ struct MemoryArena {
 		stackPtr = ALIGN_HIGH(stackPtr, alignment);
 		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
 		stackPtr += count * sizeof(T) + slackBytes;
+		return result;
+	}
+
+	template<typename T>
+	T* zalloc_aligned(U64 count, U32 alignment) {
+		alignment = max<U32>(alignment, alignof(T));
+		stackPtr = ALIGN_HIGH(stackPtr, alignment);
+		T* result = (T*)(stackBase + stackPtr);
+		zero_memory(result, count * sizeof(T));
+		stackPtr += count * sizeof(T);
 		return result;
 	}
 

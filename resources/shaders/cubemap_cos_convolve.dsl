@@ -1,18 +1,13 @@
 #version 2
 #shader compute
 
-[set 0, binding 0, uniform] &Sampler bilinearSampler;
-[set 0, binding 2, uniform] &ImageCubeSampled inputImageCube;
-[set 0, binding 6, uniform] &ImageU32CubeStorageR32UI[17] outputs;
-
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
 	V2U inputDimensions;
 	V2U outputDimensions;
-	F32 roughness;
-	U32 outputIdx;
-	U32 inputIdx;
-} pushConstants;
+	U32 inputImgCube;
+	U32 outputImg;
+} pushData;
 
 @[U32 packed][V3F x] pack_E5B9G9R9{
 	// The 5 bit exponent has no explicit 1 and has a bias of 15
@@ -44,8 +39,8 @@
 [entrypoint, localsize 16 16 1] @[][] compute_main{
 	V2U outputCoord{ globalInvocationId.xy };
 	U32 faceIdx{ globalInvocationId.z };
-	V2U inputDim{ pushConstants.inputDimensions };
-	V2U outputDim{ pushConstants.outputDimensions };
+	V2U inputDim{ pushData.inputDimensions };
+	V2U outputDim{ pushData.outputDimensions };
 	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
 		return;
 	};
@@ -73,12 +68,12 @@
 	V3F eye{ dir };
 	F32 nDotV{ dot(eye, dir) };
 
-	F32 roughness{ pushConstants.roughness };
-	roughness = roughness * roughness;
-
 	U32 sampleCount{ 16384u };
 	F32 sampleSolidAngleRatio{ (F32(inputDim.x) * F32(inputDim.y) * 6.0) / F32(sampleCount) };
 	F32 mipLevel{ 0.5 * log2(sampleSolidAngleRatio * 4.0) }; // Multiply because the ratio assumes uniform sampling, so I increased the multiplier until banding went away
+
+	Sampler bilinearSampler{ 0u };
+	ImageCubeSampled inputCube{ pushData.inputImgCube };
 
 	V3F color{ 0.0, 0.0, 0.0 };
 	for U32 n{ 0 }; n < sampleCount; n = n + 1u {
@@ -87,9 +82,9 @@
 		F32 p{ 2.0 * 3.1415926535 * randAngles.y };
 		V3F sampleDir{ cos(p) * cos(t), sin(t), sin(p) * cos(t) };
 		sampleDir = sampleDir.x * tan + sampleDir.y * dir + sampleDir.z * bitan;
-		V3F colorSample{ (^inputImageCube)[^bilinearSampler, sampleDir, mipLevel].rgb };
+		V3F colorSample{ inputCube[bilinearSampler, sampleDir, mipLevel].rgb };
 		color = color + colorSample * sin(t) * cos(t);
 	};
 	color = color * 3.1415926535 / F32(sampleCount);
-	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
+	write_image(ImageU32CubeStorageR32UI(pushData.outputImg), V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
 };

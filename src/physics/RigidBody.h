@@ -36,7 +36,7 @@ struct OrientedBox {
 		};
 		using namespace DynamicVertexBuffer;
 		Tessellator& tes = get_tessellator();
-		tes.begin_draw(VK::debugLinesPipeline, VK::drawPipelineLayout, DRAW_MODE_PRIMITIVES);
+		tes.begin_draw(VK::debugLinesPipeline, DRAW_MODE_PRIMITIVES);
 		tes.add_geometry(verts, ARRAY_COUNT(verts), indices, ARRAY_COUNT(indices));
 		tes.end_draw();
 	}

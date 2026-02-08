@@ -202,11 +202,6 @@ VKGeometry::SkeletalAnimation load_daf(StrA animationFileName) {
 	return anim;
 }
 
-
-const U32 MAX_TEXTURE_COUNT = 128 * 1024;
-U32 currentTextureMaxCount = 128;
-U32 currentTextureCount = 0;
-
 enum TextureFormat : U8 {
 	TEXTURE_FORMAT_NULL,
 	TEXTURE_FORMAT_RGBA_U8,
@@ -223,7 +218,6 @@ enum TextureFlags : Flags16 {
 };
 struct Texture {
 	VkImage image;
-	VkImageView imageView;
 	Flags16 flags;
 	U32 index;
 };
@@ -270,6 +264,15 @@ void alloc_texture_memory(VkDeviceMemory* memoryOut, VkDeviceSize* allocatedOffs
 	*allocatedOffsetOut = allocatedOffset;
 }
 
+void alloc_and_bind_texture_memory(VkImage img) {
+	VkMemoryRequirements memoryRequirements;
+	VK::vkGetImageMemoryRequirements(VK::logicalDevice, img, &memoryRequirements);
+	VkDeviceMemory linearBlock;
+	VkDeviceSize memoryOffset;
+	alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
+	CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, img, linearBlock, memoryOffset));
+}
+
 void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipLevels, TextureFormat format, bool isSRGB, bool isCube) {
 	Texture& tex = *result;
 	tex = {};
@@ -296,14 +299,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	imageCreateInfo.queueFamilyIndexCount = 0;
 	imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	CHK_VK(VK::vkCreateImage(VK::logicalDevice, &imageCreateInfo, nullptr, &tex.image));
-
-	VkMemoryRequirements memoryRequirements;
-	VK::vkGetImageMemoryRequirements(VK::logicalDevice, tex.image, &memoryRequirements);
-
-	VkDeviceMemory linearBlock;
-	VkDeviceSize memoryOffset;
-	alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
-	CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, tex.image, linearBlock, memoryOffset));
+	alloc_and_bind_texture_memory(tex.image);
 
 	U32 imgDataSize = width * height * TEXTURE_FORMAT_TEXEL_SIZE[format];
 	if (isCube) {
@@ -311,7 +307,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	}
 	VkCommandBuffer stagingCmdBuf = VK::graphicsStager.prepare_for_image_upload(imgDataSize);
 
-	VK::img_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_NONE_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	VK::img_init_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 
 	if (data) {
 		U32 mipWidth = width;
@@ -322,33 +318,12 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 			width = max(width / 2u, 1u);
 			height = max(height / 2u, 1u);
 		}
-		VK::img_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_NONE_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		VK::img_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_NONE_KHR);
 	}
 
-	tex.imageView = VK::create_img_view(tex.image, isCube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, createFormat, 0);
+	tex.index = VK::descriptorHeap.make_image(tex.image, isCube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, createFormat, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS, 0);
 
 	allTextures.push_back(result);
-
-	if (currentTextureCount == currentTextureMaxCount) {
-		currentTextureMaxCount *= 2;
-		VK::drawDataDescriptorSet.change_dynamic_array_length(currentTextureMaxCount);
-	}
-
-	VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-	write.dstSet = VK::drawDataDescriptorSet.descriptorSet;
-	write.dstBinding = VK::drawDataDescriptorSet.bindingCount - 1;
-	write.dstArrayElement = currentTextureCount;
-	write.descriptorCount = 1;
-	write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-	VkDescriptorImageInfo imageInfo;
-	imageInfo.sampler = VK_NULL_HANDLE;
-	imageInfo.imageView = tex.imageView;
-	imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	write.pImageInfo = &imageInfo;
-	VK::vkUpdateDescriptorSets(VK::logicalDevice, 1, &write, 0, nullptr);
-
-	tex.index = currentTextureCount;
-	currentTextureCount++;
 }
 
 void load_png(Texture* result, StrA path, bool isSRGB = true) {
@@ -435,7 +410,6 @@ void init_textures() {
 
 void cleanup_textures() {
 	for (Texture* tex : allTextures) {
-		VK::vkDestroyImageView(VK::logicalDevice, tex->imageView, nullptr);
 		VK::vkDestroyImage(VK::logicalDevice, tex->image, nullptr);
 	}
 	allTextures.clear();

@@ -3,8 +3,7 @@
 #shader vertex
 #extension multiview
 
-[set 0, binding 2, uniform_buffer, restrict, nonwritable] &DrawData drawData;
-[push_constant] &WorldDrawPushConstants modelData;
+[push_constant] &DrawPushData pushData;
 
 [input, builtin VertexIndex] &I32 inVertexIndex;
 [input, builtin ViewIndex] &I32 inViewIndex;
@@ -12,8 +11,9 @@
 [output, builtin Position] &V4F outPosition;
 
 [entrypoint] @[][] vert_main{
-	I32 vertIdx{ modelData.verticesOffset };
-	I32 camIdx{ modelData.camIdx };
+	&DrawData drawData{ UniformBuffer(DrawData)(pushData.drawSet.drawDataUniformBuffer) };
+	I32 vertIdx{ pushData.drawConstants.verticesOffset };
+	I32 camIdx{ pushData.drawConstants.camIdx };
 	V4F pos{ 0.0 };
 	V3F norm{ 0.0 };
 	V3F tangent{ 0.0 };
@@ -29,7 +29,7 @@
 		tangent = drawData.skinnedTangents[vertIdx];
 	};
 	I32 viewIdx{ ^inViewIndex };
-	M4x3F modelMat{ drawData.matrices[modelData.transformIdx] };
+	M4x3F modelMat{ drawData.matrices[pushData.drawConstants.transformIdx] };
 	V4F worldPos{
 		dot(pos, modelMat.row0),
 		dot(pos, modelMat.row1),
@@ -60,7 +60,7 @@
 	texCoord.y = 1.0 - texCoord.y;
 	^passTexCoord = texCoord;
 	^passCamPos = cam.position;
-	^passObjId = modelData.objId;
+	^passObjId = pushData.drawConstants.objId;
 	
 };
 
@@ -78,15 +78,7 @@
 [output, location 0] &V4F outFragColor;
 [output, location 1] &U32 outObjId;
 
-[push_constant] &WorldDrawPushConstants modelData;
-
-[uniform, set 0, binding 0] &Sampler bilinearSampler;
-[uniform, set 0, binding 1] &Sampler bilinearClampedSampler;
-[set 0, binding 2, uniform_buffer, restrict, nonwritable] &DrawData drawData;
-[uniform, set 0, binding 3] &ImageCubeSampled specularCubemap;
-[uniform, set 0, binding 4] &ImageCubeSampled diffuseCubemap;
-[uniform, set 0, binding 5] &Image2DSampled brdfTRLut;
-[uniform, set 0, binding 6] &Image2DSampled[] textures;
+[push_constant] &DrawPushData pushData;
 
 #include "pbr.dsi"
 
@@ -96,22 +88,26 @@
 	V3F worldPos{ ^passPosition };
 	V3F fragToCam{ normalize(camPos - worldPos) };
 	V2F texCoord{ ^passTexCoord };
+	
+	Sampler bilinearSampler{ 0u };
+	Sampler bilinearClampedSampler{ 1u };
+	&DrawData drawData{ UniformBuffer(DrawData)(pushData.drawSet.drawDataUniformBuffer) };
 
-	Material material{ drawData.materials[modelData.materialId] };
+	Material material{ drawData.materials[pushData.drawConstants.materialId] };
 
 	V4F materialColor{ unpack_unorm4x8(material.packedBaseColor) };
 	V4F materialARMI{ unpack_unorm4x8(material.packedARMI) };
 	if material.baseColorIdx != -1 {
-		materialColor = materialColor * (^textures)[material.baseColorIdx][^bilinearSampler, texCoord];
+		materialColor = materialColor * Image2DSampled(material.baseColorIdx)[bilinearSampler, texCoord];
 	};
 	if material.normalMapIdx != -1 {
 		V3F tangent{ normalize(^passTangent) };
 		V3F bitangent{ cross(tangent, normal) };
-		V3F normalTexel{ (^textures)[material.normalMapIdx][^bilinearSampler, texCoord].xyz * 2.0 - 1.0 };
+		V3F normalTexel{ Image2DSampled(material.normalMapIdx)[bilinearSampler, texCoord].xyz * 2.0 - 1.0 };
 		normal = normalize(tangent * normalTexel.x + bitangent * normalTexel.y + normal * normalTexel.z);
 	};
 	if material.armMapIdx != -1 {
-		materialARMI = V4F((^textures)[material.armMapIdx][^bilinearSampler, texCoord].xyz, materialARMI.w);
+		materialARMI = V4F(Image2DSampled(material.armMapIdx)[bilinearSampler, texCoord].xyz, materialARMI.w);
 	};
 	V3F baseColor{ materialColor.rgb };
 	F32 metalness{ materialARMI.z };
@@ -122,11 +118,11 @@
 	F32 fresnelReflectionFactor{ (iorA - iorB) / (iorA + iorB) };
 	fresnelReflectionFactor = fresnelReflectionFactor * fresnelReflectionFactor;
 
-	V3F diffuseSample{ (^diffuseCubemap)[^bilinearSampler, normal].rgb };
+	V3F diffuseSample{ ImageCubeSampled(pushData.drawSet.diffuseCubemap)[bilinearSampler, normal].rgb };
 	F32 cubemapLodLevels{ 10.0 };
-	V3F specularSample{ (^specularCubemap)[^bilinearSampler, reflect(-fragToCam, normal), roughness * cubemapLodLevels].rgb };
+	V3F specularSample{ ImageCubeSampled(pushData.drawSet.specularCubemap)[bilinearSampler, reflect(-fragToCam, normal), roughness * cubemapLodLevels].rgb };
 	F32 nDotV{ max(dot(normal, fragToCam), 0.0) };
-	V2F brdfLUTSample{ (^brdfTRLut)[^bilinearClampedSampler, V2F(nDotV, roughness), 0.0].xy };
+	V2F brdfLUTSample{ Image2DSampled(pushData.drawSet.brdfLUT)[bilinearClampedSampler, V2F(nDotV, roughness), 0.0].xy };
 	roughness = roughness * roughness;
 	V3F iblLighting{ ibl_fdez_aguera(baseColor, fresnelReflectionFactor, nDotV, diffuseSample, specularSample, brdfLUTSample, roughness, metalness) * ambientOcclusion };
 	

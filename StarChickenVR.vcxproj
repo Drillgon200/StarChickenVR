@@ -221,6 +221,7 @@
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -257,6 +258,7 @@
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -293,6 +295,7 @@
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -327,6 +330,7 @@
       <CallingConvention>VectorCall</CallingConvention>
       <PreprocessToFile>false</PreprocessToFile>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

@@ -52,6 +52,10 @@ struct GPUSkinnedModel {
 	U32 skinningDataOffset;
 	U32 vertexCount;
 };
+struct GPUSkinningPushData {
+	GPUSkinnedModel model;
+	U32 drawDataUniformBuffer;
+};
 #pragma pack(pop)
 
 struct GeometryHandler {
@@ -81,7 +85,7 @@ struct GeometryHandler {
 		if (size < 4096) {
 			abort("Geometry needs 4k bytes");
 		}
-		const U64 alignment = VK::physicalDeviceProperties.limits.minStorageBufferOffsetAlignment;
+		const U64 alignment = VK::physicalDeviceProperties.properties.limits.minStorageBufferOffsetAlignment;
 		const U64 indexSize = sizeof(U16);
 		F64 vertexDataSizesTotal = F64(VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE) + F64(VK::VERTEX_FORMAT_INDEX4u8_WEIGHT4unorm8_SIZE) + F64(VK::VERTEX_FORMAT_POS3F_NORM3F_TAN3F_SIZE) + F64(indexSize);
 		// Approximate weights for how relatively many vertices we need space for in each section, regular smoothed models seem to be roughly 80% index count, 20% vertex count

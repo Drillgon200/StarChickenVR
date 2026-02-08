@@ -1,19 +1,13 @@
 #version 2
 #shader compute
 
-[set 0, binding 0, uniform] &Sampler bilinearSampler;
-// Write out image in VK_FORMAT_E5B9G9R9_UFLOAT_PACK32
-[set 0, binding 1, uniform] &ImageU32CubeStorageR32UI[17] outputs;
-[set 0, binding 4, uniform] &Image2DArraySampled input;
-
 [input, builtin GlobalInvocationId] &V3U globalInvocationId;
 [push_constant, block] &struct {
-	V2U inputDimensions;
 	V2U outputDimensions;
-	F32 roughness;
-	U32 outputIdx;
-	U32 inputIdx;
-} pushConstants;
+	U32 inputCube;
+	U32 inputMipLevel;
+	U32 outputCube;
+} pushData;
 
 @[U32 packed][V3F x] pack_E5B9G9R9{
 	// The 5 bit exponent has no explicit 1 and has a bias of 15
@@ -35,15 +29,16 @@
 [entrypoint, localsize 16 16 1] @[][] compute_main{
 	V2U outputCoord{ globalInvocationId.xy };
 	U32 faceIdx{ globalInvocationId.z };
-	V2U outputDim{ pushConstants.outputDimensions };
+	V2U outputDim{ pushData.outputDimensions };
 	if outputCoord.x >= outputDim.x || outputCoord.y >= outputDim.y {
 		return;
 	};
 	V3F texCoord{ (V2F(outputCoord) + 0.5) / V2F(outputDim), F32(faceIdx) };
-	V3F color{ (^input)[^bilinearSampler, texCoord, F32(pushConstants.inputIdx)].rgb };
+	Sampler bilinearSampler{ 0u };
+	V3F color{ Image2DArraySampled(pushData.inputCube)[bilinearSampler, texCoord, F32(pushData.inputMipLevel)].rgb };
 	// Unfortunately I have to clamp the brightness to not require a huge number of samples to avoid banding for bright objects like the sun.
 	// Perhaps I should create a high quality cubemap pre-processor mode that spends several minutes calculating millions of samples per pixel
 	color = min(color, V3F(500.0));
 
-	write_image((^outputs)[pushConstants.outputIdx], V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
+	write_image(ImageU32CubeStorageR32UI(pushData.outputCube), V3U(outputCoord, faceIdx), V4U(pack_E5B9G9R9(color)));
 };
