@@ -364,5 +364,6 @@ FodyWeavers.xsd
 
 spv_test_output
 cubemap_test
+compression_tests
 *.spv
 /resources/shaders/spv/_timestamp

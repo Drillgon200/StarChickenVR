@@ -6,6 +6,7 @@
 #include "physics/SAT.h"
 #include "Level.h"
 #include "CubemapGen.h"
+#include "compression/BC7.h"
 
 namespace EditorUI {
 

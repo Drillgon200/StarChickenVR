@@ -159,6 +159,13 @@ FINLINE F32 fractf32(F32 f) {
 FINLINE F32 truncf32(F32 f) {
 	return _mm_cvtss_f32(_mm_round_ps(_mm_set_ss(f), _MM_ROUND_MODE_TOWARD_ZERO));
 }
+FINLINE F32 truncf(F32 f) {
+	return truncf32(f);
+}
+FINLINE F32 roundf32(F32 f) {
+	// I know adding 0.5 is not the right way to do this, can't be bothered to research it now though
+	return _mm_cvtss_f32(_mm_round_ps(_mm_set_ss(f + 0.5F), _MM_ROUND_MODE_DOWN));
+}
 FINLINE F32 floorf32(F32 f) {
 	return _mm_cvtss_f32(_mm_round_ps(_mm_set_ss(f), _MM_ROUND_MODE_DOWN));
 }
@@ -188,6 +195,9 @@ FINLINE F64 fractf64(F64 f) {
 FINLINE F64 absf64(F64 f) {
 	return _mm_cvtsd_f64(_mm_and_pd(_mm_set_sd(f), _mm_castsi128_pd(_mm_set1_epi64x(0x7FFFFFFFFFFFFFFFULL))));
 }
+FINLINE F32 normalize(F32 f) {
+	return signumf32(f);
+}
 
 FINLINE U32 bswap32(U32 val) {
 	return (val >> 24) | ((val >> 8) & 0xFF00) | ((val << 8) & 0xFF0000) | (val << 24);
@@ -195,6 +205,13 @@ FINLINE U32 bswap32(U32 val) {
 
 FINLINE U16 bswap16(U16 val) {
 	return U16((val >> 8) | (val << 8));
+}
+
+FINLINE U32 bitswap32(U32 val) {
+	val = (val & 0x0F0F0F0F) << 4 | val >> 4 & 0x0F0F0F0F; // swap 4 bits
+	val = (val & 0x33333333) << 2 | val >> 2 & 0x33333333; // swap 2 bits
+	val = (val & 0x55555555) << 1 | val >> 1 & 0x55555555; // swap 1 bit
+	return bswap32(val);
 }
 
 FINLINE U32 lzcnt32(U32 val) {
@@ -258,6 +275,10 @@ FINLINE T abs(T val) {
 	return val < T{} ? -val : val;
 }
 
+FINLINE F32 length_sq(F32 v) {
+	return v * v;
+}
+
 FINLINE bool epsilon_eq(F32 a, F32 b, F32 eps) {
 	return absf32(a - b) <= max(a, b) * eps;
 }
@@ -298,6 +319,56 @@ bool quadratic_formula_stable(F32* results, F32 a, F32 b, F32 c) {
 	F32 r2 = c / (a * r1);
 	results[0] = r1, results[1] = r2;
 	return true;
+}
+
+template<typename Vec, typename T>
+FINLINE Vec splat(T a) {
+	static_assert(false, "Not implemented for type");
+}
+template<>
+FINLINE F32 splat<F32, F32>(F32 a) {
+	return a;
+}
+
+template<>
+FINLINE F32x8 splat<F32x8, F32x8>(F32x8 a) {
+	return a;
+}
+FINLINE F32x8 truncf32x8(F32x8 f) {
+	return _mm256_round_ps(f, _MM_ROUND_MODE_TOWARD_ZERO);
+}
+FINLINE F32x8 truncf(F32x8 f) {
+	return truncf32x8(f);
+}
+FINLINE F32x8 equal_zero(F32x8 v) {
+	return _mm256_cmp_ps(v, _mm256_setzero_ps(), _CMP_EQ_UQ);
+}
+FINLINE F32x8 rcp(F32x8 v) {
+	return _mm256_rcp_ps(v);
+}
+FINLINE F32x8 length_sq(F32x8 v) {
+	return _mm256_mul_ps(v, v);
+}
+FINLINE F32x8 fmadd(F32x8 m1, F32x8 m2, F32x8 a) {
+	return _mm256_fmadd_ps(m1, m2, a);
+}
+FINLINE F32x8 signumf32x8(F32x8 f) {
+	// There's probably a better way to do this.
+	F32x8 zero = _mm256_setzero_ps();
+	F32x8 positive = _mm256_cmp_ps(f, zero, _CMP_GT_OQ);
+	F32x8 negative = _mm256_cmp_ps(f, zero, _CMP_LT_OQ);
+	return _mm256_or_ps(_mm256_and_ps(positive, _mm256_set1_ps(1.0F)), _mm256_and_ps(negative, _mm256_set1_ps(-1.0F)));
+}
+FINLINE F32x8 normalize(F32x8 f) {
+	return signumf32x8(f);
+}
+// Operator overloads for builtin types are questionable, but seem to work on MSVC. I may have to change this to a wrapper class if I ever support another compiler
+FINLINE F32x8 operator==(F32x8 a, F32x8 b) {
+	return _mm256_cmp_ps(a, b, _CMP_EQ_UQ);
+}
+template<>
+FINLINE F32x8 clamp01(F32x8 val) {
+	return _mm256_min_ps(_mm256_set1_ps(1.0F), _mm256_max_ps(_mm256_setzero_ps(), val));
 }
 
 #pragma pack(push, 1)
@@ -474,6 +545,11 @@ struct V3F32 {
 #pragma pack(pop)
 typedef V3F32 V3F;
 
+template<>
+FINLINE V3F32 splat<V3F32, F32>(F32 a) {
+	return V3F32{ a, a, a };
+}
+
 static constexpr V3F32 V3F32_UP{ 0.0F, 1.0F, 0.0F };
 static constexpr V3F32 V3F32_DOWN{ 0.0F, -1.0F, 0.0F };
 static constexpr V3F32 V3F32_NORTH{ 0.0F, 0.0F, -1.0F };
@@ -575,6 +651,13 @@ FINLINE V3F32 operator/=(V3F32& a, F32 b) {
 	return a;
 }
 
+FINLINE bool operator==(V3F32 a, V3F32 b) {
+	return a.x == b.x && a.y == b.y && a.z == b.z;
+}
+FINLINE bool operator!=(V3F32 a, V3F32 b) {
+	return a.x != b.x || a.y != b.y || a.z != b.z;
+}
+
 
 FINLINE F32 dot(V3F32 a, V3F32 b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -620,6 +703,23 @@ template<>
 FINLINE V3F32 max<V3F32>(V3F32 a, V3F32 b) {
 	return V3F32{ a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z };
 }
+template<>
+FINLINE V3F32 clamp(V3F32 val, V3F32 low, V3F32 high) {
+	return min(high, max(low, val));
+}
+template<>
+FINLINE V3F32 clamp01(V3F32 val) {
+	return clamp(val, V3F32{}, V3F32{ 1.0F, 1.0F, 1.0F });
+}
+FINLINE V3F32 floorv3f(V3F32 v) {
+	return V3F32{ floorf32(v.x), floorf32(v.y), floorf32(v.z) };
+}
+FINLINE V3F32 truncv3f(V3F32 v) {
+	return V3F32{ truncf32(v.x), truncf32(v.y), truncf32(v.z) };
+}
+FINLINE V3F32 truncf(V3F32 v) {
+	return truncv3f(v);
+}
 
 #pragma pack(push, 1)
 struct V2U32 {
@@ -639,6 +739,530 @@ struct V4F32 {
 };
 #pragma pack(pop)
 typedef V4F32 V4F;
+
+FINLINE V4F v4f(V3F xyz, F32 w) {
+	return V4F{ xyz.x, xyz.y, xyz.z, w };
+}
+FINLINE V3F v3f_xyz(V4F xyz) {
+	return V3F{ xyz.x, xyz.y, xyz.z };
+}
+template<>
+FINLINE V4F32 splat<V4F32, F32>(F32 a) {
+	return V4F32{ a, a, a, a };
+}
+
+FINLINE V4F32 operator+(V4F32 a, F32 b) {
+	return V4F32{ a.x + b, a.y + b, a.z + b, a.w + b };
+}
+FINLINE V4F32 operator+(F32 a, V4F32 b) {
+	return V4F32{ a + b.x, a + b.y, a + b.z, a + b.w };
+}
+FINLINE V4F32 operator+(V4F32 a, V4F32 b) {
+	return V4F32{ a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w };
+}
+
+FINLINE V4F32 operator-(V4F32 a, V4F32 b) {
+	return V4F32{ a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
+}
+FINLINE V4F32 operator-(V4F32 a, F32 b) {
+	return V4F32{ a.x - b, a.y - b, a.z - b, a.w - b };
+}
+FINLINE V4F32 operator-(F32 a, V4F32 b) {
+	return V4F32{ a - b.x, a - b.y, a - b.z, a - b.w };
+}
+FINLINE V4F32 operator-(V4F32 a) {
+	return V4F32{ -a.x, -a.y, -a.z, -a.w };
+}
+
+FINLINE V4F32 operator*(V4F32 a, V4F32 b) {
+	return V4F32{ a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w };
+}
+FINLINE V4F32 operator*(V4F32 a, F32 b) {
+	return V4F32{ a.x * b, a.y * b, a.z * b, a.w * b };
+}
+FINLINE V4F32 operator*(F32 a, V4F32 b) {
+	return V4F32{ a * b.x, a * b.y, a * b.z, a * b.w };
+}
+
+FINLINE V4F32 operator/(V4F32 a, V4F32 b) {
+	return V4F32{ a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w };
+}
+FINLINE V4F32 operator/(V4F32 a, F32 b) {
+	F32 invB = 1.0F / b;
+	return V4F32{ a.x * invB, a.y * invB, a.z * invB, a.w * invB };
+}
+FINLINE V4F32 operator/(F32 a, V4F32 b) {
+	return V4F32{ a / b.x, a / b.y, a / b.z, a / b.w };
+}
+
+FINLINE V4F32 operator+=(V4F32& a, V4F32 b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+	a.w += b.w;
+	return a;
+}
+FINLINE V4F32 operator+=(V4F32& a, F32 b) {
+	a.x += b;
+	a.y += b;
+	a.z += b;
+	a.w += b;
+	return a;
+}
+FINLINE V4F32 operator-=(V4F32& a, V4F32 b) {
+	a.x -= b.x;
+	a.y -= b.y;
+	a.z -= b.z;
+	a.w -= b.w;
+	return a;
+}
+FINLINE V4F32 operator-=(V4F32& a, F32 b) {
+	a.x -= b;
+	a.y -= b;
+	a.z -= b;
+	a.w -= b;
+	return a;
+}
+FINLINE V4F32 operator*=(V4F32& a, V4F32 b) {
+	a.x *= b.x;
+	a.y *= b.y;
+	a.z *= b.z;
+	a.w *= b.w;
+	return a;
+}
+FINLINE V4F32 operator*=(V4F32& a, F32 b) {
+	a.x *= b;
+	a.y *= b;
+	a.z *= b;
+	a.w *= b;
+	return a;
+}
+FINLINE V4F32 operator/=(V4F32& a, V4F32 b) {
+	a.x /= b.x;
+	a.y /= b.y;
+	a.z /= b.z;
+	a.w /= b.w;
+	return a;
+}
+FINLINE V4F32 operator/=(V4F32& a, F32 b) {
+	F32 invB = 1.0F / b;
+	a.x *= invB;
+	a.y *= invB;
+	a.z *= invB;
+	a.w *= invB;
+	return a;
+}
+
+FINLINE bool operator==(V4F32 a, V4F32 b) {
+	return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+}
+FINLINE bool operator!=(V4F32 a, V4F32 b) {
+	return a.x != b.x || a.y != b.y || a.z != b.z || a.w != b.w;
+}
+
+FINLINE F32 dot(V4F32 a, V4F32 b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+}
+FINLINE F32 length_sq(V4F32 v) {
+	return v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
+}
+FINLINE F32 distance_sq(V4F32 a, V4F32 b) {
+	F32 dx = a.x - b.x;
+	F32 dy = a.y - b.y;
+	F32 dz = a.z - b.z;
+	F32 dw = a.w - b.w;
+	return dx * dx + dy * dy + dz * dz + dw * dw;
+}
+FINLINE F32 length(V4F32 v) {
+	return sqrtf32(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w);
+}
+FINLINE F32 distance(V4F32 a, V4F32 b) {
+	F32 dx = a.x - b.x;
+	F32 dy = a.y - b.y;
+	F32 dz = a.z - b.z;
+	F32 dw = a.w - b.w;
+	return sqrtf32(dx * dx + dy * dy + dz * dz + dw * dw);
+}
+FINLINE V4F32 normalize(V4F32 v) {
+	F32 invLen = 1.0F / sqrtf32(v.x * v.x + v.y * v.y + v.z * v.z);
+	return V4F32{ v.x * invLen, v.y * invLen, v.z * invLen, v.w * invLen };
+}
+FINLINE V4F32 normalize_safe(V4F32 v, F32 epsilon) {
+	F32 lenSq = v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
+	if (lenSq < epsilon) {
+		return V4F32{};
+	}
+	F32 invLen = 1.0F / sqrtf32(lenSq);
+	return V4F32{ v.x * invLen, v.y * invLen, v.z * invLen, v.w * invLen };
+}
+template<>
+FINLINE V4F32 min<V4F32>(V4F32 a, V4F32 b) {
+	return V4F32{ a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y, a.z < b.z ? a.z : b.z, a.w < b.w ? a.w : b.w };
+}
+template<>
+FINLINE V4F32 max<V4F32>(V4F32 a, V4F32 b) {
+	return V4F32{ a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z, a.w > b.w ? a.w : b.w };
+}
+template<>
+FINLINE V4F32 clamp(V4F32 val, V4F32 low, V4F32 high) {
+	return min(high, max(low, val));
+}
+template<>
+FINLINE V4F32 clamp01(V4F32 val) {
+	return clamp(val, V4F32{}, V4F32{ 1.0F, 1.0F, 1.0F, 1.0F });
+}
+FINLINE V4F32 floorv4f(V4F32 v) {
+	return V4F32{ floorf32(v.x), floorf32(v.y), floorf32(v.z), floorf32(v.w) };
+}
+FINLINE V4F32 truncv4f(V4F32 v) {
+	return V4F32{ truncf32(v.x), truncf32(v.y), truncf32(v.z), truncf32(v.w) };
+}
+FINLINE V4F32 truncf(V4F32 v) {
+	return truncv4f(v);
+}
+
+
+FINLINE F32x8 blend(F32x8 a, F32x8 b, F32x8 weight) {
+	return _mm256_blendv_ps(a, b, weight);
+}
+FINLINE U32x8 blend(U32x8 a, U32x8 b, F32x8 weight) {
+	return _mm256_blendv_epi8(a, b, _mm256_castps_si256(weight));
+}
+// Takes each 32 bit part of mask, extends it to 64 bits, then puts both halves of the 512 bit result in lo and hi
+FINLINE void extract_lo_hi_masks(F32x8 mask, F32x8* lo, F32x8* hi) {
+	*lo = _mm256_castsi256_ps(_mm256_cvtepi32_epi64(_mm256_castsi256_si128(_mm256_castps_si256(mask))));
+	*hi = _mm256_castsi256_ps(_mm256_cvtepi32_epi64(_mm256_extracti128_si256(_mm256_castps_si256(mask), 1)));
+}
+
+struct V3Fx8 {
+	F32x8 x, y, z;
+};
+template<>
+FINLINE V3Fx8 splat<V3Fx8, F32x8>(F32x8 a) {
+	return V3Fx8{ a, a, a };
+}
+FINLINE V3Fx8 operator+(V3Fx8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_add_ps(a.x, b.x), _mm256_add_ps(a.y, b.y), _mm256_add_ps(a.z, b.z) };
+}
+FINLINE V3Fx8 operator+(V3Fx8 a, F32x8 b) {
+	return V3Fx8{ _mm256_add_ps(a.x, b), _mm256_add_ps(a.y, b), _mm256_add_ps(a.z, b) };
+}
+FINLINE V3Fx8 operator+(V3Fx8 a, F32 b) {
+	F32x8 bx8 = _mm256_set1_ps(b);
+	return V3Fx8{ _mm256_add_ps(a.x, bx8), _mm256_add_ps(a.y, bx8), _mm256_add_ps(a.z, bx8) };
+}
+FINLINE V3Fx8 operator+(F32x8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_add_ps(a, b.x), _mm256_add_ps(a, b.y), _mm256_add_ps(a, b.z) };
+}
+FINLINE V3Fx8 operator+(F32 a, V3Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V3Fx8{ _mm256_add_ps(ax8, b.x), _mm256_add_ps(ax8, b.y), _mm256_add_ps(ax8, b.z) };
+}
+FINLINE V3Fx8 operator-(V3Fx8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_sub_ps(a.x, b.x), _mm256_sub_ps(a.y, b.y), _mm256_sub_ps(a.z, b.z) };
+}
+FINLINE V3Fx8 operator-(V3Fx8 a, F32x8 b) {
+	return V3Fx8{ _mm256_sub_ps(a.x, b), _mm256_sub_ps(a.y, b), _mm256_sub_ps(a.z, b) };
+}
+FINLINE V3Fx8 operator-(V3Fx8 a, F32 b) {
+	F32x8 bx8 = _mm256_set1_ps(b);
+	return V3Fx8{ _mm256_sub_ps(a.x, bx8), _mm256_sub_ps(a.y, bx8), _mm256_sub_ps(a.z, bx8) };
+}
+FINLINE V3Fx8 operator-(F32x8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_sub_ps(a, b.x), _mm256_sub_ps(a, b.y), _mm256_sub_ps(a, b.z) };
+}
+FINLINE V3Fx8 operator-(F32 a, V3Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V3Fx8{ _mm256_sub_ps(ax8, b.x), _mm256_sub_ps(ax8, b.y), _mm256_sub_ps(ax8, b.z) };
+}
+FINLINE V3Fx8 operator*(V3Fx8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_mul_ps(a.x, b.x), _mm256_mul_ps(a.y, b.y), _mm256_mul_ps(a.z, b.z) };
+}
+FINLINE V3Fx8 operator*(V3Fx8 a, F32x8 b) {
+	return V3Fx8{ _mm256_mul_ps(a.x, b), _mm256_mul_ps(a.y, b), _mm256_mul_ps(a.z, b) };
+}
+FINLINE V3Fx8 operator*(V3Fx8 a, F32 b) {
+	F32x8 bx8 = _mm256_set1_ps(b);
+	return V3Fx8{ _mm256_mul_ps(a.x, bx8), _mm256_mul_ps(a.y, bx8), _mm256_mul_ps(a.z, bx8) };
+}
+FINLINE V3Fx8 operator*(F32x8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_mul_ps(a, b.x), _mm256_mul_ps(a, b.y), _mm256_mul_ps(a, b.z) };
+}
+FINLINE V3Fx8 operator*(F32 a, V3Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V3Fx8{ _mm256_mul_ps(ax8, b.x), _mm256_mul_ps(ax8, b.y), _mm256_mul_ps(ax8, b.z) };
+}
+FINLINE V3Fx8 operator/(V3Fx8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_div_ps(a.x, b.x), _mm256_div_ps(a.y, b.y), _mm256_div_ps(a.z, b.z) };
+}
+FINLINE V3Fx8 operator/(V3Fx8 a, F32x8 b) {
+	F32x8 rcpB = _mm256_div_ps(_mm256_set1_ps(1.0F), b);
+	return V3Fx8{ _mm256_mul_ps(a.x, rcpB), _mm256_mul_ps(a.y, rcpB), _mm256_mul_ps(a.z, rcpB) };
+}
+FINLINE V3Fx8 operator/(V3Fx8 a, F32 b) {
+	F32x8 rcpB = _mm256_set1_ps(1.0F / b);
+	return V3Fx8{ _mm256_mul_ps(a.x, rcpB), _mm256_mul_ps(a.y, rcpB), _mm256_mul_ps(a.z, rcpB) };
+}
+FINLINE V3Fx8 operator/(F32x8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_div_ps(a, b.x), _mm256_div_ps(a, b.y), _mm256_div_ps(a, b.z) };
+}
+FINLINE V3Fx8 operator/(F32 a, V3Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V3Fx8{ _mm256_div_ps(ax8, b.x), _mm256_div_ps(ax8, b.y), _mm256_div_ps(ax8, b.z) };
+}
+
+FINLINE V3Fx8 rcp(V3Fx8 v) {
+	return V3Fx8{ _mm256_rcp_ps(v.x), _mm256_rcp_ps(v.y), _mm256_rcp_ps(v.z) };
+}
+FINLINE F32x8 operator==(V3Fx8 a, V3Fx8 b) {
+	F32x8 cmpx = _mm256_cmp_ps(a.x, b.x, _CMP_EQ_UQ);
+	F32x8 cmpy = _mm256_cmp_ps(a.y, b.y, _CMP_EQ_UQ);
+	F32x8 cmpz = _mm256_cmp_ps(a.z, b.z, _CMP_EQ_UQ);
+	return _mm256_and_ps(cmpx, _mm256_and_ps(cmpy, cmpz));
+}
+FINLINE V3Fx8 fmadd(V3Fx8 m1, V3Fx8 m2, V3Fx8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1.x, m2.x, a.x), _mm256_fmadd_ps(m1.y, m2.y, a.y), _mm256_fmadd_ps(m1.z, m2.z, a.z) };
+}
+FINLINE V3Fx8 fmadd(V3Fx8 m1, V3Fx8 m2, F32x8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1.x, m2.x, a), _mm256_fmadd_ps(m1.y, m2.y, a), _mm256_fmadd_ps(m1.z, m2.z, a) };
+}
+FINLINE V3Fx8 fmadd(V3Fx8 m1, F32x8 m2, V3Fx8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1.x, m2, a.x), _mm256_fmadd_ps(m1.y, m2, a.y), _mm256_fmadd_ps(m1.z, m2, a.z) };
+}
+FINLINE V3Fx8 fmadd(V3Fx8 m1, F32x8 m2, F32x8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1.x, m2, a), _mm256_fmadd_ps(m1.y, m2, a), _mm256_fmadd_ps(m1.z, m2, a) };
+}
+FINLINE V3Fx8 fmadd(F32x8 m1, V3Fx8 m2, V3Fx8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1, m2.x, a.x), _mm256_fmadd_ps(m1, m2.y, a.y), _mm256_fmadd_ps(m1, m2.z, a.z) };
+}
+FINLINE V3Fx8 fmadd(F32x8 m1, V3Fx8 m2, F32x8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1, m2.x, a), _mm256_fmadd_ps(m1, m2.y, a), _mm256_fmadd_ps(m1, m2.z, a) };
+}
+FINLINE V3Fx8 fmadd(F32x8 m1, F32x8 m2, V3Fx8 a) {
+	return V3Fx8{ _mm256_fmadd_ps(m1, m2, a.x), _mm256_fmadd_ps(m1, m2, a.y), _mm256_fmadd_ps(m1, m2, a.z) };
+}
+FINLINE V3Fx8 blend(V3Fx8 a, V3Fx8 b, F32x8 weight) {
+	return V3Fx8{ _mm256_blendv_ps(a.x, b.x, weight), _mm256_blendv_ps(a.y, b.y, weight), _mm256_blendv_ps(a.z, b.z, weight) };
+}
+FINLINE V3Fx8 normalize(V3Fx8 v) {
+	F32x8 len = _mm256_sqrt_ps(_mm256_fmadd_ps(v.x, v.x, _mm256_fmadd_ps(v.y, v.y, _mm256_mul_ps(v.z, v.z))));
+	F32x8 invLen = _mm256_div_ps(_mm256_set1_ps(1.0F), len);
+	return V3Fx8{ _mm256_mul_ps(v.x, invLen), _mm256_mul_ps(v.y, invLen), _mm256_mul_ps(v.z, invLen) };
+}
+FINLINE F32x8 dot(V3Fx8 a, V3Fx8 b) {
+	return _mm256_fmadd_ps(a.x, b.x, _mm256_fmadd_ps(a.y, b.y, _mm256_mul_ps(a.z, b.z)));
+}
+FINLINE F32x8 length_sq(V3Fx8 v) {
+	return _mm256_fmadd_ps(v.x, v.x, _mm256_fmadd_ps(v.y, v.y, _mm256_mul_ps(v.z, v.z)));
+}
+FINLINE V3Fx8 truncv3fx8(V3Fx8 v) {
+	return V3Fx8{ truncf32x8(v.x), truncf32x8(v.y), truncf32x8(v.z) };
+}
+FINLINE V3Fx8 truncf(V3Fx8 v) {
+	return truncv3fx8(v);
+}
+FINLINE F32x8 equal_zero(V3Fx8 v) {
+	F32x8 zero = _mm256_setzero_ps();
+	F32x8 cmpx = _mm256_cmp_ps(v.x, zero, _CMP_EQ_UQ);
+	F32x8 cmpy = _mm256_cmp_ps(v.y, zero, _CMP_EQ_UQ);
+	F32x8 cmpz = _mm256_cmp_ps(v.z, zero, _CMP_EQ_UQ);
+	return _mm256_and_ps(cmpx, _mm256_and_ps(cmpy, cmpz));
+}
+template<>
+FINLINE V3Fx8 min<V3Fx8>(V3Fx8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_min_ps(a.x, b.x), _mm256_min_ps(a.y, b.y), _mm256_min_ps(a.z, b.z) };
+}
+template<>
+FINLINE V3Fx8 max<V3Fx8>(V3Fx8 a, V3Fx8 b) {
+	return V3Fx8{ _mm256_max_ps(a.x, b.x), _mm256_max_ps(a.y, b.y), _mm256_max_ps(a.z, b.z) };
+}
+template<>
+FINLINE V3Fx8 clamp(V3Fx8 val, V3Fx8 low, V3Fx8 high) {
+	return min(high, max(low, val));
+}
+template<>
+FINLINE V3Fx8 clamp01(V3Fx8 val) {
+	F32x8 zero = _mm256_setzero_ps();
+	F32x8 one = _mm256_set1_ps(1.0F);
+	return V3Fx8{ _mm256_max_ps(zero, _mm256_min_ps(one, val.x)), _mm256_max_ps(zero, _mm256_min_ps(one, val.y)), _mm256_max_ps(zero, _mm256_min_ps(one, val.z)) };
+}
+
+struct V4Fx8 {
+	F32x8 x, y, z, w;
+};
+template<>
+FINLINE V4Fx8 splat<V4Fx8, F32x8>(F32x8 a) {
+	return V4Fx8{ a, a, a, a };
+}
+FINLINE V4Fx8 v4fx8(V3Fx8 xyz, F32x8 w) {
+	return V4Fx8{ xyz.x, xyz.y, xyz.z, w };
+}
+FINLINE V3Fx8 v3fx8_xyz(V4Fx8 xyz) {
+	return V3Fx8{ xyz.x, xyz.y, xyz.z };
+}
+FINLINE V4Fx8 operator+(V4Fx8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_add_ps(a.x, b.x), _mm256_add_ps(a.y, b.y), _mm256_add_ps(a.z, b.z), _mm256_add_ps(a.w, b.w) };
+}
+FINLINE V4Fx8 operator+(V4Fx8 a, F32x8 b) {
+	return V4Fx8{ _mm256_add_ps(a.x, b), _mm256_add_ps(a.y, b), _mm256_add_ps(a.z, b), _mm256_add_ps(a.w, b) };
+}
+FINLINE V4Fx8 operator+(V4Fx8 a, F32 b) {
+	F32x8 bx8 = _mm256_set1_ps(b);
+	return V4Fx8{ _mm256_add_ps(a.x, bx8), _mm256_add_ps(a.y, bx8), _mm256_add_ps(a.z, bx8), _mm256_add_ps(a.w, bx8) };
+}
+FINLINE V4Fx8 operator+(F32x8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_add_ps(a, b.x), _mm256_add_ps(a, b.y), _mm256_add_ps(a, b.z), _mm256_add_ps(a, b.w) };
+}
+FINLINE V4Fx8 operator+(F32 a, V4Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V4Fx8{ _mm256_add_ps(ax8, b.x), _mm256_add_ps(ax8, b.y), _mm256_add_ps(ax8, b.z), _mm256_add_ps(ax8, b.w) };
+}
+FINLINE V4Fx8 operator-(V4Fx8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_sub_ps(a.x, b.x), _mm256_sub_ps(a.y, b.y), _mm256_sub_ps(a.z, b.z), _mm256_sub_ps(a.w, b.w) };
+}
+FINLINE V4Fx8 operator-(V4Fx8 a, F32x8 b) {
+	return V4Fx8{ _mm256_sub_ps(a.x, b), _mm256_sub_ps(a.y, b), _mm256_sub_ps(a.z, b), _mm256_sub_ps(a.w, b) };
+}
+FINLINE V4Fx8 operator-(V4Fx8 a, F32 b) {
+	F32x8 bx8 = _mm256_set1_ps(b);
+	return V4Fx8{ _mm256_sub_ps(a.x, bx8), _mm256_sub_ps(a.y, bx8), _mm256_sub_ps(a.z, bx8), _mm256_sub_ps(a.w, bx8) };
+}
+FINLINE V4Fx8 operator-(F32x8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_sub_ps(a, b.x), _mm256_sub_ps(a, b.y), _mm256_sub_ps(a, b.z), _mm256_sub_ps(a, b.w) };
+}
+FINLINE V4Fx8 operator-(F32 a, V4Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V4Fx8{ _mm256_sub_ps(ax8, b.x), _mm256_sub_ps(ax8, b.y), _mm256_sub_ps(ax8, b.z), _mm256_sub_ps(ax8, b.w) };
+}
+FINLINE V4Fx8 operator*(V4Fx8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_mul_ps(a.x, b.x), _mm256_mul_ps(a.y, b.y), _mm256_mul_ps(a.z, b.z), _mm256_mul_ps(a.w, b.w) };
+}
+FINLINE V4Fx8 operator*(V4Fx8 a, F32x8 b) {
+	return V4Fx8{ _mm256_mul_ps(a.x, b), _mm256_mul_ps(a.y, b), _mm256_mul_ps(a.z, b), _mm256_mul_ps(a.w, b) };
+}
+FINLINE V4Fx8 operator*(V4Fx8 a, F32 b) {
+	F32x8 bx8 = _mm256_set1_ps(b);
+	return V4Fx8{ _mm256_mul_ps(a.x, bx8), _mm256_mul_ps(a.y, bx8), _mm256_mul_ps(a.z, bx8), _mm256_mul_ps(a.w, bx8) };
+}
+FINLINE V4Fx8 operator*(F32x8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_mul_ps(a, b.x), _mm256_mul_ps(a, b.y), _mm256_mul_ps(a, b.z), _mm256_mul_ps(a, b.w) };
+}
+FINLINE V4Fx8 operator*(F32 a, V4Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V4Fx8{ _mm256_mul_ps(ax8, b.x), _mm256_mul_ps(ax8, b.y), _mm256_mul_ps(ax8, b.z), _mm256_mul_ps(ax8, b.w) };
+}
+FINLINE V4Fx8 operator/(V4Fx8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_div_ps(a.x, b.x), _mm256_div_ps(a.y, b.y), _mm256_div_ps(a.z, b.z), _mm256_div_ps(a.w, b.w) };
+}
+FINLINE V4Fx8 operator/(V4Fx8 a, F32x8 b) {
+	F32x8 rcpB = _mm256_div_ps(_mm256_set1_ps(1.0F), b);
+	return V4Fx8{ _mm256_mul_ps(a.x, rcpB), _mm256_mul_ps(a.y, rcpB), _mm256_mul_ps(a.z, rcpB), _mm256_mul_ps(a.w, rcpB) };
+}
+FINLINE V4Fx8 operator/(V4Fx8 a, F32 b) {
+	F32x8 rcpB = _mm256_set1_ps(1.0F / b);
+	return V4Fx8{ _mm256_mul_ps(a.x, rcpB), _mm256_mul_ps(a.y, rcpB), _mm256_mul_ps(a.z, rcpB), _mm256_mul_ps(a.w, rcpB) };
+}
+FINLINE V4Fx8 operator/(F32x8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_div_ps(a, b.x), _mm256_div_ps(a, b.y), _mm256_div_ps(a, b.z), _mm256_div_ps(a, b.w) };
+}
+FINLINE V4Fx8 operator/(F32 a, V4Fx8 b) {
+	F32x8 ax8 = _mm256_set1_ps(a);
+	return V4Fx8{ _mm256_div_ps(ax8, b.x), _mm256_div_ps(ax8, b.y), _mm256_div_ps(ax8, b.z), _mm256_div_ps(ax8, b.w) };
+}
+
+FINLINE V4Fx8 rcp(V4Fx8 v) {
+	return V4Fx8{ _mm256_rcp_ps(v.x), _mm256_rcp_ps(v.y), _mm256_rcp_ps(v.z), _mm256_rcp_ps(v.w) };
+}
+FINLINE F32x8 operator==(const V4Fx8& a, const V4Fx8& b) {
+	F32x8 cmpx = _mm256_cmp_ps(a.x, b.x, _CMP_EQ_UQ);
+	F32x8 cmpy = _mm256_cmp_ps(a.y, b.y, _CMP_EQ_UQ);
+	F32x8 cmpz = _mm256_cmp_ps(a.z, b.z, _CMP_EQ_UQ);
+	F32x8 cmpw = _mm256_cmp_ps(a.w, b.w, _CMP_EQ_UQ);
+	return _mm256_and_ps(_mm256_and_ps(cmpx, cmpy), _mm256_and_ps(cmpz, cmpw));
+}
+FINLINE V4Fx8 fmadd(V4Fx8 m1, V4Fx8 m2, V4Fx8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1.x, m2.x, a.x), _mm256_fmadd_ps(m1.y, m2.y, a.y), _mm256_fmadd_ps(m1.z, m2.z, a.z), _mm256_fmadd_ps(m1.w, m2.w, a.w) };
+}
+FINLINE V4Fx8 fmadd(V4Fx8 m1, V4Fx8 m2, F32x8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1.x, m2.x, a), _mm256_fmadd_ps(m1.y, m2.y, a), _mm256_fmadd_ps(m1.z, m2.z, a), _mm256_fmadd_ps(m1.w, m2.w, a) };
+}
+FINLINE V4Fx8 fmadd(V4Fx8 m1, F32x8 m2, V4Fx8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1.x, m2, a.x), _mm256_fmadd_ps(m1.y, m2, a.y), _mm256_fmadd_ps(m1.z, m2, a.z), _mm256_fmadd_ps(m1.w, m2, a.w) };
+}
+FINLINE V4Fx8 fmadd(V4Fx8 m1, F32x8 m2, F32x8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1.x, m2, a), _mm256_fmadd_ps(m1.y, m2, a), _mm256_fmadd_ps(m1.z, m2, a), _mm256_fmadd_ps(m1.w, m2, a) };
+}
+FINLINE V4Fx8 fmadd(F32x8 m1, V4Fx8 m2, V4Fx8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1, m2.x, a.x), _mm256_fmadd_ps(m1, m2.y, a.y), _mm256_fmadd_ps(m1, m2.z, a.z), _mm256_fmadd_ps(m1, m2.w, a.w) };
+}
+FINLINE V4Fx8 fmadd(F32x8 m1, V4Fx8 m2, F32x8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1, m2.x, a), _mm256_fmadd_ps(m1, m2.y, a), _mm256_fmadd_ps(m1, m2.z, a), _mm256_fmadd_ps(m1, m2.w, a) };
+}
+FINLINE V4Fx8 fmadd(F32x8 m1, F32x8 m2, V4Fx8 a) {
+	return V4Fx8{ _mm256_fmadd_ps(m1, m2, a.x), _mm256_fmadd_ps(m1, m2, a.y), _mm256_fmadd_ps(m1, m2, a.z), _mm256_fmadd_ps(m1, m2, a.w) };
+}
+FINLINE V4Fx8 blend(V4Fx8 a, V4Fx8 b, F32x8 weight) {
+	return V4Fx8{ _mm256_blendv_ps(a.x, b.x, weight), _mm256_blendv_ps(a.y, b.y, weight), _mm256_blendv_ps(a.z, b.z, weight), _mm256_blendv_ps(a.w, b.w, weight) };
+}
+FINLINE V4Fx8 normalize(V4Fx8 v) {
+	F32x8 len = _mm256_sqrt_ps(_mm256_fmadd_ps(v.x, v.x, _mm256_fmadd_ps(v.y, v.y, _mm256_fmadd_ps(v.z, v.z, _mm256_mul_ps(v.w, v.w)))));
+	F32x8 invLen = _mm256_div_ps(_mm256_set1_ps(1.0F), len);
+	return V4Fx8{ _mm256_mul_ps(v.x, invLen), _mm256_mul_ps(v.y, invLen), _mm256_mul_ps(v.z, invLen), _mm256_mul_ps(v.w, invLen) };
+}
+FINLINE F32x8 dot(V4Fx8 a, V4Fx8 b) {
+	return _mm256_fmadd_ps(a.x, b.x, _mm256_fmadd_ps(a.y, b.y, _mm256_fmadd_ps(a.z, b.z, _mm256_mul_ps(a.w, b.w))));
+}
+FINLINE F32x8 length_sq(V4Fx8 v) {
+	return _mm256_fmadd_ps(v.x, v.x, _mm256_fmadd_ps(v.y, v.y, _mm256_fmadd_ps(v.z, v.z, _mm256_mul_ps(v.w, v.w))));
+}
+FINLINE V4Fx8 truncv4fx8(V4Fx8 v) {
+	return V4Fx8{ truncf32x8(v.x), truncf32x8(v.y), truncf32x8(v.z), truncf32x8(v.w) };
+}
+FINLINE V4Fx8 truncf(V4Fx8 v) {
+	return truncv4fx8(v);
+}
+FINLINE F32x8 equal_zero(V4Fx8 v) {
+	F32x8 zero = _mm256_setzero_ps();
+	F32x8 cmpx = _mm256_cmp_ps(v.x, zero, _CMP_EQ_UQ);
+	F32x8 cmpy = _mm256_cmp_ps(v.y, zero, _CMP_EQ_UQ);
+	F32x8 cmpz = _mm256_cmp_ps(v.z, zero, _CMP_EQ_UQ);
+	F32x8 cmpw = _mm256_cmp_ps(v.w, zero, _CMP_EQ_UQ);
+	return _mm256_and_ps(_mm256_and_ps(cmpx, cmpy), _mm256_and_ps(cmpz, cmpw));
+}
+template<>
+FINLINE V4Fx8 min<V4Fx8>(V4Fx8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_min_ps(a.x, b.x), _mm256_min_ps(a.y, b.y), _mm256_min_ps(a.z, b.z), _mm256_min_ps(a.w, b.w) };
+}
+template<>
+FINLINE V4Fx8 max<V4Fx8>(V4Fx8 a, V4Fx8 b) {
+	return V4Fx8{ _mm256_max_ps(a.x, b.x), _mm256_max_ps(a.y, b.y), _mm256_max_ps(a.z, b.z), _mm256_max_ps(a.w, b.w) };
+}
+template<>
+FINLINE V4Fx8 clamp(V4Fx8 val, V4Fx8 low, V4Fx8 high) {
+	return min(high, max(low, val));
+}
+template<>
+FINLINE V4Fx8 clamp01(V4Fx8 val) {
+	F32x8 zero = _mm256_setzero_ps();
+	F32x8 one = _mm256_set1_ps(1.0F);
+	return V4Fx8{ _mm256_max_ps(zero, _mm256_min_ps(one, val.x)), _mm256_max_ps(zero, _mm256_min_ps(one, val.y)), _mm256_max_ps(zero, _mm256_min_ps(one, val.z)), _mm256_max_ps(zero, _mm256_min_ps(one, val.w)) };
+}
+
+FINLINE U32x4 cvt_int64x4_int32x4(U64x4 vec) {
+	// Could be better as a single vpermd
+	F32x4 low = _mm_castsi128_ps(_mm256_castsi256_si128(vec));
+	F32x4 high = _mm_castsi128_ps(_mm256_extracti128_si256(vec, 1));
+	return _mm_castps_si128(_mm_shuffle_ps(low, high, _MM_SHUFFLE(2, 0, 2, 0)));
+}
+
+FINLINE F32 horizontal_sum(const F32x8& f) {
+	F32x4 fLow = _mm256_castps256_ps128(f);
+	F32x4 fHigh = _mm256_extractf128_ps(f, 1);
+	F32x4 sum = _mm_add_ps(fLow, fHigh);
+	sum = _mm_add_ps(sum, _mm_permute_ps(sum, _MM_PERM_CDCD));
+	sum = _mm_add_ps(sum, _mm_permute_ps(sum, _MM_PERM_BBBB));
+	return _mm_cvtss_f32(sum);
+}
 
 // Not optimized, might be worth coming back to
 template<typename Vec>

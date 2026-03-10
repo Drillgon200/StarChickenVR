@@ -16,8 +16,12 @@ struct TestGroup {
 };
 
 ArenaArrayList<TestGroup> groupStack;
+bool testOutputDisabled;
 
 void test_expect_check(B32 failed, const char* funcName, U32 lineNumber) {
+	if (testOutputDisabled) {
+		return;
+	}
 	if (failed) {
 		groupStack.back().testsFailed++;
 		println(strafmt(get_scratch_arena(), "%Test failed, func %, line %"a, "-"a.rep(get_scratch_arena(), groupStack.size), funcName, lineNumber));

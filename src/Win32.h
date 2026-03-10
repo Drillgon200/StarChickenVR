@@ -150,6 +150,23 @@ enum Key {
 	KEY_Count = 0xFF
 };
 
+struct ErrCode {
+	DWORD err;
+};
+
+StrA get_error_text(MemoryArena& arena, DWORD err) {
+	arena.commit_bytes(U16_MAX);
+	DWORD numChars = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, LANG_SYSTEM_DEFAULT, (char*)arena.stackBase + arena.stackPtr, U16_MAX, NULL);
+	DWORD errCode = GetLastError();
+	if (numChars == 0) {
+		return ""a;
+	} else {
+		StrA result{ (char*)arena.stackBase + arena.stackPtr, numChars };
+		arena.stackPtr += numChars;
+		return result;
+	}
+}
+
 #define USER32_FUNCTIONS X(MessageBoxA)\
 	X(DispatchMessageA)\
 	X(TranslateMessage)\
@@ -659,4 +676,14 @@ void destroy() {
 // In any case, it costs me nothing to include this, so why not
 extern "C" __declspec(dllexport) void NoHotPatch() {}
 
+}
+
+template<typename... Values>
+StrA strafmt(MemoryArena& arena, StrA format, Win32::ErrCode val, Values... others) {
+	U64 prevStackPtr = arena.stackPtr;
+	if (strafmt_write_until_format_specifier(arena, &format)) {
+		Win32::get_error_text(arena, val.err);
+		strafmt(arena, format, others...);
+	}
+	return StrA{ reinterpret_cast<char*>(arena.stackBase) + prevStackPtr, arena.stackPtr - prevStackPtr };
 }

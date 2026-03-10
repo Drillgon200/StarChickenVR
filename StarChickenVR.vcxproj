@@ -94,6 +94,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
@@ -216,11 +217,11 @@
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324</DisableSpecificWarnings>
-      <CallingConvention>VectorCall</CallingConvention>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      <CallingConvention>VectorCall</CallingConvention>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -253,7 +254,7 @@
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324</DisableSpecificWarnings>
       <CallingConvention>VectorCall</CallingConvention>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
       <MultiProcessorCompilation>false</MultiProcessorCompilation>
@@ -350,6 +351,11 @@
     <ClInclude Include="external\vulkan\vk_platform.h" />
     <ClInclude Include="external\vulkan\vulkan.h" />
     <ClInclude Include="external\vulkan\vulkan_core.h" />
+    <ClInclude Include="src\compression\BC7.h" />
+    <ClInclude Include="src\compression\BC7Tables.h" />
+    <ClInclude Include="src\compression\BCCommon.h" />
+    <ClInclude Include="src\compression\Huffman.h" />
+    <ClInclude Include="src\compression\LZ.h" />
     <ClInclude Include="src\CubemapGen.h" />
     <ClInclude Include="src\DrillLib.h" />
     <ClInclude Include="src\DrillLibDefs.h" />
@@ -384,6 +390,7 @@
     <ClInclude Include="src\Win32.h" />
     <ClInclude Include="src\XR.h" />
     <ClInclude Include="src\XR_decl.h" />
+    <ClInclude Include="tests\CompressionTests.h" />
     <ClInclude Include="tests\DrillLibTests.h" />
     <ClInclude Include="tests\ShaderCompilerTests.h" />
     <ClInclude Include="tests\StarChickenTests.h" />
@@ -397,7 +404,16 @@
   <ItemGroup>
     <Text Include="src\SerializeToolsPowerOf5Table.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <MASM Include="src\compression\Huffman.asm">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <UseSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</UseSafeExceptionHandlers>
+      <CallingConvention Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">1</CallingConvention>
+    </MASM>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
 </Project>

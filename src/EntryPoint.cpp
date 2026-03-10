@@ -8,6 +8,8 @@
 #include "../tests/StarChickenTests.h"
 #endif
 
+#include "../tests/StarChickenTests.h"
+
 // It is actually possible to initialize with no import libraries (see link)
 // However, it requires going through a lot of undocumented windows stuff that could change at any time
 // and I don't want my program to break on some future version of windows just because I didn't want to link to kernel32.dll at compile time
@@ -20,8 +22,9 @@ extern "C" void __stdcall mainCRTStartup() {
 #ifdef TESTING_ENABLE
 		StarChickenTests::run_all();
 #else
-		result = StarChicken::run_star_chicken();
+		//result = StarChicken::run_star_chicken();
 #endif
+		CompressionTests::lz_bc7_full_test();
 	}
 	ExitProcess(result);
 }

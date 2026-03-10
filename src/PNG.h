@@ -116,6 +116,7 @@ struct HuffmanTree {
 		I32 firstCodeForLength = 0;
 		I32 huffmanCode = 0;
 
+		// This is a really slow implementation of huffman decoding (table driven is ideal), but it doesn't matter since the game's textures don't use PNG for the most part.
 		for (I32 treeLevel = 1; treeLevel <= MAX_BIT_LENGTH; treeLevel++) {
 			I32 bit = I32(scratch & 1);
 			scratch >>= 1;
@@ -370,7 +371,6 @@ Byte* inflate(MemoryArena& arena, Byte* data, Byte** result, U32* resultLength, 
 				litLenTreeRef = &litLenTree;
 				distTreeRef = &distTree;
 			}
-
 
 			while (true) {
 				U16 value = (*litLenTreeRef).read_next(reader);

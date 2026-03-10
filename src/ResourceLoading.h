@@ -281,7 +281,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	case TEXTURE_FORMAT_NULL: abort("Texture format cannot be null"); break;
 	case TEXTURE_FORMAT_RGBA_U8: createFormat = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM; break;
 	case TEXTURE_FORMAT_RG_U8: createFormat = isSRGB ? VK_FORMAT_R8G8_SRGB : VK_FORMAT_R8G8_UNORM; break;
-	case TEXTURE_FORMAT_RGBA_BC7: abort("BC7 not yet supported"); createFormat = isSRGB ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK; break;
+	case TEXTURE_FORMAT_RGBA_BC7: abort("BC7 not yet supported"); break;
 	case TEXTURE_FORMAT_R9G9B9E5: createFormat = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32; break;
 	default: abort("Unknown texture format"); break;
 	}

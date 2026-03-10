@@ -152,6 +152,24 @@
     <ClInclude Include="src\Level.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\compression\LZ.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\compression\Huffman.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\compression\BC7.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\compression\BC7Tables.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\compression\BCCommon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests\CompressionTests.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />
@@ -160,5 +178,10 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="src\SerializeToolsPowerOf5Table.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="src\compression\Huffman.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
   </ItemGroup>
 </Project>

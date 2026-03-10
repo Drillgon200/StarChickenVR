@@ -210,13 +210,23 @@ struct MemoryArena {
 	}
 
 	template<typename T>
-	T* alloc_and_commit(U64 count) {
-		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
+	T* alloc_aligned(U64 count, U32 alignment) {
+		return alloc_aligned_with_slack<T>(count, alignment, 0);
+	}
+
+	void commit_bytes(U64 count) {
 		// Volatile, just in case the compiler somehow optimizes it out otherwise (though I don't think it reasonably could)
 		volatile U8* commitBase = stackBase + stackPtr;
-		for (U64 i = 0; i < count * sizeof(T); i += PAGE_SIZE) {
+		U64 touchedPageByteCount = ALIGN_HIGH(stackPtr + count, PAGE_SIZE) - ALIGN_LOW(stackPtr, PAGE_SIZE);
+		for (U64 i = 0; i < touchedPageByteCount; i += PAGE_SIZE) {
 			*(commitBase + i) = 0;
 		}
+	}
+
+	template<typename T>
+	T* alloc_and_commit(U64 count) {
+		stackPtr = ALIGN_HIGH(stackPtr, alignof(T));
+		commit_bytes(count * sizeof(T));
 		T* result = reinterpret_cast<T*>(stackBase + stackPtr);
 		stackPtr += count * sizeof(T);
 		return result;
@@ -475,26 +485,34 @@ ArenaArrayList<T> make_arena_array_list(MemoryArena& arena, T val1, Values... va
 	return list;
 }
 
+// https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+
+FINLINE U32 hash32(U32 val) {
+	val = (val >> 16 ^ val) * 0x45d9f3bu;
+	val = (val >> 16 ^ val) * 0x45d9f3bu;
+	val = val >> 16 ^ val;
+	return val;
+}
+FINLINE U64 hash64(U64 val) {
+	val = (val >> 30 ^ val) * 0xbf58476d1ce4e5b9ull;
+	val = (val >> 27 ^ val) * 0x94d049bb133111ebull;
+	val = val >> 31 ^ val;
+	return val;
+}
+
 template<typename T>
 struct Hasher;
 
-// https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
 template<>
 struct Hasher<U32> {
 	FINLINE U32 operator()(U32 val) {
-		val = (val >> 16 ^ val) * 0x45d9f3bu;
-		val = (val >> 16 ^ val) * 0x45d9f3bu;
-		val = val >> 16 ^ val;
-		return val;
+		return hash32(val);
 	}
 };
 template<>
 struct Hasher<U64> {
 	FINLINE U64 operator()(U64 val) {
-		val = (val >> 30 ^ val) * 0xbf58476d1ce4e5b9ull;
-		val = (val >> 27 ^ val) * 0x94d049bb133111ebull;
-		val = val >> 31 ^ val;
-		return val;
+		return hash64(val);
 	}
 };
 
@@ -1177,6 +1195,10 @@ void printf(StrA fmt, Args... args) {
 	}
 }
 
+namespace Win32 {
+StrA get_error_text(MemoryArena& arena, DWORD err);
+}
+
 struct RWSpinLock {
 	I32 lock;
 
@@ -1453,6 +1475,49 @@ void println_float(F64 f) {
 	abort(StrA{ message, strlen(message) });
 }
 
+U64 splitmix64(U64* statePtr) {
+	// https://prng.di.unimi.it/splitmix64.c
+	U64 state = *statePtr;
+	state += 0x9E3779B97F4A7C15ull;
+	U64 z = state;
+	z = (z ^ z >> 30) * 0xBF58476D1CE4E5B9ull;
+	z = (z ^ z >> 27) * 0x94D049BB133111EBull;
+	U64 result = z ^ (z >> 31);
+
+	*statePtr = state;
+	return result;
+}
+
+// Generates 64 bit pseudo random integers
+struct Xoshiro256 {
+	// https://prng.di.unimi.it/xoshiro256plusplus.c
+	U64 s0, s1, s2, s3;
+	U64 next() {
+		U64 result = (s0 + s3 << 23 | s0 + s3 >> 31) + s0;
+		U64 t = s1 << 17;
+		s2 ^= s0;
+		s3 ^= s1;
+		s1 ^= s2;
+		s0 ^= s3;
+		s2 ^= t;
+		s3 = s3 << 45 | s3 >> 19;
+		return result;
+	}
+	void seed(U64 s) {
+		U64 state = s;
+		s0 = splitmix64(&state);
+		s1 = splitmix64(&state);
+		s2 = splitmix64(&state);
+		s3 = splitmix64(&state);
+	}
+	void seed_rand() {
+		while (_rdrand64_step(&s0) == 0);
+		while (_rdrand64_step(&s1) == 0);
+		while (_rdrand64_step(&s2) == 0);
+		while (_rdrand64_step(&s3) == 0);
+	}
+};
+
 template<typename T>
 T* read_full_file_to_arena(U32* count, MemoryArena& arena, StrA fileName) {
 	T* result = nullptr;
@@ -1461,18 +1526,21 @@ T* read_full_file_to_arena(U32* count, MemoryArena& arena, StrA fileName) {
 	arena.stackPtr = oldStackPtr;
 	if (file != INVALID_HANDLE_VALUE) {
 		U32 size = GetFileSize(file, NULL);
-		result = arena.alloc_and_commit<T>(size);
+		U32 objectsToRead = size / sizeof(T);
+		result = arena.alloc_and_commit<T>(objectsToRead);
 		DWORD numBytesRead{};
-		if (!ReadFile(file, result, size, &numBytesRead, NULL)) {
+		if (!ReadFile(file, result, objectsToRead * sizeof(T), &numBytesRead, NULL)) {
 			result = nullptr;
 			DWORD fileReadError = GetLastError();
-			print("Failed to read file, code: ");
-			println_integer(fileReadError);
+			printf("Failed to read file, reason: (%) %\n"a, fileReadError, Win32::get_error_text(arena, fileReadError));
+			arena.stackPtr = oldStackPtr;
 		}
 		CloseHandle(file);
-		*count = numBytesRead / sizeof(T);
+		*count = objectsToRead;
 	} else {
-		printf("Failed to create file, code: %\n"a, GetLastError());
+		DWORD fileOpenError = GetLastError();
+		printf("Failed to create file, reason: (%) %\n"a, fileOpenError, Win32::get_error_text(arena, fileOpenError));
+		arena.stackPtr = oldStackPtr;
 	}
 	return result;
 }

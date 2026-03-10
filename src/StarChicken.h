@@ -12,6 +12,13 @@
 #include "Level.h"
 #include "EditorUI.h"
 
+// Rendering was sometimes extremely slow in another project if we didn't export these symbols, so I guess I'll do it here, too.
+// I would guess that it doesn't matter when using Vulkan, since the device is selected manually, but it can't hurt to export them anyway.
+extern "C" {
+	__declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+	__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+
 namespace StarChicken {
 
 enum PlayerFinger : U32 {

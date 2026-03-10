@@ -10,7 +10,7 @@ namespace ShaderCompilerTests {
 void run_shader_compile_test(StrA shaderCode) {
 	U32 numCompiledDwords = 0;
 	F64 timeTaken = current_time_seconds();
-	SPIRV::SpvDword* result = ShaderCompiler::compile_dsl(&numCompiledDwords, shaderCode);
+	SPIRV::SpvDword* result = ShaderCompiler::compile_dsl(&numCompiledDwords, shaderCode, "test_code.dsl"a, ""a);
 	timeTaken = current_time_seconds() - timeTaken;
 	TEST_EXPECT(result);
 	U32 validationExitCode = U32_MAX;

@@ -79,7 +79,7 @@
 
 #define DRILL_LIB_MAKE_VERSION(major, minor, patch) ((((major) & 0b1111111111) << 20) | (((minor) & 0b1111111111) << 10) | ((patch) & 0b1111111111))
 
-#define DRILL_LIB_VERSION DRILL_LIB_MAKE_VERSION(1, 6, 0)
+#define DRILL_LIB_VERSION DRILL_LIB_MAKE_VERSION(1, 8, 0)
 
 typedef signed __int8 I8;
 typedef unsigned __int8 U8;
@@ -140,19 +140,40 @@ typedef U64 uint64_t;
 typedef UPtr uintptr_t;
 #endif
 
+typedef __m128 F32x4;
+typedef __m128 F64x2;
+typedef __m128i I8x16;
+typedef __m128i U8x16;
+typedef __m128i I16x8;
+typedef __m128i U16x8;
+typedef __m128i I32x4;
+typedef __m128i U32x4;
+typedef __m128i I64x2;
+typedef __m128i U64x2;
+typedef __m256 F32x8;
+typedef __m256 F64x4;
+typedef __m256i I8x32;
+typedef __m256i U8x32;
+typedef __m256i I16x16;
+typedef __m256i U16x16;
+typedef __m256i I32x8;
+typedef __m256i U32x8;
+typedef __m256i I64x4;
+typedef __m256i U64x4;
+
 DEBUG_OPTIMIZE_ON
 
-FINLINE U16 load_le16(void* ptr) {
+FINLINE U16 load_le16(const void* ptr) {
 	U16 result;
 	memcpy(&result, ptr, sizeof(U16));
 	return result;
 }
-FINLINE U32 load_le32(void* ptr) {
+FINLINE U32 load_le32(const void* ptr) {
 	U32 result;
 	memcpy(&result, ptr, sizeof(U32));
 	return result;
 }
-FINLINE U64 load_le64(void* ptr) {
+FINLINE U64 load_le64(const void* ptr) {
 	U64 result;
 	memcpy(&result, ptr, sizeof(U64));
 	return result;
@@ -169,7 +190,7 @@ FINLINE void store_le64(void* ptr, U64 val) {
 
 DEBUG_OPTIMIZE_OFF
 
-#define LOAD_LE8(ptr) (*reinterpret_cast<U8*>(ptr))
+#define LOAD_LE8(ptr) (*reinterpret_cast<const U8*>(ptr))
 #define LOAD_LE16(ptr) (load_le16((ptr)))
 #define LOAD_LE32(ptr) (load_le32((ptr)))
 #define LOAD_LE64(ptr) (load_le64((ptr)))
@@ -177,7 +198,7 @@ DEBUG_OPTIMIZE_OFF
 #define STORE_LE16(ptr, val) (store_le16((ptr), (val)))
 #define STORE_LE32(ptr, val) (store_le32((ptr), (val)))
 #define STORE_LE64(ptr, val) (store_le64((ptr), (val)))
-#define LOAD_BE8(ptr) (*reinterpret_cast<U8*>(ptr))
+#define LOAD_BE8(ptr) (*reinterpret_cast<const U8*>(ptr))
 #define LOAD_BE16(ptr) (_load_be_u16((ptr)))
 #define LOAD_BE32(ptr) (_load_be_u32((ptr)))
 #define LOAD_BE64(ptr) (_load_be_u64((ptr)))
