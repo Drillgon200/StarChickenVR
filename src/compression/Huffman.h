@@ -12,14 +12,23 @@ struct Huff4StreamDecodeCallArgs {
 	Byte* readPtr3;
 };
 extern "C" Byte* __stdcall huff_4_stream_decode(Huff4StreamDecodeCallArgs* args);
+struct Huff16StreamDecodeCallArgs {
+	U16* decodeTable;
+	Byte* writePtr;
+	U64 outputLen;
+	Byte* readPtr;
+	U64 readOffset[16];
+};
+extern "C" Byte* __stdcall huff_16_stream_decode(Huff16StreamDecodeCallArgs* args);
 
 namespace Huffman {
 
-// 11 bit is only marginally (~0.1%) worse than a 12 bit limit for 2k textures and allows 4 decodes without a refill check in the decoder instead of 3.
+// 11 bit is only marginally (~0.1%) worse than a 12 bit limit for 2k textures and allows 5 decodes without a refill check in the decoder instead of 4.
 const U32 HUFFMAN_MAX_DEPTH = 11;
 const U32 SINGLE_SYMBOL_BIT = 0x80000000;
 const U32 MAX_UNCODED_DATA_SIZE = 0x7FFFFFFF;
-const U32 HUFFMAN_PARALLEL_STREAMS = 4;
+const U32 HUFFMAN_PARALLEL_STREAMS = 16;
+#define HUFFMAN_16_STREAM_VECTORIZED
 #define HUFFMAN_ASM_DECODER
 
 Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
@@ -233,15 +242,15 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	for (U32 i = 0; i < 256; i += 2) {
 		*out++ = symCodes[i].len | symCodes[i + 1].len << 4;
 	}
-	Byte* dataStreams[4];
+	Byte* dataStreams[HUFFMAN_PARALLEL_STREAMS];
 	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
 		dataStreams[i] = out + streamOffsets[i];
 	}
-	U64 bitBuf4[HUFFMAN_PARALLEL_STREAMS]{};
-	U32 bitBufBits4[HUFFMAN_PARALLEL_STREAMS]{};
+	U64 bitBufAll[HUFFMAN_PARALLEL_STREAMS]{};
+	U32 bitBufBitsAll[HUFFMAN_PARALLEL_STREAMS]{};
 	for (U32 i = 0; i < dataLen; i++) {
-		U64& bitBuf = bitBuf4[i % HUFFMAN_PARALLEL_STREAMS];
-		U32& bitBufBits = bitBufBits4[i % HUFFMAN_PARALLEL_STREAMS];
+		U64& bitBuf = bitBufAll[i % HUFFMAN_PARALLEL_STREAMS];
+		U32& bitBufBits = bitBufBitsAll[i % HUFFMAN_PARALLEL_STREAMS];
 		Byte*& dataStream = dataStreams[i % HUFFMAN_PARALLEL_STREAMS];
 		SymCode code = symCodes[data[i]];
 		bitBuf |= U64(code.code) << bitBufBits;
@@ -259,9 +268,9 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 		}
 	}
 	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
-		U64& bitBuf = bitBuf4[i];
-		U32& bitBufBits = bitBufBits4[i];
-		Byte*& dataStream = dataStreams[i];
+		U64 bitBuf = bitBufAll[i];
+		U32 bitBufBits = bitBufBitsAll[i];
+		Byte* dataStream = dataStreams[i];
 		if (bitBufBits) {
 			STORE_LE64(dataStream, bitBuf);
 		}
@@ -410,9 +419,22 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 	Byte* result = arena.alloc_aligned<Byte>(outputLen, 32);
 	Byte* writePtr = result;
 
-	static_assert(HUFFMAN_MAX_DEPTH <= 11, "Decoder loop is designed to work with 4 decodes per refill");
+	static_assert(HUFFMAN_MAX_DEPTH <= 11, "Decoder loop is designed to work with 5 decodes per refill");
 
 #ifdef HUFFMAN_ASM_DECODER
+#ifdef HUFFMAN_16_STREAM_VECTORIZED
+	{
+		Huff16StreamDecodeCallArgs args{};
+		args.decodeTable = (U16*)decodeTable;
+		args.writePtr = writePtr;
+		args.outputLen = outputLen;
+		args.readPtr = data;
+		for (U32 i = 0; i < 16; i++) {
+			args.readOffset[i] = streamOffsets[i];
+		}
+		writePtr = huff_16_stream_decode(&args);
+	}
+#else
 	{
 		Huff4StreamDecodeCallArgs args{};
 		args.decodeTable = (U16*)decodeTable;
@@ -424,8 +446,130 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		args.readPtr3 = data + streamOffsets[3];
 		writePtr = huff_4_stream_decode(&args);
 	}
+#endif
 #else
+#ifdef HUFFMAN_16_STREAM_VECTORIZED
+	{ // Decoder vector loop - even more heavily optimized!
+		__m256i lookupMask = _mm256_set1_epi64x((1 << HUFFMAN_MAX_DEPTH) - 1);
+		__m128i bitCountMask = _mm_set1_epi32(0xFF);
+		__m128i shuffleData = _mm_setr_epi8(1, 5, 9, 13, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80);
+		__m256i readPtr0to3 = _mm256_setr_epi64x(streamOffsets[0], streamOffsets[1], streamOffsets[2], streamOffsets[3]);
+		__m256i readPtr4to7 = _mm256_setr_epi64x(streamOffsets[4], streamOffsets[5], streamOffsets[6], streamOffsets[7]);
+		__m256i readPtr8to11 = _mm256_setr_epi64x(streamOffsets[8], streamOffsets[9], streamOffsets[10], streamOffsets[11]);
+		__m256i readPtr12to15 = _mm256_setr_epi64x(streamOffsets[12], streamOffsets[13], streamOffsets[14], streamOffsets[15]);
+		__m256i bitBuf0to3 = _mm256_i64gather_epi64((long long*)data, readPtr0to3, 1);
+		__m256i bitBuf4to7 = _mm256_i64gather_epi64((long long*)data, readPtr4to7, 1);
+		__m256i bitBuf8to11 = _mm256_i64gather_epi64((long long*)data, readPtr8to11, 1);
+		__m256i bitBuf12to15 = _mm256_i64gather_epi64((long long*)data, readPtr12to15, 1);
+		__m256i sixtyFour = _mm256_set1_epi64x(64);
+		__m256i bitBufBits0to3 = sixtyFour;
+		__m256i bitBufBits4to7 = sixtyFour;
+		__m256i bitBufBits8to11 = sixtyFour;
+		__m256i bitBufBits12to15 = sixtyFour;
+		readPtr0to3 = _mm256_add_epi64(readPtr0to3, _mm256_set1_epi64x(sizeof(U64)));
+		readPtr4to7 = _mm256_add_epi64(readPtr4to7, _mm256_set1_epi64x(sizeof(U64)));
+		readPtr8to11 = _mm256_add_epi64(readPtr8to11, _mm256_set1_epi64x(sizeof(U64)));
+		readPtr12to15 = _mm256_add_epi64(readPtr12to15, _mm256_set1_epi64x(sizeof(U64)));
 
+		__m128i tableResult;
+		__m256i bitCounts;
+		__m256i nextBits;
+		__m256i bytesLoaded;
+
+#define EXTRACT_STEP(idx, bitBuf, bitBufBits)\
+		tableResult = _mm256_i64gather_epi32((int*)decodeTable, _mm256_and_si256(bitBuf, lookupMask), 2);\
+		bitCounts = _mm256_cvtepi32_epi64(_mm_and_si128(tableResult, bitCountMask));\
+		bitBuf = _mm256_srlv_epi64(bitBuf, bitCounts);\
+		bitBufBits = _mm256_sub_epi64(bitBufBits, bitCounts);\
+		_mm_storeu_si32(writePtr + idx, _mm_shuffle_epi8(tableResult, shuffleData))
+
+#define REFILL_STEP(readPtr, bitBuf, bitBufBits)\
+		nextBits = _mm256_i64gather_epi64((long long*)data, readPtr, 1);\
+		bitBuf = _mm256_or_si256(bitBuf, _mm256_sllv_epi64(nextBits, bitBufBits));\
+		bytesLoaded = _mm256_srli_epi64(_mm256_sub_epi64(sixtyFour, bitBufBits), 3);\
+		readPtr = _mm256_add_epi64(readPtr, bytesLoaded);\
+		bitBufBits = _mm256_add_epi64(bitBufBits, _mm256_slli_epi64(bytesLoaded, 3))
+
+		U32 bytesPerLoopIteration = 5 * HUFFMAN_PARALLEL_STREAMS;
+		U32 toHandleInFastLoop = outputLen / bytesPerLoopIteration * bytesPerLoopIteration;
+		U32 outputResidual = outputLen - toHandleInFastLoop;
+		Byte* fastLoopEndPtr = writePtr + toHandleInFastLoop;
+		while (writePtr != fastLoopEndPtr) {
+			EXTRACT_STEP(0, bitBuf0to3, bitBufBits0to3);
+			EXTRACT_STEP(4, bitBuf4to7, bitBufBits4to7);
+			EXTRACT_STEP(8, bitBuf8to11, bitBufBits8to11);
+			EXTRACT_STEP(12, bitBuf12to15, bitBufBits12to15);
+			EXTRACT_STEP(16, bitBuf0to3, bitBufBits0to3);
+			EXTRACT_STEP(20, bitBuf4to7, bitBufBits4to7);
+			EXTRACT_STEP(24, bitBuf8to11, bitBufBits8to11);
+			EXTRACT_STEP(28, bitBuf12to15, bitBufBits12to15);
+			EXTRACT_STEP(32, bitBuf0to3, bitBufBits0to3);
+			EXTRACT_STEP(36, bitBuf4to7, bitBufBits4to7);
+			EXTRACT_STEP(40, bitBuf8to11, bitBufBits8to11);
+			EXTRACT_STEP(44, bitBuf12to15, bitBufBits12to15);
+			EXTRACT_STEP(48, bitBuf0to3, bitBufBits0to3);
+			EXTRACT_STEP(52, bitBuf4to7, bitBufBits4to7);
+			EXTRACT_STEP(56, bitBuf8to11, bitBufBits8to11);
+			EXTRACT_STEP(60, bitBuf12to15, bitBufBits12to15);
+			EXTRACT_STEP(64, bitBuf0to3, bitBufBits0to3);
+			EXTRACT_STEP(68, bitBuf4to7, bitBufBits4to7);
+			EXTRACT_STEP(72, bitBuf8to11, bitBufBits8to11);
+			EXTRACT_STEP(76, bitBuf12to15, bitBufBits12to15);
+
+			REFILL_STEP(readPtr0to3, bitBuf0to3, bitBufBits0to3);
+			REFILL_STEP(readPtr4to7, bitBuf4to7, bitBufBits4to7);
+			REFILL_STEP(readPtr8to11, bitBuf8to11, bitBufBits8to11);
+			REFILL_STEP(readPtr12to15, bitBuf12to15, bitBufBits12to15);
+
+			writePtr += bytesPerLoopIteration;
+		}
+
+		if (outputResidual == 0) goto finished;
+		EXTRACT_STEP(0, bitBuf0to3, bitBufBits0to3);
+		if (outputResidual < 4) goto finished;
+		EXTRACT_STEP(4, bitBuf4to7, bitBufBits4to7);
+		if (outputResidual < 8) goto finished;
+		EXTRACT_STEP(8, bitBuf8to11, bitBufBits8to11);
+		if (outputResidual < 12) goto finished;
+		EXTRACT_STEP(12, bitBuf12to15, bitBufBits12to15);
+		if (outputResidual < 16) goto finished;
+		EXTRACT_STEP(16, bitBuf0to3, bitBufBits0to3);
+		if (outputResidual < 20) goto finished;
+		EXTRACT_STEP(20, bitBuf4to7, bitBufBits4to7);
+		if (outputResidual < 24) goto finished;
+		EXTRACT_STEP(24, bitBuf8to11, bitBufBits8to11);
+		if (outputResidual < 28) goto finished;
+		EXTRACT_STEP(28, bitBuf12to15, bitBufBits12to15);
+		if (outputResidual < 32) goto finished;
+		EXTRACT_STEP(32, bitBuf0to3, bitBufBits0to3);
+		if (outputResidual < 36) goto finished;
+		EXTRACT_STEP(36, bitBuf4to7, bitBufBits4to7);
+		if (outputResidual < 40) goto finished;
+		EXTRACT_STEP(40, bitBuf8to11, bitBufBits8to11);
+		if (outputResidual < 44) goto finished;
+		EXTRACT_STEP(44, bitBuf12to15, bitBufBits12to15);
+		if (outputResidual < 48) goto finished;
+		EXTRACT_STEP(48, bitBuf0to3, bitBufBits0to3);
+		if (outputResidual < 52) goto finished;
+		EXTRACT_STEP(52, bitBuf4to7, bitBufBits4to7);
+		if (outputResidual < 56) goto finished;
+		EXTRACT_STEP(56, bitBuf8to11, bitBufBits8to11);
+		if (outputResidual < 60) goto finished;
+		EXTRACT_STEP(60, bitBuf12to15, bitBufBits12to15);
+		if (outputResidual < 64) goto finished;
+		EXTRACT_STEP(64, bitBuf0to3, bitBufBits0to3);
+		if (outputResidual < 68) goto finished;
+		EXTRACT_STEP(68, bitBuf4to7, bitBufBits4to7);
+		if (outputResidual < 72) goto finished;
+		EXTRACT_STEP(72, bitBuf8to11, bitBufBits8to11);
+		if (outputResidual < 76) goto finished;
+		EXTRACT_STEP(76, bitBuf12to15, bitBufBits12to15);
+	finished:;
+
+
+		writePtr += outputResidual;
+	}
+#else
 	{ // Decoder loop - heavily optimized!
 		U16* decodeTable16 = (U16*)decodeTable;
 		U16 tableResult = 0;
@@ -446,7 +590,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		readPtr1 += sizeof(U64);
 		readPtr2 += sizeof(U64);
 		readPtr3 += sizeof(U64);
-		__m128i writeReg = _mm_setzero_si128();
+		//__m128i writeReg = _mm_setzero_si128();
 		// Idea from Fabien Giesen's decoder series
 #define EXTRACT_STEP(idx, bitBuf, extractControl)\
 		tableResult = decodeTable16[_bextr2_u64(bitBuf, extractControl)];\
@@ -528,6 +672,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 #undef EXTRACT_STEP
 #undef REFILL_STEP
 	}
+#endif
 #endif
 	
 

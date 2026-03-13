@@ -255,7 +255,7 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		// Baseline opt:
 		// Huff time: 0.011819200124591589
 		// LZ time: 0.007234199903905392 
-		//printf("Huff time: %\nLZ time: %\n"a, lzDecodeStart - huffDecodeStart, current_time_seconds() - lzDecodeStart);
+		printf("Huff time: %\nLZ time: %\n"a, lzDecodeStart - huffDecodeStart, current_time_seconds() - lzDecodeStart);
 	}
 	return result;
 }

@@ -344,4 +344,34 @@ void lz_bc7_full_test() {
 	}
 }
 
+void test_huff_throughput() {
+	MemoryArena& arena = get_scratch_arena();
+	U32 fileLen;
+	Byte* file = read_full_file_to_arena<Byte>(&fileLen, arena, "compression_tests/cannon_Normal.bc7"a);
+	U32 encodedLen;
+	Byte* encoded = Huffman::encode(arena, &encodedLen, file, fileLen);
+	scratchArena0.commit_bytes(100 * MEGABYTE);
+	scratchArena1.commit_bytes(100 * MEGABYTE);
+	F64 bestThroughput = 0.0F;
+	F64 avgThroughput = 0.0F;
+	U32 decodeIterations = 1000;
+	for (U32 i = 0; i < decodeIterations; i++) {
+		MEMORY_ARENA_FRAME(arena) {
+			F64 t = current_time_seconds();
+			U32 decodedLen;
+			Byte* decoded = Huffman::decode(arena, &decodedLen, encoded, encodedLen);
+			F64 t2 = current_time_seconds();
+			/*if (fileLen != decodedLen || memcmp(file, decoded, fileLen) != 0) {
+				__debugbreak();
+			}*/
+			F64 throughput = F64(decodedLen) / (t2 - t) / F64(MEGABYTE);
+
+			bestThroughput = max(bestThroughput, throughput);
+			avgThroughput += throughput;
+		}
+	}
+	avgThroughput /= decodeIterations;
+	printf("Throughput avg: %\nThroughput max: %\n"a, avgThroughput, bestThroughput);
+}
+
 }
