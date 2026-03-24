@@ -2,16 +2,20 @@
 
 #include "../DrillLib.h"
 
-struct Huff4StreamDecodeCallArgs {
+#define HUFFMAN_PARALLEL_STREAMS 25
+//#define HUFFMAN_16_STREAM_VECTORIZED
+#define HUFFMAN_HYBRID_16V9S
+#define HUFFMAN_ASM_DECODER
+
+struct HuffScalarMultiStreamDecodeCallArgs {
 	U16* decodeTable;
 	Byte* writePtr;
 	U64 outputLen;
-	Byte* readPtr0;
-	Byte* readPtr1;
-	Byte* readPtr2;
-	Byte* readPtr3;
+	Byte* readPtr[HUFFMAN_PARALLEL_STREAMS];
 };
-extern "C" Byte* __stdcall huff_4_stream_decode(Huff4StreamDecodeCallArgs* args);
+// These procedures are implemented in Huffman.asm
+extern "C" Byte* __stdcall huff_4_stream_decode(HuffScalarMultiStreamDecodeCallArgs* args);
+extern "C" Byte* __stdcall huff_9_stream_decode(HuffScalarMultiStreamDecodeCallArgs* args);
 struct Huff16StreamDecodeCallArgs {
 	U16* decodeTable;
 	Byte* writePtr;
@@ -19,7 +23,20 @@ struct Huff16StreamDecodeCallArgs {
 	Byte* readPtr;
 	U64 readOffset[16];
 };
-extern "C" Byte* __stdcall huff_16_stream_decode(Huff16StreamDecodeCallArgs* args);
+extern "C" Byte* __stdcall huff_16_stream_vector_decode(Huff16StreamDecodeCallArgs* args);
+struct HuffHybrid9Plus16DecodeCallArgs {
+	U16* decodeTable;
+	Byte* writePtr;
+	U64 outputLen;
+	Byte* readPtr[9];
+	Byte* vectorReadPtr;
+	U64 readOffset[16];
+};
+extern "C" Byte* __stdcall huff_hybrid_9_plus_16_stream_decode(HuffHybrid9Plus16DecodeCallArgs* args);
+
+
+// For testing the latency and throughput of various code sequences. Duplicates the inner code section 16 times, then runs the result 10000000 times. Returns RDTSC time passed.
+extern "C" U64 __stdcall test_ports();
 
 namespace Huffman {
 
@@ -27,9 +44,6 @@ namespace Huffman {
 const U32 HUFFMAN_MAX_DEPTH = 11;
 const U32 SINGLE_SYMBOL_BIT = 0x80000000;
 const U32 MAX_UNCODED_DATA_SIZE = 0x7FFFFFFF;
-const U32 HUFFMAN_PARALLEL_STREAMS = 16;
-#define HUFFMAN_16_STREAM_VECTORIZED
-#define HUFFMAN_ASM_DECODER
 
 Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	if (dataLen > MAX_UNCODED_DATA_SIZE) {
@@ -226,12 +240,21 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	STORE_LE32(out, dataLen);
 	out += sizeof(U32);
 	U64 streamBitLengths[HUFFMAN_PARALLEL_STREAMS]{};
+#ifdef HUFFMAN_HYBRID_16V9S
+	U32 streamIndices[34]{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
+	for (U32 i = 0; i < dataLen; i++) {
+		SymCode code = symCodes[data[i]];
+		streamBitLengths[streamIndices[i % ARRAY_COUNT(streamIndices)]] += code.len;
+	}
+#else
 	for (U32 i = 0; i < dataLen; i++) {
 		SymCode code = symCodes[data[i]];
 		streamBitLengths[i % HUFFMAN_PARALLEL_STREAMS] += code.len;
 	}
+#endif
 	U32 nextStreamOffset = 0;
 	U32 streamOffsets[HUFFMAN_PARALLEL_STREAMS];
+	// Scalar streams get encoded to twice. Vector decode latency is much longer than scalar decode latency, so we need multiple scalar decodes per vector decode
 	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
 		U32 streamByteSize = (streamBitLengths[i] + 7) / 8 + 8;
 		STORE_LE32(out, nextStreamOffset);
@@ -248,6 +271,29 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	}
 	U64 bitBufAll[HUFFMAN_PARALLEL_STREAMS]{};
 	U32 bitBufBitsAll[HUFFMAN_PARALLEL_STREAMS]{};
+#ifdef HUFFMAN_HYBRID_16V9S
+	// Scalar streams get encoded to twice. Vector decode latency is much longer than scalar decode latency, so we need multiple scalar decodes per vector decode
+	for (U32 i = 0; i < dataLen; i++) {
+		U32 streamIdx = streamIndices[i % ARRAY_COUNT(streamIndices)];
+		U64& bitBuf = bitBufAll[streamIdx];
+		U32& bitBufBits = bitBufBitsAll[streamIdx];
+		Byte*& dataStream = dataStreams[streamIdx];
+		SymCode code = symCodes[data[i]];
+		bitBuf |= U64(code.code) << bitBufBits;
+		bitBufBits += code.len;
+		if (bitBufBits > 64 - HUFFMAN_MAX_DEPTH) {
+			STORE_LE64(dataStream, bitBuf);
+			U32 bytesWritten = bitBufBits >> 3;
+			dataStream += bytesWritten;
+			if (bytesWritten == sizeof(U64)) {
+				bitBuf = 0;
+			} else {
+				bitBuf >>= bitBufBits & ~0b111;
+			}
+			bitBufBits &= 0b111;
+		}
+	}
+#else
 	for (U32 i = 0; i < dataLen; i++) {
 		U64& bitBuf = bitBufAll[i % HUFFMAN_PARALLEL_STREAMS];
 		U32& bitBufBits = bitBufBitsAll[i % HUFFMAN_PARALLEL_STREAMS];
@@ -267,6 +313,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 			bitBufBits &= 0b111;
 		}
 	}
+#endif
 	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
 		U64 bitBuf = bitBufAll[i];
 		U32 bitBufBits = bitBufBitsAll[i];
@@ -423,6 +470,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 
 #ifdef HUFFMAN_ASM_DECODER
 #ifdef HUFFMAN_16_STREAM_VECTORIZED
+	RUNTIME_ASSERT(HUFFMAN_PARALLEL_STREAMS == 16, "16 stream vector decoder needs 16 streams");
 	{
 		Huff16StreamDecodeCallArgs args{};
 		args.decodeTable = (U16*)decodeTable;
@@ -432,23 +480,43 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		for (U32 i = 0; i < 16; i++) {
 			args.readOffset[i] = streamOffsets[i];
 		}
-		writePtr = huff_16_stream_decode(&args);
+		writePtr = huff_16_stream_vector_decode(&args);
 	}
-#else
+#elif defined HUFFMAN_HYBRID_16V9S
+	RUNTIME_ASSERT(HUFFMAN_PARALLEL_STREAMS == 25, "9+16 stream vector decoder needs 25 streams");
 	{
-		Huff4StreamDecodeCallArgs args{};
+		HuffHybrid9Plus16DecodeCallArgs args{};
 		args.decodeTable = (U16*)decodeTable;
 		args.writePtr = writePtr;
 		args.outputLen = outputLen;
-		args.readPtr0 = data + streamOffsets[0];
-		args.readPtr1 = data + streamOffsets[1];
-		args.readPtr2 = data + streamOffsets[2];
-		args.readPtr3 = data + streamOffsets[3];
+		for (U32 i = 0; i < 9; i++) {
+			args.readPtr[i] = data + streamOffsets[i];
+		}
+		args.vectorReadPtr = data;
+		for (U32 i = 0; i < 16; i++) {
+			args.readOffset[i] = streamOffsets[9 + i];
+		}
+		writePtr = huff_hybrid_9_plus_16_stream_decode(&args);
+	}
+#else
+	HuffScalarMultiStreamDecodeCallArgs args{};
+	args.decodeTable = (U16*)decodeTable;
+	args.writePtr = writePtr;
+	args.outputLen = outputLen;
+	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
+		args.readPtr[i] = data + streamOffsets[i];
+	}
+	if (HUFFMAN_PARALLEL_STREAMS == 4) {
 		writePtr = huff_4_stream_decode(&args);
+	} else if (HUFFMAN_PARALLEL_STREAMS == 9) {
+		writePtr = huff_9_stream_decode(&args);
+	} else {
+		RUNTIME_ASSERT(false, "This stream count isn't implemented in ASM"a);
 	}
 #endif
 #else
 #ifdef HUFFMAN_16_STREAM_VECTORIZED
+	RUNTIME_ASSERT(HUFFMAN_PARALLEL_STREAMS == 16, "16 stream vector decoder needs 16 streams");
 	{ // Decoder vector loop - even more heavily optimized!
 		__m256i lookupMask = _mm256_set1_epi64x((1 << HUFFMAN_MAX_DEPTH) - 1);
 		__m128i bitCountMask = _mm_set1_epi32(0xFF);
@@ -570,6 +638,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		writePtr += outputResidual;
 	}
 #else
+	RUNTIME_ASSERT(HUFFMAN_PARALLEL_STREAMS == 4, "This stream count isn't implemented in C++"a);
 	{ // Decoder loop - heavily optimized!
 		U16* decodeTable16 = (U16*)decodeTable;
 		U16 tableResult = 0;

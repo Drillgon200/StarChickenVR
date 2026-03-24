@@ -24,8 +24,9 @@ extern "C" void __stdcall mainCRTStartup() {
 #else
 		//result = StarChicken::run_star_chicken();
 #endif
-		//CompressionTests::lz_bc7_full_test();
-		CompressionTests::test_huff_throughput();
+		CompressionTests::lz_bc7_full_test();
+		//CompressionTests::test_huff_throughput();
+		//LZ::print_length_decode_lookup_tables();
 	}
 	ExitProcess(result);
 }

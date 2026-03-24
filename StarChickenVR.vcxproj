@@ -233,6 +233,8 @@
       <StackCommitSize>4194304</StackCommitSize>
       <OptimizeReferences>false</OptimizeReferences>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <SectionAlignment>
+      </SectionAlignment>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugEditor|x64'">
@@ -269,6 +271,8 @@
       <StackCommitSize>4194304</StackCommitSize>
       <OptimizeReferences>false</OptimizeReferences>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <SectionAlignment>
+      </SectionAlignment>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugTests|x64'">
@@ -305,6 +309,8 @@
       <StackCommitSize>4194304</StackCommitSize>
       <OptimizeReferences>false</OptimizeReferences>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <SectionAlignment>
+      </SectionAlignment>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -339,6 +345,8 @@
       <AdditionalDependencies>kernel32.lib</AdditionalDependencies>
       <StackReserveSize>4194304</StackReserveSize>
       <StackCommitSize>4194304</StackCommitSize>
+      <SectionAlignment>
+      </SectionAlignment>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -410,6 +418,9 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
       <UseSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</UseSafeExceptionHandlers>
       <CallingConvention Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">1</CallingConvention>
+    </MASM>
+    <MASM Include="src\compression\LZ.asm">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
     </MASM>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

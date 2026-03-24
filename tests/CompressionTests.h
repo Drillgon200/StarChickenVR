@@ -87,7 +87,7 @@ void huffman_5_elements_short() {
 		Byte* encoded = Huffman::encode(arena, &encodedLen, (Byte*)data.str, data.length);
 		TEST_EXPECT(encoded != nullptr);
 		if (encoded) {
-			U8* lenTable = encoded + sizeof(U32) + Huffman::HUFFMAN_PARALLEL_STREAMS * sizeof(U32);
+			U8* lenTable = encoded + sizeof(U32) + HUFFMAN_PARALLEL_STREAMS * sizeof(U32);
 			U32 aLen = lenTable['A' >> 1] >> ('A' & 1) * 4 & 0xF;
 			U32 bLen = lenTable['B' >> 1] >> ('B' & 1) * 4 & 0xF;
 			U32 cLen = lenTable['C' >> 1] >> ('C' & 1) * 4 & 0xF;
@@ -287,47 +287,67 @@ void lz_bc7_full_test() {
 	// greedy, 2 byte offset, separate match/lit lengths, hash every pos: 53636 (81.8%)
 	// optimal, 2 byte offset: 53386 (81.4%)
 	//
-	// Cannon BaseColor:
+	// Cannon BaseColor (4194304 bytes):
 	// DEFLATE
 	// 7z ultra: 2681950 (63.9%)
 	// LZMA
 	// 7z ultra: 2192742 (52.3%)
+	// LZ4
+	// 3121835 (74.4%)
 	// DRLZ
 	// optimal, 2 byte offset: 2704173 (64.4%)
 	// 11 bit huff: 2706500 (64.5%)
+	// Branchless LZ: 2814422 (67.1%)
+	// Branchless LZ (limit 32, allow closer offsets with shorter lengths): 2779501 (66.2%);
+	// Fixed width LZ offsets: 2792396 (66.5%)
 	//
-	// Cannon Normal:
+	// Cannon Normal (4194304 bytes):
 	// DEFLATE
 	// 7z ultra: 1922169 (45.8%)
 	// LZMA
 	// 7z ultra: 1660809 (39.6%)
+	// LZ4
+	// 2255416 (53.8%)
 	// DRLZ
 	// optimal, 2 byte offset: 1921927 (45.8%)
 	// 11 bit huff: 1923846 (45.9%)
+	// Branchless LZ (limit 16): 2043012 (48.7%)
+	// Branchless LZ (limit 32): 2020054 (48.2%)
+	// Branchless LZ (limit 32, allow closer offsets with shorter lengths): 1997336 (47.6%)
+	// Fixed width LZ offsets: 2016699 (48.1%)
 	//
-	// Cannon ARM:
+	// Cannon ARM (4194304 bytes):
 	// DEFLATE
 	// 7z ultra: 3180020 (75.8%)
 	// LZMA
 	// 7z ultra: 2891905 (68.9%)
+	// LZ4
+	// 3462893 (82.6%)
 	// DRLZ
 	// optimal, 2 byte offset: 3186797 (76.0%)
 	// 11 bit huff: 3190705 (76.1%)
+	// Branchless LZ (limit 32, allow closer offsets with shorter lengths): 3253697 (77.6%)
+	// Fixed width LZ offsets: 2016699 (77.8%)
 	MemoryArena& arena = get_scratch_arena();
 	U32 fileLen;
 	Byte* file = read_full_file_to_arena<Byte>(&fileLen, arena, "compression_tests/cannon_Normal.bc7"a);
 	scratchArena0.commit_bytes(100 * MEGABYTE);
 	scratchArena1.commit_bytes(100 * MEGABYTE);
 	U32 encodedLen;
-	Byte* encoded = LZ::encode(arena, &encodedLen, file, fileLen);
+	Byte* encoded = LZ::encode2(arena, &encodedLen, file, fileLen);
 	printf("File: %\nEncoded: %\n"a, fileLen, encodedLen);
 	U32 decodeIterations = 10;
 	for (U32 i = 0; i < decodeIterations; i++) {
 		MEMORY_ARENA_FRAME(arena) {
 			F64 t = current_time_seconds();
 			U32 decodedLen;
-			Byte* decoded = LZ::decode(arena, &decodedLen, encoded, encodedLen);
+			Byte* decoded = LZ::decode2(arena, &decodedLen, encoded, encodedLen);
 			F64 t2 = current_time_seconds();
+			for (U32 i = 0; i < decodedLen; i++) {
+				if (decoded[i] != file[i]) {
+					__debugbreak();
+				}
+			}
 			if (fileLen != decodedLen || memcmp(file, decoded, fileLen) != 0) {
 				__debugbreak();
 			}
@@ -361,9 +381,14 @@ void test_huff_throughput() {
 			U32 decodedLen;
 			Byte* decoded = Huffman::decode(arena, &decodedLen, encoded, encodedLen);
 			F64 t2 = current_time_seconds();
-			/*if (fileLen != decodedLen || memcmp(file, decoded, fileLen) != 0) {
+			for (U32 i = 0; i < decodedLen; i++) {
+				if (decoded[i] != file[i]) {
+					__debugbreak();
+				}
+			}
+			if (fileLen != decodedLen || memcmp(file, decoded, fileLen) != 0) {
 				__debugbreak();
-			}*/
+			}
 			F64 throughput = F64(decodedLen) / (t2 - t) / F64(MEGABYTE);
 
 			bestThroughput = max(bestThroughput, throughput);
@@ -371,7 +396,25 @@ void test_huff_throughput() {
 		}
 	}
 	avgThroughput /= decodeIterations;
+	// With bad refill (scalar): 2412
+	// With good refill (scalar): 2454
+	// vpgather: 2175
+	// replaced gather: 2660
+	// replaced gather refill: 2710
+	// Scalar 9 stream: 3800
+	// Scalar 9 mov from high reg: 4460
+	// Scalar 9 with simple addressing load: 4610
+	// Scalar 9 with early load: 4800
 	printf("Throughput avg: %\nThroughput max: %\n"a, avgThroughput, bestThroughput);
+	SetThreadAffinityMask(GetCurrentThread(), 1 << 16);
+	SetThreadIdealProcessor(GetCurrentThread(), 16);
+	for (U32 i = 0; i < 100; i++) {
+		U64 timestampVal = test_ports();
+		// 4.3 ghz rdtsc, 5.56 ghz core clock
+		U64 clocksExecuted = timestampVal * (5.56 / 4.3);
+		U64 instructionsExecuted = (6 * 16 + 1) * 10000000;
+		printf("Cycles per iteration: %, RDTSC: %, IPC: %\n"a, timestampVal / 10000000.0 / (4.3 / 5.56) / 16.0, timestampVal, F64(instructionsExecuted) / F64(clocksExecuted));
+	}
 }
 
 }

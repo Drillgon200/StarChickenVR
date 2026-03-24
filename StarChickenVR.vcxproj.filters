@@ -183,5 +183,8 @@
     <MASM Include="src\compression\Huffman.asm">
       <Filter>Source Files</Filter>
     </MASM>
+    <MASM Include="src\compression\LZ.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
   </ItemGroup>
 </Project>
