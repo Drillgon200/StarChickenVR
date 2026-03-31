@@ -53,8 +53,10 @@ Texture specularCubemap;
 Texture diffuseCubemap;
 
 Texture fontAtlas;
-Texture uiIncrementLeft;
-Texture uiIncrementRight;
+Texture uiArrowLeft;
+Texture uiArrowRight;
+Texture uiX;
+Texture uiFolder;
 
 Material cannonMat;
 Material matMat;
@@ -74,8 +76,10 @@ void load_resources() {
 	load_dtf(&diffuseCubemap, "./resources/textures/city_diffuse.dtf"a);
 	VK::set_pbr_params(specularCubemap.imageView, diffuseCubemap.imageView, trowbridgeReitzBRDFLut.imageView);
 
-	load_png(&uiIncrementLeft, "resources/textures/ui_increment_left.png"a);
-	load_png(&uiIncrementRight, "resources/textures/ui_increment_right.png"a);
+	load_png(&uiArrowLeft, "resources/textures/ui/arrow_left.png"a);
+	load_png(&uiArrowRight, "resources/textures/ui/arrow_right.png"a);
+	load_png(&uiX, "resources/textures/ui/x.png"a);
+	load_png(&uiFolder, "resources/textures/ui/folder.png"a);
 	load_msdf(&fontAtlas, "resources/textures/font2.ddf"a);
 
 	create_material_from_pngs(&cannonMat, "resources/textures/cannon"a);

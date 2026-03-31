@@ -216,17 +216,11 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		VK::vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 		VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 
-		if (VK::hasCubemap) {
-			// Fill in background
-			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
-			VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
-		}
-		
 		{ // Draw world geometry
 			if (isInEditorMode) {
 				U32 camIdx = 0;
 				for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
-					if (rng_area(editor3d->viewport) == 0.0F) {
+					if (editor3d->viewport.area()  == 0.0F) {
 						editor3d->gpuCameraIndex = U32_MAX;
 						continue;
 					}
@@ -237,6 +231,14 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 						viewport.width = editor3d->viewport.width();
 						viewport.height = editor3d->viewport.height();
 						VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+						if (VK::hasCubemap) {
+							// Fill in background
+							VK::BackgroundPushConstants backgroundPushConstants{};
+							backgroundPushConstants.camIdx = camIdx;
+							VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
+							VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
+							VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+						}
 						VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 						VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
 						Level::level.draw_models(cmdBuf, camIdx);
@@ -248,6 +250,14 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 					camIdx++;
 				}
 			} else {
+				if (VK::hasCubemap) {
+					// Fill in background
+					VK::BackgroundPushConstants backgroundPushConstants{};
+					backgroundPushConstants.camIdx = 0;
+					VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
+					VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
+					VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+				}
 				VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 				VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
 				Level::level.draw_models(cmdBuf, 0);
@@ -425,7 +435,7 @@ void keyboard_callback(Win32::Key key, Win32::ButtonState state) {
 	UI::handle_keyboard_action(mousePos, key, state);
 	if (key == Win32::KEY_ESC && state == Win32::BUTTON_STATE_DOWN) {
 		Win32::set_mouse_captured(false);
-		EditorUI::focusedPanel = nullptr;
+		EditorUI::focusedEditor3D = nullptr;
 	}
 	EditorUI::key_input(key, state);
 }
@@ -434,10 +444,10 @@ void mouse_callback(Win32::MouseButton button, Win32::MouseValue state) {
 		return;
 	}
 	V2F mousePos = Win32::get_mouse();
-	if (!EditorUI::focusedPanel) {
+	if (!EditorUI::focusedEditor3D) {
 		UI::handle_mouse_action(mousePos, button, state);
 	}
-	if (EditorUI::focusedPanel) {
+	if (EditorUI::focusedEditor3D) {
 		UI::activeBox = UI::hotBox = UI::BoxHandle{};
 	}
 	EditorUI::mouse_input(button, state, mousePos);

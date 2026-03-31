@@ -145,7 +145,7 @@ namespace VK {
 	OP(vkCmdUpdateBuffer)\
 	OP(vkCmdBeginRenderingKHR)\
 	OP(vkCmdEndRenderingKHR)\
-	OP(vkCmdClearAttachments)
+	OP(vkCmdClearAttachments)\
 
 #if VK_DEBUG != 0
 #define VK_DEBUG_DEVICE_FUNCTIONS
@@ -159,6 +159,9 @@ VK_DEBUG_INSTANCE_FUNCTIONS
 VK_DEVICE_FUNCTIONS
 VK_DEBUG_DEVICE_FUNCTIONS
 #undef OP
+
+#define VK_PUSH_MEMBER(cmdBuf, pipelineLayout, shaderStage, pushData, memberName) VK::vkCmdPushConstants(cmdBuf, pipelineLayout, shaderStage, OFFSET_OF(decltype(pushData), memberName), sizeof((pushData).memberName), &(pushData).memberName)
+#define VK_PUSH_STRUCT(cmdBuf, pipelineLayout, shaderStage, pushData, offsetBytes) VK::vkCmdPushConstants(cmdBuf, pipelineLayout, shaderStage, offsetBytes, sizeof(pushData), &(pushData))
 
 const U32 FRAMES_IN_FLIGHT = 2;
 
@@ -312,6 +315,9 @@ struct WorldDrawPushConstants {
 	U32 camIdx;
 	U32 objId; // High bit set if object is selected
 	U32 materialId;
+};
+struct BackgroundPushConstants {
+	U32 camIdx;
 };
 struct FinalCompositePushConstants {
 	U32 activeObjectId;

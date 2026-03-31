@@ -3790,7 +3790,7 @@ struct DSLCompiler {
 				case TC_OP_SUBSCRIPT: {
 					TCOp& toCall = tcCode.data[op->extendedOperands[0]];
 					U32 numArgs = op->extendedOperandsLength - 1;
-					Type* calledType = load_type(tcCode.data[op->extendedOperands[0]]);
+					Type* calledType = load_type(toCall);
 					if (op->opcode == TC_OP_SUBSCRIPT && calledType) {
 						if (numArgs > 1) {
 							generation_error("Array declaration must not have more than one size"a, *op);
@@ -4457,7 +4457,7 @@ struct DSLCompiler {
 
 		for (ShaderEntrypoint& entry : entrypoints) {
 			ShaderSection& shaderSection = shaderSections.data[entry.shaderSectionIdx];
-			if (shaderSection.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE) {
+			if (shaderSection.shaderType == SHADER_TYPE_INTER_SHADER_INTERFACE || shaderSection.shaderType == SHADER_TYPE_NONE) {
 				continue;
 			}
 			SpvId* globalVarIds = arena->alloc<U32>(shaderSection.globals.size);

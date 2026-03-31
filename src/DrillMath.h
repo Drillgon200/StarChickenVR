@@ -2129,42 +2129,54 @@ enum Axis3 : I32 {
 struct Rng1F32 {
 	F32 minX, maxX;
 
-	void init(F32 mnX, F32 mxX) {
+	FINLINE void init(F32 mnX, F32 mxX) {
 		minX = min(mnX, mxX);
 		maxX = max(mnX, mxX);
 	}
-	F32 midpoint() {
+	FINLINE F32 midpoint() {
 		return (minX + maxX) * 0.5F;
+	}
+	FINLINE F32 area() {
+		return maxX - minX;
+	}
+	FINLINE Rng1F32 unioned(Rng1F32 b) {
+		return Rng1F32{ min(minX, b.minX), max(maxX, b.maxX) };
+	}
+	FINLINE Rng1F32 intersected(Rng1F32 b) {
+		Rng1F32 rng{ max(minX, b.minX), min(maxX, b.maxX) };
+		return rng.maxX < rng.minX ? Rng1F32{} : rng;
+	}
+	FINLINE bool contains_point(F32 v) {
+		return v >= minX && v <= maxX;
 	}
 };
 #pragma pack(pop)
-FINLINE Rng1F32 rng_union(Rng1F32 a, Rng1F32 b) {
-	return Rng1F32{ min(a.minX, b.minX), max(a.maxX, b.maxX) };
-}
-FINLINE Rng1F32 rng_intersect(Rng1F32 a, Rng1F32 b) {
-	Rng1F32 rng{ max(a.minX, b.minX), min(a.maxX, b.maxX) };
-	return rng.maxX < rng.minX ? Rng1F32{} : rng;;
-}
-FINLINE F32 rng_area(Rng1F32 rng) {
-	return rng.maxX - rng.minX;
-}
-FINLINE B32 rng_contains_point(Rng1F32 rng, F32 v) {
-	return v >= rng.minX && v <= rng.maxX;
-}
 
 #pragma pack(push, 1)
 struct Rng2F32 {
 	F32 minX, minY, maxX, maxY;
 
-	V2F32 midpoint() {
+	FINLINE V2F32 midpoint() {
 		return V2F32{ (minX + maxX) * 0.5F, (minY + maxY) * 0.5F };
 	}
-
-	F32 width() {
+	FINLINE F32 width() {
 		return maxX - minX;
 	}
-	F32 height() {
+	FINLINE F32 height() {
 		return maxY - minY;
+	}
+	FINLINE Rng2F32 unioned(Rng2F32 b) {
+		return Rng2F32{ min(minX, b.minX), min(minY, b.minY), max(maxX, b.maxX), max(maxY, b.maxY) };
+	}
+	FINLINE Rng2F32 intersected(Rng2F32 b) {
+		Rng2F32 rng{ max(minX, b.minX), max(minY, b.minY), min(maxX, b.maxX), min(maxY, b.maxY) };
+		return rng.maxX < rng.minX || rng.maxY < rng.minY ? Rng2F32{} : rng;
+	}
+	FINLINE F32 area() {
+		return (maxX - minX) * (maxY - minY);
+	}
+	FINLINE bool contains_point(V2F32 v) {
+		return v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY;
 	}
 };
 #pragma pack(pop)
@@ -2176,52 +2188,76 @@ FINLINE Rng2F32 make_rng2f(V2F a, V2F b) {
 	result.maxY = max(a.y, b.y);
 	return result;
 }
-FINLINE Rng2F32 rng_union(Rng2F32 a, Rng2F32 b) {
-	return Rng2F32{ min(a.minX, b.minX), min(a.minY, b.minY), max(a.maxX, b.maxX), max(a.maxY, b.maxY) };
-}
-FINLINE Rng2F32 rng_intersect(Rng2F32 a, Rng2F32 b) {
-	Rng2F32 rng{ max(a.minX, b.minX), max(a.minY, b.minY), min(a.maxX, b.maxX), min(a.maxY, b.maxY) };
-	return rng.maxX < rng.minX || rng.maxY < rng.minY ? Rng2F32{} : rng;
-}
-FINLINE F32 rng_area(Rng2F32 rng) {
-	return (rng.maxX - rng.minX) * (rng.maxY - rng.minY);
-}
-FINLINE bool rng_contains_point(Rng2F32 rng, V2F32 v) {
-	return v.x >= rng.minX && v.x <= rng.maxX && v.y >= rng.minY && v.y <= rng.maxY;
-}
 
 #pragma pack(push, 1)
 struct Rng3F32 {
 	F32 minX, minY, minZ, maxX, maxY, maxZ;
 
-	V3F32 midpoint() {
+	FINLINE V3F32 midpoint() {
 		return V3F32{ (minX + maxX) * 0.5F, (minY + maxY) * 0.5F, (minZ + maxZ) * 0.5F };
+	}
+	FINLINE Rng3F32 unioned(Rng3F32 b) {
+		return Rng3F32{ min(minX, b.minX), min(minY, b.minY), min(minZ, b.minZ), max(maxX, b.maxX), max(maxY, b.maxY), max(maxZ, b.maxZ) };
+	}
+	FINLINE Rng3F32 intersected(Rng3F32 b) {
+		Rng3F32 rng{ max(minX, b.minX), max(minY, b.minY), max(minZ, b.minZ), min(maxX, b.maxX), min(maxY, b.maxY), min(maxZ, b.maxZ) };
+		return rng.maxX < rng.minX || rng.maxY < rng.minY || rng.maxZ < rng.minZ ? Rng3F32{} : rng;
+	}
+	FINLINE F32 area() {
+		return (maxX - minX) * (maxY - minY) * (maxZ - minZ);
+	}
+	FINLINE bool contains_point(V3F32 v) {
+		return v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY && v.z >= minZ && v.z <= maxZ;
 	}
 };
 #pragma pack(pop)
-FINLINE Rng3F32 rng_union(Rng3F32 a, Rng3F32 b) {
-	return Rng3F32{ min(a.minX, b.minX), min(a.minY, b.minY), min(a.minZ, b.minZ), max(a.maxX, b.maxX), max(a.maxY, b.maxY), max(a.maxZ, b.maxZ) };
-}
-FINLINE Rng3F32 rng_intersect(Rng3F32 a, Rng3F32 b) {
-	Rng3F32 rng{ max(a.minX, b.minX), max(a.minY, b.minY), max(a.minZ, b.minZ), min(a.maxX, b.maxX), min(a.maxY, b.maxY), min(a.maxZ, b.maxZ) };
-	return rng.maxX < rng.minX || rng.maxY < rng.minY || rng.maxZ < rng.minZ ? Rng3F32{} : rng;
-}
-FINLINE F32 rng_area(Rng3F32 rng) {
-	return (rng.maxX - rng.minX) * (rng.maxY - rng.minY) * (rng.maxZ - rng.minZ);
-}
-FINLINE B32 rng_contains_point(Rng3F32 rng, V3F32 v) {
-	return v.x >= rng.minX && v.x <= rng.maxX && v.y >= rng.minY && v.y <= rng.maxY && v.z >= rng.minZ && v.z <= rng.maxZ;
-}
 
 #pragma pack(push, 1)
 struct Rng1I32 {
 	I32 minX, maxX;
+	FINLINE void init(I32 mnX, I32 mxX) {
+		minX = min(mnX, mxX);
+		maxX = max(mnX, mxX);
+	}
+	FINLINE I32 midpoint() {
+		return I32(I64(minX + maxX) / 2);
+	}
+	FINLINE I32 area() {
+		return maxX - minX;
+	}
+	FINLINE Rng1I32 unioned(Rng1I32 b) {
+		return Rng1I32{ min(minX, b.minX), max(maxX, b.maxX) };
+	}
+	FINLINE Rng1I32 intersected(Rng1I32 b) {
+		Rng1I32 rng{ max(minX, b.minX), min(maxX, b.maxX) };
+		return rng.maxX < rng.minX ? Rng1I32{} : rng;
+	}
+	FINLINE bool contains_point(I32 v) {
+		return v >= minX && v <= maxX;
+	}
 };
 #pragma pack(pop)
 
 #pragma pack(push, 1)
 struct Rng2I32 {
 	I32 minX, minY, maxX, maxY;
+
+	FINLINE I32 width() {
+		return maxX - minX;
+	}
+	FINLINE I32 height() {
+		return maxY - minY;
+	}
+	FINLINE Rng2I32 unioned(Rng2I32 b) {
+		return Rng2I32{ min(minX, b.minX), min(minY, b.minY), max(maxX, b.maxX), max(maxY, b.maxY) };
+	}
+	FINLINE Rng2I32 intersected(Rng2I32 b) {
+		Rng2I32 rng{ max(minX, b.minX), max(minY, b.minY), min(maxX, b.maxX), min(maxY, b.maxY) };
+		return rng.maxX < rng.minX || rng.maxY < rng.minY ? Rng2I32{} : rng;
+	}
+	FINLINE I32 area() {
+		return (maxX - minX) * (maxY - minY);
+	}
 };
 #pragma pack(pop)
 

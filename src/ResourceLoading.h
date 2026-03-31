@@ -327,6 +327,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 
 	tex.imageView = VK::create_img_view(tex.image, isCube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, createFormat, 0);
 
+	DEBUG_ASSERT(!allTextures.contains(result), "Tried to load into the same texture object multiple times"a);
 	allTextures.push_back(result);
 
 	if (currentTextureCount == currentTextureMaxCount) {

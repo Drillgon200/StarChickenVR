@@ -16,37 +16,6 @@ namespace UI {
 
 RWSpinLock modificationLock;
 
-ArenaArrayList<V2F32> sizeStack;
-ArenaArrayList<RGBA8> textColorStack;
-ArenaArrayList<RGBA8> borderColorStack;
-ArenaArrayList<RGBA8> backgroundColorStack;
-ArenaArrayList<F32> textSizeStack;
-ArenaArrayList<F32> borderWidthStack;
-ArenaArrayList<F32> paddingStack;
-ArenaArrayList<Flags32> defaultFlagsStack;
-
-#define UI_MAX_Z_OFFSET 2048.0F
-
-#define UI_SIZE(newSize) DEFER_LOOP(sizeStack.push_back(newSize), sizeStack.pop_back())
-#define UI_BACKGROUND_COLOR(newColor) DEFER_LOOP(backgroundColorStack.push_back((newColor).to_rgba8()), backgroundColorStack.pop_back())
-#define UI_TEXT_COLOR(newColor) DEFER_LOOP(textColorStack.push_back((newColor).to_rgba8()), textColorStack.pop_back())
-#define UI_BORDER_COLOR(newColor) DEFER_LOOP(borderColorStack.push_back((newColor).to_rgba8()), borderColorStack.pop_back())
-#define UI_TEXT_SIZE(newSize) DEFER_LOOP(textSizeStack.push_back(newSize), textSizeStack.pop_back())
-#define UI_BORDER_WIDTH(newWidth) DEFER_LOOP(borderWidthStack.push_back(newWidth), borderWidthStack.pop_back())
-#define UI_PADDING(newPadding) DEFER_LOOP(paddingStack.push_back(newPadding), paddingStack.pop_back())
-#define UI_FLAGS(newFlags) DEFER_LOOP(defaultFlagsStack.push_back(newFlags), defaultFlagsStack.pop_back())
-// Suppress "hides previous local declaration" and "local variable is initialized but not referenced", intended behavior for this construct
-#define UI_WORKING_BOX(newBox) __pragma(warning(suppress : 4456 4189))\
-	for (UI::Box* oldWorkingBox = UI::workingBox, * irrelevant = UI::workingBox = (newBox); oldWorkingBox; UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
-
-const U32 MAX_CLIP_BOXES = 0x10000;
-ArenaArrayList<U32> clipBoxIndexStack;
-ArenaArrayList<Rng2F32> clipBoxStack;
-VK::DedicatedBuffer clipBoxBuffers[VK::FRAMES_IN_FLIGHT];
-U32 currentClipBoxCount;
-
-const U32 MAX_TEXT_INPUT = 512;
-
 enum LayoutDirection : U8 {
 	// UP and LEFT are the same as DOWN and RIGHT, but the children are reversed.
 	// Use with the corresponding AlignMode to layout from opposite sides
@@ -72,6 +41,47 @@ enum AlignMode : U8 {
 	ALIGN_MODE_BOTTOM_CENTER = 0b1001,
 	ALIGN_MODE_BOTTOM_RIGHT = 0b1010
 };
+
+ArenaArrayList<V2F32> sizeStack;
+ArenaArrayList<RGBA8> textColorStack;
+ArenaArrayList<RGBA8> borderColorStack;
+ArenaArrayList<RGBA8> backgroundColorStack;
+ArenaArrayList<F32> textSizeStack;
+ArenaArrayList<F32> borderWidthStack;
+ArenaArrayList<F32> paddingStack;
+ArenaArrayList<Flags32> defaultFlagsStack;
+ArenaArrayList<LayoutDirection> layoutDirectionStack;
+ArenaArrayList<SizeMode> sizeModeXStack;
+ArenaArrayList<SizeMode> sizeModeYStack;
+ArenaArrayList<AlignMode> alignModeStack;
+
+#define UI_MAX_Z_OFFSET 2048.0F
+
+#define UI_SIZE(newSize) DEFER_LOOP(UI::sizeStack.push_back(newSize), UI::sizeStack.pop_back())
+#define UI_BACKGROUND_COLOR(newColor) DEFER_LOOP(UI::backgroundColorStack.push_back((newColor).to_rgba8()), UI::backgroundColorStack.pop_back())
+#define UI_TEXT_COLOR(newColor) DEFER_LOOP(UI::textColorStack.push_back((newColor).to_rgba8()), UI::textColorStack.pop_back())
+#define UI_BORDER_COLOR(newColor) DEFER_LOOP(UI::borderColorStack.push_back((newColor).to_rgba8()), UI::borderColorStack.pop_back())
+#define UI_TEXT_SIZE(newSize) DEFER_LOOP(UI::textSizeStack.push_back(newSize), UI::textSizeStack.pop_back())
+#define UI_BORDER_WIDTH(newWidth) DEFER_LOOP(UI::borderWidthStack.push_back(newWidth), UI::borderWidthStack.pop_back())
+#define UI_PADDING(newPadding) DEFER_LOOP(UI::paddingStack.push_back(newPadding), UI::paddingStack.pop_back())
+#define UI_FLAGS(newFlags) DEFER_LOOP(UI::defaultFlagsStack.push_back(newFlags), UI::defaultFlagsStack.pop_back())
+#define UI_LAYOUT_DIRECTION(newLayoutDirection) DEFER_LOOP(UI::layoutDirectionStack.push_back(newLayoutDirection), UI::layoutDirectionStack.pop_back())
+#define UI_SIZE_MODE_X(newSizeMode) DEFER_LOOP(UI::sizeModeXStack.push_back(newSizeMode), UI::sizeModeXStack.pop_back())
+#define UI_SIZE_MODE_Y(newSizeMode) DEFER_LOOP(UI::sizeModeYStack.push_back(newSizeMode), UI::sizeModeYStack.pop_back())
+#define UI_SIZE_MODE(newSizeMode) DEFER_LOOP((UI::sizeModeYStack.push_back(newSizeMode), UI::sizeModeXStack.push_back(newSizeMode)), (UI::sizeModeXStack.pop_back(), UI::sizeModeYStack.pop_back()))
+#define UI_ALIGN_MODE(newAlignMode) DEFER_LOOP(UI::alignModeStack.push_back(newAlignMode), UI::alignModeStack.pop_back())
+// Suppress "hides previous local declaration" and "local variable is initialized but not referenced", intended behavior for this construct
+#define UI_WORKING_BOX(newBox) __pragma(warning(suppress : 4456 4189))\
+	for (UI::Box* oldWorkingBox = UI::workingBox, * irrelevant = UI::workingBox = (newBox); oldWorkingBox; UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
+
+const U32 MAX_CLIP_BOXES = 0x10000;
+ArenaArrayList<U32> clipBoxIndexStack;
+ArenaArrayList<Rng2F32> clipBoxStack;
+VK::DedicatedBuffer clipBoxBuffers[VK::FRAMES_IN_FLIGHT];
+U32 currentClipBoxCount;
+
+const U32 MAX_TEXT_INPUT = 2048;
+
 struct Box;
 // Amalgamation of anything interesting that might happen to a box.
 // Each of these fields can be optionally handled in the action callback.
@@ -114,7 +124,8 @@ enum BoxFlag : U32 {
 	BOX_FLAG_CUSTOM_DRAW = 1 << 4,
 	BOX_FLAG_DONT_CLOSE_CONTEXT_MENU_ON_INTERACTION = 1 << 5,
 	BOX_FLAG_WRAP_TEXT = 1 << 6,
-	BOX_FLAG_DONT_FIT_CHILDREN = 1 << 7
+	BOX_FLAG_DONT_FIT_CHILDREN = 1 << 7,
+	BOX_FLAG_FLOATING = 1 << 8
 };
 typedef Flags32 BoxFlags;
 const F32 BOX_INF_SIZE = 100000.0F;
@@ -148,8 +159,10 @@ struct Box {
 	F32 padding; // Padding around edges as well as between children
 	F32 zOffset;
 
-	V2F computedPos;
-	V2F computedSize;
+	V2F computedPos; // Position relative to parent after the last layout pass
+	V2F computedSize; // Size after the last layout pass
+
+	V2F renderPos; // Absolute screen pos after the last render pass
 
 	StrA text;
 	StrA tooltip;
@@ -207,6 +220,165 @@ struct BoxHandle {
 	}
 };
 
+struct TypedTextBuffer {
+	char* buffer;
+	U32 bufferCap;
+	U32 textLength;
+	// cursorAnchor and cursor represent a highlighted range, both values are the same if nothing is selected
+	I32 cursorAnchor;
+	I32 cursor;
+	B8 allowMultiLine;
+
+	void set_buffer(char* data, U32 length, U32 cap) {
+		buffer = data;
+		bufferCap = cap;
+		textLength = length;
+		cursor = cursorAnchor = length;
+	}
+
+	void move_left() {
+		if (cursorAnchor != cursor) {
+			cursorAnchor = cursor = min(cursor, cursorAnchor);
+		} else if (cursor > 0) {
+			cursor--, cursorAnchor--;
+		}
+	}
+	void move_right() {
+		if (cursorAnchor != cursor) {
+			cursorAnchor = cursor = max(cursor, cursorAnchor);
+		} else if (cursor < textLength) {
+			cursor++, cursorAnchor++;
+		}
+	}
+	void select_left() {
+		cursor = max(cursor - 1, 0);
+	}
+	void select_right() {
+		cursor = min(cursor + 1, I32(textLength));
+	}
+	void delete_selected() {
+		Rng1I32 selected; selected.init(cursor, cursorAnchor);
+		memmove(buffer + selected.minX, buffer + selected.maxX, textLength - selected.maxX);
+		textLength -= selected.area();
+		cursor = cursorAnchor = selected.minX;
+	}
+	void handle_key_press(Win32::Key key) {
+		if (Win32::keyboardState[Win32::KEY_CTRL]) {
+			switch (key) {
+			case Win32::KEY_A: {
+				cursorAnchor = 0;
+				cursor = textLength;
+			} break;
+			case Win32::KEY_C: {
+				Rng1I32 selected; selected.init(cursor, cursorAnchor);
+				Win32::set_clipboard(buffer + selected.minX, selected.area());
+			} break;
+			case Win32::KEY_X: {
+				Rng1I32 selected; selected.init(cursor, cursorAnchor);
+				Win32::set_clipboard(buffer + selected.minX, selected.area());
+				delete_selected();
+			} break;
+			case Win32::KEY_V: {
+				delete_selected();
+				MemoryArena& arena = get_scratch_arena();
+				char* clipData = (char*)arena.stackBase + arena.stackPtr;
+				U32 clipLength = GIGABYTE;
+				Win32::get_clipboard(clipData, &clipLength);
+				if (!allowMultiLine) {
+					for (U32 i = 0; i < clipLength; i++) {
+						if (clipData[i] == '\r' || clipData[i] == '\n') {
+							clipLength = i;
+							break;
+						}
+					}
+				}
+				if (textLength + clipLength <= bufferCap) {
+					memmove(buffer + cursor + clipLength, buffer + cursor, textLength - cursor);
+					memcpy(buffer + cursor, clipData, clipLength);
+					textLength += clipLength;
+					cursor = cursorAnchor = cursor + clipLength;
+				}
+			} break;
+			default: break;
+			}
+		} else {
+			switch (key) {
+			case Win32::KEY_LEFT: {
+				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
+					select_left();
+				} else {
+					move_left();
+				}
+			} break;
+			case Win32::KEY_RIGHT: {
+				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
+					select_right();
+				} else {
+					move_right();
+				}
+			} break;
+			case Win32::KEY_BACKSPACE: {
+				if (cursor == cursorAnchor) {
+					select_left();
+				}
+				delete_selected();
+			} break;
+			case Win32::KEY_DELETE: {
+				if (cursor == cursorAnchor) {
+					select_right();
+				}
+				delete_selected();
+			} break;
+			default: {
+				char letter = Win32::key_to_typed_char(key);
+				if (key == Win32::KEY_RETURN && allowMultiLine) {
+					letter = '\n';
+				}
+				Rng1I32 selected; selected.init(cursor, cursorAnchor);
+				if (letter != '\0' && textLength - selected.area() < bufferCap) {
+					memmove(buffer + selected.minX + 1, buffer + selected.maxX, textLength - selected.maxX);
+					buffer[selected.minX] = letter;
+					textLength = textLength - selected.area() + 1;
+					cursor = cursorAnchor = selected.minX + 1;
+				}
+			} break;
+			}
+		}
+	}
+	void handle_mouse_action(V2F pos, bool drag, bool wrap, F32 wrapWidth, F32 sizeY) {
+		MemoryArena& arena = get_scratch_arena();
+		MEMORY_ARENA_FRAME(arena) {
+			StrA baseStr{ buffer, textLength };
+			StrA* lines = &baseStr;
+			U32 lineCount = 1;
+			U32 zero = 0;
+			U32* originalLineOffsets = &zero;
+			if (wrap) {
+				lines = TextRenderer::wrap_text(arena, &lineCount, &originalLineOffsets, baseStr, wrapWidth, sizeY);
+			}
+			I32 selectedLine = TextRenderer::get_line_idx_from_position(pos.y, sizeY);
+			I32 selectedColumn = I32(pos.x / TextRenderer::get_character_width(' ', sizeY) + 0.5F);
+			if (selectedLine < 0) {
+				selectedLine = 0;
+				selectedColumn = 0;
+			}
+			if (selectedLine >= lineCount) {
+				selectedLine = lineCount - 1;
+				selectedColumn = I32_MAX;
+			}
+			selectedColumn = clamp(selectedColumn, 0, I32(lines[selectedLine].length));
+			if (drag) {
+				cursor = originalLineOffsets[selectedLine] + selectedColumn;
+			} else {
+				cursorAnchor = cursor = originalLineOffsets[selectedLine] + selectedColumn;
+			}
+		}
+	}
+	StrA stra() {
+		return StrA{ buffer, textLength };
+	}
+};
+
 Box* root;
 Box* workingBox;
 
@@ -221,6 +393,8 @@ BoxHandle activeBox;
 F32 activeBoxTotalScale;
 // The box currently selected for typing
 BoxHandle activeTextBox;
+TypedTextBuffer textInputHandler;
+F64 lastKeyTypedSeconds;
 
 U64 currentGeneration = 1;
 Box* boxFreeList = nullptr;
@@ -244,7 +418,10 @@ void make_default_settings(Box* box) {
 	box->backgroundColor = backgroundColorStack.back();
 	box->backgroundTexture = nullptr;
 	box->actionCallback = nullptr;
-	box->layoutDirection = LAYOUT_DIRECTION_DOWN;
+	box->layoutDirection = layoutDirectionStack.back();
+	box->sizeModeX = sizeModeXStack.back();
+	box->sizeModeY = sizeModeYStack.back();
+	box->align = alignModeStack.back();
 }
 
 char* alloc_text_input() {
@@ -270,10 +447,10 @@ BoxHandle alloc_box() {
 		boxFreeList[amountToAlloc - 1].next = nullptr;
 	}
 	Box* box = boxFreeList;
+	boxFreeList = box->next;
 	*box = Box{};
 	make_default_settings(box);
 	box->generation = currentGeneration++;
-	boxFreeList = box->next;
 	return BoxHandle{ box, box->generation };
 }
 void free_box(BoxHandle boxHandle) {
@@ -349,11 +526,19 @@ void init_ui() {
 	textSizeStack.reserve(16);
 	textSizeStack.push_back(12.0F);
 	borderWidthStack.reserve(16);
-	borderWidthStack.push_back(2.0F);
+	borderWidthStack.push_back(0.0F);
 	paddingStack.reserve(16);
 	paddingStack.push_back(0.0F);
 	defaultFlagsStack.reserve(16);
 	defaultFlagsStack.push_back(0);
+	layoutDirectionStack.reserve(16);
+	layoutDirectionStack.push_back(LAYOUT_DIRECTION_DOWN);
+	sizeModeXStack.reserve(16);
+	sizeModeXStack.push_back(SIZE_MODE_FIT_CHILDREN);
+	sizeModeYStack.reserve(16);
+	sizeModeYStack.push_back(SIZE_MODE_FIT_CHILDREN);
+	alignModeStack.reserve(16);
+	alignModeStack.push_back(ALIGN_MODE_TOP_LEFT);
 
 	contextMenuStack.reserve(16);
 
@@ -396,10 +581,12 @@ void compute_min_sizes_x_recurse(Box* box) {
 			continue;
 		}
 		compute_min_sizes_x_recurse(child);
-		if (layoutAxis == AXIS2_X) {
-			current += child->computedSize.x + (child->next ? padding : 0.0F);
-		} else {
-			current = max(current, padding + child->computedPos.x + child->computedSize.x);
+		if (!(child->flags & BOX_FLAG_FLOATING)) {
+			if (layoutAxis == AXIS2_X) {
+				current += child->computedSize.x + (child->next ? padding : 0.0F);
+			} else {
+				current = max(current, padding + child->computedPos.x + child->computedSize.x);
+			}
 		}
 	}
 	size = max(size, current + padding);
@@ -422,9 +609,8 @@ void compute_min_sizes_y_recurse(Box* box) {
 	}
 	if (!boxText.is_empty()) {
 		if (box->flags & BOX_FLAG_WRAP_TEXT) {
-			MEMORY_ARENA_FRAME(scratchArena0) {
-				size = max(size, TextRenderer::string_size_y(TextRenderer::wrap_text(scratchArena0, boxText, box->computedSize.x - padding * 2.0F, box->textSize), box->textSize) + padding * 2.0F);
-			}
+			V2F wrappedSize = TextRenderer::wrapped_size(boxText, box->computedSize.x - padding * 2.0F, box->textSize);
+			size = max(size, wrappedSize.y);
 		} else {
 			size = max(size, TextRenderer::string_size_y(boxText, box->textSize) + padding * 2.0F);
 		}
@@ -438,10 +624,12 @@ void compute_min_sizes_y_recurse(Box* box) {
 			continue;
 		}
 		compute_min_sizes_y_recurse(child);
-		if (layoutAxis == AXIS2_X) {
-			current = max(current, padding + child->computedPos.y + child->computedSize.y);
-		} else {
-			current += child->computedSize.y + (child->next ? padding : 0.0F);
+		if (!(child->flags & BOX_FLAG_FLOATING)) {
+			if (layoutAxis == AXIS2_X) {
+				current = max(current, padding + child->computedPos.y + child->computedSize.y);
+			} else {
+				current += child->computedSize.y + (child->next ? padding : 0.0F);
+			}
 		}
 	}
 	size = max(size, current + padding);
@@ -472,7 +660,9 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 		U32 childCount = 0;
 		Box** growables = scratchArena0.alloc<Box*>(0);
 		for (Box* child = box->childFirst; child; child = child->next) {
-			childrenSpace += child->computedSize.x;
+			if (!(child->flags & BOX_FLAG_FLOATING)) {
+				childrenSpace += child->computedSize.x;
+			}
 			if (child->sizeModeX == SIZE_MODE_GROW_TO_PARENT || child->sizeModeX == SIZE_MODE_PARENT_PERCENT) {
 				growables[growableCount++] = child;
 			}
@@ -554,11 +744,13 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 			continue;
 		}
 		compute_final_sizes_and_positions_x_recurse(child);
-		if (layoutAxis == AXIS2_X) {
-			child->computedPos.x += current;
-			current += child->computedSize.x + padding;
-		} else {
-			child->computedPos.x += padding;
+		if (!(child->flags & BOX_FLAG_FLOATING)) {
+			if (layoutAxis == AXIS2_X) {
+				child->computedPos.x += current;
+				current += child->computedSize.x + padding;
+			} else {
+				child->computedPos.x += padding;
+			}
 		}
 	}
 }
@@ -593,7 +785,9 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 		U32 childCount = 0;
 		Box** growables = scratchArena0.alloc<Box*>(0);
 		for (Box* child = box->childFirst; child; child = child->next) {
-			childrenSpace += child->computedSize.y;
+			if (!(child->flags & BOX_FLAG_FLOATING)) {
+				childrenSpace += child->computedSize.y;
+			}
 			if (child->sizeModeY == SIZE_MODE_GROW_TO_PARENT || child->sizeModeY == SIZE_MODE_PARENT_PERCENT) {
 				growables[growableCount++] = child;
 			}
@@ -663,11 +857,13 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 			continue;
 		}
 		compute_final_sizes_and_positions_y_recurse(child);
-		if (layoutAxis == AXIS2_X) {
-			child->computedPos.y += padding;
-		} else {
-			child->computedPos.y += current;
-			current += child->computedSize.y + padding;
+		if (!(child->flags & BOX_FLAG_FLOATING)) {
+			if (layoutAxis == AXIS2_X) {
+				child->computedPos.y += padding;
+			} else {
+				child->computedPos.y += current;
+				current += child->computedSize.y + padding;
+			}
 		}
 	}
 }
@@ -718,14 +914,21 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 	}
 	V2F boxPos = parentPos + box->computedPos;
 	Rng2F32 renderArea{ boxPos.x, boxPos.y, boxPos.x + box->computedSize.x, boxPos.y + box->computedSize.y };
+	box->renderPos = boxPos;
+	U32 prevClipBox = clipBoxIndexStack.back();
 	if (box->flags & BOX_FLAG_CLIP_CHILDREN && currentClipBoxCount < MAX_CLIP_BOXES) {
-		Rng2F32 boxRange = rng_intersect(renderArea, clipBoxStack.back());
+		Rng2F32 boxRange = renderArea.intersected(clipBoxStack.back());
 		reinterpret_cast<Rng2F32*>(clipBoxBuffers[VK::currentFrameInFlight].mapping)[currentClipBoxCount] = boxRange;
 		clipBoxIndexStack.push_back(currentClipBoxCount);
 		clipBoxStack.push_back(boxRange);
 		currentClipBoxCount++;
 	}
 	if (!(box->flags & BOX_FLAG_INVISIBLE)) {
+		if (box->borderWidth != 0.0F && box->borderColor.a != 0) {
+			V4F32 color = box->borderColor.to_v4f32();
+			F32 borderWidth = box->borderWidth * scale;
+			tes.ui_rect2d(renderArea.minX - borderWidth, renderArea.minY - borderWidth, renderArea.maxX + borderWidth, renderArea.maxY + borderWidth, z, 0.0F, 0.0F, 1.0F, 1.0F, color, Resources::simpleWhite.index, prevClipBox << 16);
+		}
 		if (box->backgroundColor.a != 0) {
 			V4F32 color = box->backgroundColor.to_v4f32();
 			if (box->flags & BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION) {
@@ -746,23 +949,60 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 		MEMORY_ARENA_FRAME(scratchArena0) {
 			if (!box->text.is_empty() && box->numTypedCharacters == 0) {
 				StrA str = box->text;
+				StrA* lines = &str;
+				U32 zero = 0;
+				U32* originalLineOffsets = &zero;
+				U32 lineCount = 1;
 				if (box->flags & BOX_FLAG_WRAP_TEXT) {
-					str = TextRenderer::wrap_text(scratchArena0, str, box->computedSize.x - box->padding * 2.0F, box->textSize);
+					lines = TextRenderer::wrap_text(scratchArena0, &lineCount, &originalLineOffsets, str, box->computedSize.x - box->padding * 2.0F, box->textSize);
 				}
 				V4F32 textColor = box->textColor.to_v4f32();
 				if (box->typedTextBuffer && box->numTypedCharacters == 0) {
 					textColor = V4F32{ textColor.x * 0.25F, textColor.y * 0.25F, textColor.z * 0.25F, textColor.w };
 				}
-				F32 strHeight = TextRenderer::string_size_y(str, box->textSize * scale);
-				TextRenderer::draw_string_batched(tes, str, renderArea.minX + box->padding * scale, 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight, z, box->textSize * scale, textColor, clipBoxIndexStack.back() << 16);
+				F32 strHeight = TextRenderer::lines_size_y(lines, lineCount, box->textSize * scale);
+				F32 textStartX = renderArea.minX + box->padding * scale;
+				F32 textStartY = 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight;
+				TextRenderer::draw_string_batched(tes, str, textStartX, textStartY, z, box->textSize * scale, textColor, clipBoxIndexStack.back() << 16);
 			}
-			if (box->numTypedCharacters) {
+			if (box->typedTextBuffer) {
 				StrA str{ box->typedTextBuffer, box->numTypedCharacters };
+				StrA* lines = &str;
+				U32 zero = 0;
+				U32* originalLineOffsets = &zero;
+				U32 lineCount = 1;
 				if (box->flags & BOX_FLAG_WRAP_TEXT) {
-					str = TextRenderer::wrap_text(scratchArena0, str, box->computedSize.x - box->padding * 2.0F, box->textSize);
+					lines = TextRenderer::wrap_text(scratchArena0, &lineCount, &originalLineOffsets, str, box->computedSize.x - box->padding * 2.0F, box->textSize);
 				}
-				F32 strHeight = TextRenderer::string_size_y(str, box->textSize * scale);
-				TextRenderer::draw_string_batched(tes, str, renderArea.minX + box->padding * scale, 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight, z, box->textSize * scale, box->textColor.to_v4f32(), clipBoxIndexStack.back() << 16);
+				F32 strHeight = TextRenderer::lines_size_y(lines, lineCount, box->textSize * scale);
+				F32 textStartX = renderArea.minX + box->padding * scale;
+				F32 textStartY = 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight;
+				TextRenderer::draw_lines_batched(tes, lines, lineCount, textStartX, textStartY, z, box->textSize * scale, box->textColor.to_v4f32(), clipBoxIndexStack.back() << 16, false);
+				F32 charWidth = TextRenderer::get_character_width(' ', box->textSize * scale); // Only supporting monospaced for now
+				if (activeTextBox.get() == box) {
+					V4F highlightColor{ 0.14F, 0.34F, 0.71f, 0.5F };
+					F32 cursorOffsetX = 0.0F;
+					F32 cursorOffsetY = 0.0F;
+					Rng1I32 selected; selected.init(textInputHandler.cursor, textInputHandler.cursorAnchor);
+					for (U32 i = 0; i < lineCount; i++) {
+						StrA line = lines[i];
+						I32 highlightStart = max(0, selected.minX - I32(originalLineOffsets[i]));
+						I32 highlightEnd = min(I32(line.length), selected.maxX - I32(originalLineOffsets[i]));
+						F32 yOffset = TextRenderer::lines_size_y(lines, i, box->textSize * scale);
+						if (highlightEnd > highlightStart) {
+							tes.ui_rect2d(textStartX + charWidth * F32(highlightStart), textStartY + yOffset, textStartX + charWidth * F32(highlightEnd), textStartY + yOffset + box->textSize * scale, z, 0.0F, 0.0F, 1.0F, 1.0F, highlightColor, Resources::simpleWhite.index, clipBoxIndexStack.back() << 16);
+						}
+						if (textInputHandler.cursor >= originalLineOffsets[i] && textInputHandler.cursor < originalLineOffsets[i] + line.length ||
+							i == lineCount - 1 && textInputHandler.cursor == originalLineOffsets[i] + line.length) {
+
+							cursorOffsetX = charWidth * (textInputHandler.cursor - originalLineOffsets[i]);
+							cursorOffsetY = yOffset;
+						}
+					}
+					if (fractf64(current_time_seconds() - lastKeyTypedSeconds) < 0.5) {
+						tes.ui_rect2d(textStartX + cursorOffsetX, textStartY + cursorOffsetY, textStartX + cursorOffsetX + 1.0F, textStartY + cursorOffsetY + box->textSize * scale, z, 0.0F, 0.0F, 1.0F, 1.0F, V4F{ 0.85F, 0.85F, 0.85F, 1.0F }, Resources::simpleWhite.index, clipBoxIndexStack.back() << 16);
+					}
+				}
 			}
 		}
 	}
@@ -818,7 +1058,8 @@ B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::
 	}
 	V2F32 boxPos = parentPos + box->computedPos;
 	Rng2F32 renderArea{ boxPos.x, boxPos.y, boxPos.x + box->computedSize.x, boxPos.y + box->computedSize.y };
-	bool mouseOutside = !rng_contains_point(renderArea, pos);
+	box->renderPos = boxPos;
+	bool mouseOutside = !renderArea.contains_point(pos);
 	if (mouseOutside && box->flags & BOX_FLAG_CLIP_CHILDREN) {
 		return false;
 	}
@@ -863,6 +1104,9 @@ B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::
 			comm.mouse4ClickStart = button == Win32::MOUSE_BUTTON_3;
 			comm.mouse5ClickStart = button == Win32::MOUSE_BUTTON_4;
 			activeBox = BoxHandle{ box, box->generation };
+			if (Box* textEntry = activeTextBox.get()) {
+				textEntry->borderWidth = 0.0F;
+			}
 			activeTextBox = BoxHandle{};
 			// This is a bit of a hack to avoid having to set parents while also having drag properly scaleed.
 			// It won't update correctly if the user scales while dragging
@@ -896,6 +1140,14 @@ bool handle_mouse_action(V2F32 pos, Win32::MouseButton button, Win32::MouseValue
 	}
 	mouse_input_for_box_recurse(&anyContained, root, pos, button, state, root->computedPos, 1.0F, false);
 contextMenuClicked:;
+	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_DOWN && activeBox.get() && activeBox.get() == activeTextBox.get()) {
+		Box* box = activeBox.unsafeBox;
+		F32 textStartX = box->renderPos.x + box->padding * activeBoxTotalScale;
+		StrA str = textInputHandler.stra();
+		F32 wrapWidth = box->computedSize.x - box->padding * 2.0F;
+		F32 textStartY = box->renderPos.y + 0.5F * box->computedSize.y - 0.5F * (box->flags & BOX_FLAG_WRAP_TEXT ? TextRenderer::wrapped_size(str, wrapWidth, box->textSize).y : TextRenderer::string_size_y(str, box->textSize));
+		textInputHandler.handle_mouse_action(pos - V2F{ textStartX, textStartY }, false, box->flags & BOX_FLAG_WRAP_TEXT, wrapWidth, box->textSize);
+	}
 	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_UP) {
 		activeBox = BoxHandle{};
 	}
@@ -908,8 +1160,8 @@ B32 mouse_update_for_box_recurse(B32* anyContains, Box* box, V2F32 pos, V2F32 de
 	}
 	V2F32 boxPos = parentPos + box->computedPos;
 	Rng2F32 renderArea{ boxPos.x, boxPos.y, boxPos.x + box->computedSize.x, boxPos.y + box->computedSize.y };
-
-	B32 mouseOutside = !rng_contains_point(renderArea, pos);
+	box->renderPos = boxPos;
+	B32 mouseOutside = !renderArea.contains_point(pos);
 	if (mouseOutside && box->flags & BOX_FLAG_CLIP_CHILDREN) {
 		return false;
 	}
@@ -946,6 +1198,13 @@ void handle_mouse_update(V2F32 pos, V2F32 delta) {
 		active = nullptr;
 	}
 	if (active && active->actionCallback) {
+		if (activeTextBox.get() == active) {
+			F32 textStartX = active->renderPos.x + active->padding * activeBoxTotalScale;
+			StrA str = textInputHandler.stra();
+			F32 wrapWidth = active->computedSize.x - active->padding * 2.0F;
+			F32 textStartY = active->renderPos.y + 0.5F * active->computedSize.y - 0.5F * (active->flags & BOX_FLAG_WRAP_TEXT ? TextRenderer::wrapped_size(str, wrapWidth, active->textSize).y : TextRenderer::string_size_y(str, active->textSize));
+			textInputHandler.handle_mouse_action(pos - V2F{ textStartX, textStartY }, true, active->flags & BOX_FLAG_WRAP_TEXT, wrapWidth, active->textSize);
+		}
 		UserCommunication comm{};
 		comm.mousePos = pos;
 		comm.drag = delta / activeBoxTotalScale;
@@ -964,7 +1223,7 @@ void handle_mouse_update(V2F32 pos, V2F32 delta) {
 		}
 		mouse_update_for_box_recurse(nullptr, root, pos, delta, root->computedPos, 1.0F);
 	contextMenuHovered:;
-		if (!hotBox.get() && rng_contains_point(Rng2F32{ 0.0F, 0.0F, F32(Win32::framebufferWidth), F32(Win32::framebufferHeight) }, pos)) {
+		if (!hotBox.get() && Rng2F32{ 0.0F, 0.0F, F32(Win32::framebufferWidth), F32(Win32::framebufferHeight) }.contains_point(pos)) {
 			Win32::set_cursor(Win32::CURSOR_TYPE_POINTER);
 		}
 	}
@@ -976,7 +1235,8 @@ B32 keyboard_input_for_box_recurse(B32* anyContained, Box* box, V2F32 pos, Win32
 	}
 	V2F32 boxPos = parentPos + box->computedPos;
 	Rng2F32 renderArea{ boxPos.x, boxPos.y, boxPos.x + box->computedSize.x, boxPos.y + box->computedSize.y };
-	B32 mouseOutside = !rng_contains_point(renderArea, pos);
+	box->renderPos = boxPos;
+	B32 mouseOutside = !renderArea.contains_point(pos);
 	if (mouseOutside && box->flags & BOX_FLAG_CLIP_CHILDREN) {
 		return false;
 	}
@@ -1003,11 +1263,12 @@ void handle_keyboard_action(V2F32 mousePos, Win32::Key key, Win32::ButtonState s
 	modificationLock.lock_write();
 	if (Box* activeTextInput = activeTextBox.get()) {
 		if (state == Win32::BUTTON_STATE_DOWN) {
-			UserCommunication comm{};
-			comm.mousePos = mousePos;
-			comm.keyPressed = key;
-			comm.charTyped = Win32::key_to_typed_char(key);
-			activeTextInput->actionCallback(activeTextInput, comm);
+			lastKeyTypedSeconds = current_time_seconds();
+			textInputHandler.handle_key_press(key);
+			activeTextInput->numTypedCharacters = textInputHandler.textLength;
+			if (activeTextInput->boxConsumerCallback) {
+				activeTextInput->boxConsumerCallback(activeTextInput); // Notify user that the field changed
+			}
 		}
 	} else {
 		for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
@@ -1064,10 +1325,16 @@ void lbox(BoxActionCallback callback = nullptr) {
 void rbox(BoxActionCallback callback = nullptr) {
 	layout_box(LAYOUT_DIRECTION_RIGHT, callback);
 }
+void background_box() {
+	BoxHandle box = generic_box();
+	box.unsafeBox->sizeModeX = box.unsafeBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+	workingBox = box.unsafeBox;
+}
 #define UI_UBOX() DEFER_LOOP(UI::ubox(), UI::pop_box())
 #define UI_DBOX() DEFER_LOOP(UI::dbox(), UI::pop_box())
 #define UI_LBOX() DEFER_LOOP(UI::lbox(), UI::pop_box())
 #define UI_RBOX() DEFER_LOOP(UI::rbox(), UI::pop_box())
+#define UI_BACKGROUND() DEFER_LOOP(UI::background_box(), UI::pop_box())
 BoxHandle spacer(F32 spacing) {
 	BoxHandle box = generic_box();
 	if (workingBox->layoutDirection == LAYOUT_DIRECTION_LEFT || workingBox->layoutDirection == LAYOUT_DIRECTION_RIGHT) {
@@ -1095,6 +1362,7 @@ BoxHandle text_button(StrA text, Callback&& onClick) {
 	box.unsafeBox->flags |= BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
 	box.unsafeBox->text = text;
 	box.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
+	box.unsafeBox->padding = 2.0F;
 	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
 	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
 		if (com.leftClicked) {
@@ -1111,30 +1379,27 @@ template<typename Callback>
 BoxHandle text_input(StrA prompt, StrA defaultValue, Callback&& onTextUpdated) {
 	BoxHandle boxHandle = generic_box();
 	Box* box = boxHandle.unsafeBox;
-	box->flags = BOX_FLAG_CLIP_CHILDREN | BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION | BOX_FLAG_WRAP_TEXT;
+	box->flags = BOX_FLAG_CLIP_CHILDREN | BOX_FLAG_WRAP_TEXT;
 	box->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 	box->sizeModeY = SIZE_MODE_FIT_CHILDREN;
 	box->size.x = 100.0F;
 	box->text = prompt;
+	box->borderWidth = 0.0F;
+	box->borderColor = RGBA8{ 0, 0, 0, 255 };
+	box->padding = 2.0F;
 	box->typedTextBuffer = alloc_text_input();
 	defaultValue.length = min<U64>(defaultValue.length, MAX_TEXT_INPUT);
 	memcpy(box->typedTextBuffer, defaultValue.str, defaultValue.length);
 	box->numTypedCharacters = U32(defaultValue.length);
 	set_box_consumer_box_callback(box, reinterpret_cast<Callback&&>(onTextUpdated));
 	box->actionCallback = [](Box* box, UserCommunication& comm) {
-		if (comm.leftClicked) {
-			activeTextBox = BoxHandle{ box, box->generation };
-			return ACTION_HANDLED;
-		}
-		if (comm.keyPressed && activeTextBox.get() == box) {
-			if (comm.charTyped && box->numTypedCharacters < MAX_TEXT_INPUT) {
-				box->typedTextBuffer[box->numTypedCharacters++] = comm.charTyped;
-			} else if (comm.keyPressed == Win32::KEY_RETURN && box->numTypedCharacters < MAX_TEXT_INPUT) {
-				box->typedTextBuffer[box->numTypedCharacters++] = '\n';
-			} else if (comm.keyPressed == Win32::KEY_BACKSPACE && box->numTypedCharacters > 0) {
-				box->numTypedCharacters--;
+		if (comm.leftClickStart || comm.rightClickStart) {
+			if (activeTextBox.get() != box) {
+				box->borderWidth = 1.0F;
+				activeTextBox = BoxHandle{ box, box->generation };
+				textInputHandler.set_buffer(box->typedTextBuffer, box->numTypedCharacters, MAX_TEXT_INPUT);
+				textInputHandler.allowMultiLine = box->flags & BOX_FLAG_WRAP_TEXT;
 			}
-			box->boxConsumerCallback(box);
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
@@ -1159,6 +1424,28 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 		};
 	return box;
 }
+
+void path_input(StrA fieldName) {
+	UI_RBOX() {
+		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+		text(fieldName);
+		spacer(4.0F);
+		BoxHandle textInput = text_input("Enter file path"a, ""a, [](Box* box){});
+		button(Resources::uiFolder, [textInput](Box* box) mutable {
+			if (Box* box = textInput.get()) {
+				MemoryArena& arena = get_scratch_arena();
+				MEMORY_ARENA_FRAME(arena) {
+					StrA path = get_user_selected_file(arena);
+					if (path.length <= MAX_TEXT_INPUT) {
+						memcpy(box->typedTextBuffer, path.str, path.length);
+						box->numTypedCharacters = path.length;
+					}
+				}
+			}
+		});
+	}
+}
+
 /*
 // onClick of type BoxConsumer
 // Min and max are only hints, they do not guarantee the text value
@@ -1283,6 +1570,7 @@ Box* context_menu_begin_helper() {
 	box.unsafeBox->layoutDirection = LAYOUT_DIRECTION_RIGHT;
 	spacer(2.0F);
 	dbox();
+	workingBox->padding = 2.0F;
 	return dummyParent.unsafeBox;
 }
 void context_menu_end_helper(BoxHandle parent, V2F32 offset) {

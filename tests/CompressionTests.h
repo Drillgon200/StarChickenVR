@@ -365,6 +365,8 @@ void lz_bc7_full_test() {
 }
 
 void test_huff_throughput() {
+	SetThreadAffinityMask(GetCurrentThread(), 1 << 16);
+	SetThreadIdealProcessor(GetCurrentThread(), 16);
 	MemoryArena& arena = get_scratch_arena();
 	U32 fileLen;
 	Byte* file = read_full_file_to_arena<Byte>(&fileLen, arena, "compression_tests/cannon_Normal.bc7"a);
@@ -375,12 +377,16 @@ void test_huff_throughput() {
 	F64 bestThroughput = 0.0F;
 	F64 avgThroughput = 0.0F;
 	U32 decodeIterations = 1000;
+	U64 bestRDTSC = U64_MAX;
 	for (U32 i = 0; i < decodeIterations; i++) {
 		MEMORY_ARENA_FRAME(arena) {
 			F64 t = current_time_seconds();
+			U64 rt = __rdtsc();
 			U32 decodedLen;
 			Byte* decoded = Huffman::decode(arena, &decodedLen, encoded, encodedLen);
+			U64 rt2 = __rdtsc();
 			F64 t2 = current_time_seconds();
+			bestRDTSC = min(bestRDTSC, rt2 - rt);
 			for (U32 i = 0; i < decodedLen; i++) {
 				if (decoded[i] != file[i]) {
 					__debugbreak();
@@ -406,8 +412,9 @@ void test_huff_throughput() {
 	// Scalar 9 with simple addressing load: 4610
 	// Scalar 9 with early load: 4800
 	printf("Throughput avg: %\nThroughput max: %\n"a, avgThroughput, bestThroughput);
-	SetThreadAffinityMask(GetCurrentThread(), 1 << 16);
-	SetThreadIdealProcessor(GetCurrentThread(), 16);
+	U64 clocksExecuted = bestRDTSC * (5.4 / 4.3);
+	U64 instructionsExecuted = 963 * 24672.37;
+	printf("Cycles per iteration: %, IPC: %\n"a, clocksExecuted / 24672.37, F64(instructionsExecuted) / F64(clocksExecuted));
 	for (U32 i = 0; i < 100; i++) {
 		U64 timestampVal = test_ports();
 		// 4.3 ghz rdtsc, 5.56 ghz core clock

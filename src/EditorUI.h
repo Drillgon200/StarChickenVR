@@ -173,13 +173,40 @@ struct TranslateWidget {
 
 enum PanelType {
 	PANEL_TYPE_NONE,
-	PANEL_TYPE_EDITOR_3D
+	PANEL_TYPE_EDITOR_3D,
+	PANEL_TYPE_TEXTURE_PROCESSING
 };
 
 struct PanelEditor3D;
 ArenaArrayList<PanelEditor3D*> renderPanels;
 
-PanelEditor3D* focusedPanel;
+PanelEditor3D* focusedEditor3D;
+
+struct PanelTextureProcessing {
+	void init() {
+		
+	}
+	void destroy() {
+
+	}
+
+	void build_ui() {
+		using namespace UI;
+		UI_BACKGROUND_COLOR((V4F{ 1.0F, 1.0F, 1.0F, 1.0F }))
+		UI_BACKGROUND() {
+			workingBox->padding = 4.0F;
+			spacer(24.0F);
+			UI_TEXT_COLOR((V4F{ 0.1F, 0.1F, 0.1F, 1.0F }))
+			UI_BACKGROUND_COLOR((V4F{ 0.6F, 0.6F, 0.6F, 1.0F })) {
+				text_input("Test text 1"a, ""a, [](Box*){  });
+				text_input("Another text input"a, ""a, [](Box*){  });
+				path_input("File 1"a);
+				path_input("File 2"a);
+			}
+			
+		}
+	}
+};
 
 struct PanelEditor3D {
 	EditorPlayer editor;
@@ -209,8 +236,8 @@ struct PanelEditor3D {
 		if (idx != -1) {
 			renderPanels.data[idx] = renderPanels.pop_back();
 		}
-		if (focusedPanel == this) {
-			focusedPanel = nullptr;
+		if (focusedEditor3D == this) {
+			focusedEditor3D = nullptr;
 		}
 	}
 	V3F unproject_vec(V2F screenPixCoords) {
@@ -233,7 +260,7 @@ struct PanelEditor3D {
 		if (!Win32::mouseCaptured) {
 			V2F mousePos = Win32::get_mouse();
 			mousePickRay = unproject_vec(mousePos);
-			panelContainsMouse = rng_contains_point(viewport, mousePos);
+			panelContainsMouse = viewport.contains_point(mousePos);
 			V3F eyePos = editor.get_render_eye_pos();
 			if (panelContainsMouse) {
 				translateWidget.do_mouse_over(eyePos, mousePickRay);
@@ -257,7 +284,7 @@ struct PanelEditor3D {
 		PanelEditor3D* editor3d = this;
 		set_box_callback(contentBox, [=](Box* box, UserCommunication& com){
 			if (com.leftClickStart && Win32::mouseButtonState[Win32::MOUSE_BUTTON_MIDDLE]) {
-				focusedPanel = editor3d;
+				focusedEditor3D = editor3d;
 				Win32::set_mouse_captured(true);
 				return ACTION_HANDLED;
 			} else if (com.leftClickStart) {
@@ -270,8 +297,8 @@ struct PanelEditor3D {
 					Level::level.deselect_all();
 				}
 				Rng2F32 dragArea = make_rng2f(editor3d->selectDragStart, com.mousePos);
-				if (editor3d->isDragSelecting && rng_area(dragArea) != 0.0F) {
-					dragArea = rng_intersect(dragArea, com.renderArea);
+				if (editor3d->isDragSelecting && dragArea.area() != 0.0F) {
+					dragArea = dragArea.intersected(com.renderArea);
 					I32 minX = clamp(I32(dragArea.minX), 0, I32(VK::attachments.mainWidth));
 					I32 maxX = clamp(I32(dragArea.maxX) + 1, 0, I32(VK::attachments.mainWidth));
 					I32 minY = clamp(I32(dragArea.minY), 0, I32(VK::attachments.mainHeight));
@@ -313,7 +340,7 @@ struct PanelEditor3D {
 			if (com.tessellator) {
 				editor3d->viewport = com.renderArea;
 				Rng2F32 dragArea = make_rng2f(editor3d->selectDragStart, com.mousePos);
-				if (editor3d->isDragSelecting && rng_area(dragArea) != 0.0F) {
+				if (editor3d->isDragSelecting && dragArea.area() != 0.0F) {
 					com.tessellator->ui_rect2d(dragArea.minX, dragArea.minY, dragArea.maxX, dragArea.maxY, com.renderZ, 0.0F, 0.0F, 0.0F, 0.0F, V4F{ 1.0F, 1.0F, 1.0F, 0.75F }, Resources::simpleWhite.index, 0);
 				}
 			}
@@ -338,6 +365,7 @@ struct Panel {
 	PanelType panelType;
 	union {
 		PanelEditor3D editor3D;
+		PanelTextureProcessing textureProcessing;
 	};
 
 	void build_ui() {
@@ -364,11 +392,24 @@ struct Panel {
 				}
 				return ACTION_PASS;
 			});
-			//TODO Do some panel type switching UI here, like blender's top button panel
+
 			UI_WORKING_BOX(contentBox) {
+				Panel* panel = this;
+				Box* panelSwitcher = button(ResourceLoading::simpleWhite, [panel](Box* box) {
+					UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
+						text_button("3D Editor"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_EDITOR_3D); });
+						text_button("Texture Processing"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_TEXTURE_PROCESSING); });
+					}
+				}).unsafeBox;
+				panelSwitcher->flags |= BOX_FLAG_FLOATING;
+				panelSwitcher->sizeModeX = panelSwitcher->sizeModeY = SIZE_MODE_ABSOLUTE;
+				panelSwitcher->pos = V2F{ 8.0F, 8.0F };
+				panelSwitcher->size = V2F{ 16.0F, 16.0F };
+				panelSwitcher->backgroundColor = RGBA8{ 255, 255, 255, 255 };
 				switch (panelType) {
 				case PANEL_TYPE_NONE: break;
 				case PANEL_TYPE_EDITOR_3D: editor3D.build_ui(); break;
+				case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.build_ui(); break;
 				}
 			}
 		}
@@ -378,10 +419,13 @@ struct Panel {
 		switch (panelType) {
 		case PANEL_TYPE_NONE: break;
 		case PANEL_TYPE_EDITOR_3D: editor3D.destroy(); break;
+		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.destroy(); break;
 		}
 		switch (type) {
 		case PANEL_TYPE_NONE: break;
 		case PANEL_TYPE_EDITOR_3D: editor3D = PanelEditor3D{}; editor3D.init(); break;
+		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing = PanelTextureProcessing{}; textureProcessing.init(); break;
+
 		}
 		panelType = type;
 		build_ui();
@@ -529,18 +573,18 @@ void free_panel(Panel* panel) {
 }
 
 void key_input(Win32::Key key, Win32::ButtonState state) {
-	if (focusedPanel) {
-		focusedPanel->editor.key_input(key, state);
+	if (focusedEditor3D) {
+		focusedEditor3D->editor.key_input(key, state);
 	}
 }
 void mouse_input(Win32::MouseButton button, Win32::MouseValue state, V2F pos) {
-	if (focusedPanel) {
-		focusedPanel->editor.mouse_input(button, state, pos);
+	if (focusedEditor3D) {
+		focusedEditor3D->editor.mouse_input(button, state, pos);
 	}
 }
 void update() {
-	if (focusedPanel) {
-		focusedPanel->editor.update();
+	if (focusedEditor3D) {
+		focusedEditor3D->editor.update();
 	}
 	for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
 		editor3d->update();
@@ -615,10 +659,10 @@ void debug_render() {
 	boxA.debug_render(color);
 	boxB.debug_render(color);
 	DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
-	if (focusedPanel) {
+	if (focusedEditor3D) {
 		F32 t{};
-		V3F o = focusedPanel->editor.get_render_eye_pos();
-		V3F d = focusedPanel->editor.forward;
+		V3F o = focusedEditor3D->editor.get_render_eye_pos();
+		V3F d = focusedEditor3D->editor.forward;
 		bool hit = ray_cyliner_intersect(&t, o, d, V3F{ 0.0F, 2.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.2F);
 		if (hit) {
 			V3F hitPos = o + t * d;
@@ -659,7 +703,7 @@ void build_test_ui() {
 		bi->padding = 2.0F;
 		Box* bj = text_input("A text input"a, ""a, [](Box* box){}).unsafeBox;
 		bj->padding = 2.0F;
-		Box* bk = button(Resources::uiIncrementLeft, [](Box* box){}).unsafeBox;
+		Box* bk = button(Resources::uiArrowLeft, [](Box* box){}).unsafeBox;
 		bk->padding = 2.0F;
 		bk->size = V2F{ 20.0F, 20.0F };
 	}

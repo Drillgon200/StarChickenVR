@@ -954,12 +954,10 @@ decodeLoop:
 	DO_HYBRID_VECTOR_EXTRACTS
 	writeOffset = writeOffset + 16
 	mov r15, 8000000000000000h
-	DO_HYBRID_SCALAR_REFILLS
-
 	vpbroadcastq ymm12, [sixtyFour]
 	vmovdqa ymm0, ymmword ptr [rsp + (1 + 1 + 9 + 1) * 8]
 	vmovdqa ymm1, ymmword ptr [rsp + (1 + 1 + 9 + 1) * 8 + 32]
-
+	DO_HYBRID_SCALAR_REFILLS
 	REFILL_STEP_VECTOR r14, rcx, r13, ymm0, xmm0, ymm4, ymm8
 	REFILL_STEP_VECTOR r14, rcx, r13, ymm1, xmm1, ymm5, ymm9
 	REFILL_STEP_VECTOR r14, rcx, r13, ymm2, xmm2, ymm6, ymm10

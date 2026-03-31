@@ -459,7 +459,7 @@ LRESULT CALLBACK window_callback(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 				POINT point{};
 				pGetCursorPos(&point);
 				pScreenToClient(window, &point);
-				if (mouseCallback && point.x >= 0 && point.x < framebufferWidth && point.y >= 0 && point.y < framebufferHeight) {
+				if (mouseCallback) {
 					for (ULONG i = 0; i < 5; i++) {
 						ULONG currentButton = (rawMouse.ulButtons >> (i * 2)) & 1;
 						if (currentButton) {
