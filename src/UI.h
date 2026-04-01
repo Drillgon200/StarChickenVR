@@ -251,6 +251,10 @@ struct TypedTextBuffer {
 		cursor = cursorAnchor = length;
 	}
 
+	StrA stra() {
+		return StrA{ buffer, textLength };
+	}
+
 	enum CharClass {
 		// Could be expanded to group special characters or digits separately, not sure if I want that or not
 		CHAR_CLASS_WHITESPACE,
@@ -296,7 +300,7 @@ struct TypedTextBuffer {
 		textLength -= selected.area();
 		cursor = cursorAnchor = selected.minX;
 	}
-	void handle_key_press(Win32::Key key) {
+	void handle_key_press(Win32::Key key, F32 wrapWidth, F32 sizeY) {
 		if (Win32::keyboardState[Win32::KEY_CTRL]) {
 			switch (key) {
 			case Win32::KEY_A: {
@@ -373,6 +377,45 @@ struct TypedTextBuffer {
 					select_right();
 				} else {
 					move_right();
+				}
+			} break;
+			case Win32::KEY_UP:
+			case Win32::KEY_DOWN: {
+				if (allowMultiLine) {
+					MemoryArena& arena = get_scratch_arena();
+					MEMORY_ARENA_FRAME(arena) {
+						U32 lineCount;
+						U32* originalOffsets;
+						StrA* lines = TextRenderer::wrap_text(arena, &lineCount, &originalOffsets, stra(), wrapWidth, sizeY);
+						U32 cursorLine = lineCount - 1;
+						for (U32 i = 0; i < lineCount; i++) {
+							if (cursor >= originalOffsets[i] && cursor < originalOffsets[i] + I32(lines[i].length)) {
+								cursorLine = i;
+								break;
+							}
+						}
+						I32 cursorColumn = cursor - I32(originalOffsets[cursorLine]);
+						if (key == Win32::KEY_UP) {
+							if (cursorLine > 0) {
+								// Line wrapping has the somewhat annoying limitation of not being able to represent a difference between
+								// the cursor position at the end of a line and the cursor position at the start of the next line.
+								// We'll just subtract 1 so the "end" of the line is actually one before the end.
+								// This works well most of the time, since lines typically wrap on newlines or spaces
+								cursor = I32(originalOffsets[cursorLine - 1]) + min(cursorColumn, max(I32(lines[cursorLine - 1].length) - 1, 0));
+							} else {
+								cursor = 0;
+							}
+						} else { // KEY_DOWN
+							if (cursorLine < lineCount - 1) {
+								cursor = I32(originalOffsets[cursorLine + 1]) + min(cursorColumn, max(I32(lines[cursorLine + 1].length) - 1, 0));
+							} else {
+								cursor = textLength;
+							}
+						}
+						if (!Win32::keyboardState[Win32::KEY_SHIFT]) {
+							cursorAnchor = cursor;
+						}
+					}
 				}
 			} break;
 			case Win32::KEY_BACKSPACE: {
@@ -466,9 +509,6 @@ struct TypedTextBuffer {
 				lastCursorClickedTime = time;
 			}
 		}
-	}
-	StrA stra() {
-		return StrA{ buffer, textLength };
 	}
 };
 
@@ -1367,8 +1407,11 @@ void handle_keyboard_action(V2F32 mousePos, Win32::Key key, Win32::ButtonState s
 	modificationLock.lock_write();
 	if (Box* activeTextInput = activeTextBox.get()) {
 		if (state == Win32::BUTTON_STATE_DOWN) {
-			lastKeyTypedSeconds = current_time_seconds();
-			textInputHandler.handle_key_press(key);
+			if (Box* active = activeTextBox.get()) {
+				lastKeyTypedSeconds = current_time_seconds();
+				F32 wrapWidth = active->computedSize.x - active->padding * 2.0F;
+				textInputHandler.handle_key_press(key, wrapWidth, active->textSize);
+			}
 			activeTextInput->numTypedCharacters = textInputHandler.textLength;
 			if (activeTextInput->boxConsumerCallback) {
 				activeTextInput->boxConsumerCallback(activeTextInput); // Notify user that the field changed
