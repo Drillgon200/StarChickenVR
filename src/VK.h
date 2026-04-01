@@ -989,8 +989,8 @@ void create_render_targets(U32 width, U32 height, U32 viewCount) {
 	attachments.depth = create_dedicated_image(VK_FORMAT_D32_SFLOAT, width, height, viewCount, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 0, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
 	attachments.composite = create_dedicated_image(VK_FORMAT_R8G8B8A8_SRGB, width, height, viewCount, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT);
 	attachments.compositeLinearView = create_img_view2d(attachments.composite.img, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT);
-	attachments.uiColor = create_dedicated_image(VK_FORMAT_R8G8B8A8_SRGB, U32(Win32::framebufferWidth), U32(Win32::framebufferHeight), 1, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT);
-	attachments.uiColorLinearView = create_img_view2d(attachments.uiColor.img, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT);
+	attachments.uiColor = create_dedicated_image(VK_FORMAT_R8G8B8A8_SRGB, U32(Win32::framebufferWidth), U32(Win32::framebufferHeight), 1, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT);
+	attachments.uiColorLinearView = create_img_view2d(attachments.uiColor.img, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 	attachments.uiDepth = create_dedicated_image(VK_FORMAT_D16_UNORM, U32(Win32::framebufferWidth), U32(Win32::framebufferHeight), 1, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 0, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
 	attachments.mainWidth = width;
 	attachments.mainHeight = height;
@@ -1043,7 +1043,7 @@ void create_render_targets(U32 width, U32 height, U32 viewCount) {
 		writeUIColor.descriptorCount = 1;
 		writeUIColor.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 		VkDescriptorImageInfo uiColorInfo{};
-		uiColorInfo.imageView = attachments.uiColor.imgView;
+		uiColorInfo.imageView = attachments.uiColorLinearView;
 		uiColorInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		writeUIColor.pImageInfo = &uiColorInfo;
 		VkWriteDescriptorSet& writeCompositeTarget = writes[3];
@@ -1565,7 +1565,7 @@ struct GraphicsPipelineBuilder {
 			renderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
 		} else if (renderPass == RENDER_PASS_UI) {
 			renderingInfo.colorAttachmentCount = 1;
-			colorAttachmentFormats[0] = VK_FORMAT_R8G8B8A8_SRGB;
+			colorAttachmentFormats[0] = VK_FORMAT_R8G8B8A8_UNORM;
 			renderingInfo.depthAttachmentFormat = VK_FORMAT_D16_UNORM;
 		}
 		renderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;

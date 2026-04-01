@@ -64,6 +64,7 @@
 		V4F activeColor{ 0.953, 0.592, 0.18, min(activeIntensity * 0.34, 1.0) };
 		outlineColor = V4F(mix(outlineColor.rgb, activeColor.rgb, V3F(activeColor.a)), min(outlineColor.a + activeColor.a, 1.0));
 	};
-	V3F outColor{ mix(mix(sceneTonemapped, outlineColor.rgb, V3F(outlineColor.a)), uiTexel.rgb, V3F(uiTexel.a)) };
-	write_image(^compositeImage, fragCoord, V4F(to_srgb(clamp(outColor, V3F(0.0), V3F(1.0))), 1.0));
+	V3F sceneOutlinedColor{ to_srgb(mix(sceneTonemapped, outlineColor.rgb, V3F(outlineColor.a))) };
+	V3F outColor{ mix(sceneOutlinedColor, uiTexel.rgb, V3F(uiTexel.a)) };
+	write_image(^compositeImage, fragCoord, V4F(clamp(outColor, V3F(0.0), V3F(1.0)), 1.0));
 };

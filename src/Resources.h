@@ -57,6 +57,7 @@ Texture uiArrowLeft;
 Texture uiArrowRight;
 Texture uiX;
 Texture uiFolder;
+Texture uiWindowSwitch;
 
 Material cannonMat;
 Material matMat;
@@ -80,6 +81,7 @@ void load_resources() {
 	load_png(&uiArrowRight, "resources/textures/ui/arrow_right.png"a);
 	load_png(&uiX, "resources/textures/ui/x.png"a);
 	load_png(&uiFolder, "resources/textures/ui/folder.png"a);
+	load_png(&uiWindowSwitch, "resources/textures/ui/window_switch.png"a);
 	load_msdf(&fontAtlas, "resources/textures/font2.ddf"a);
 
 	create_material_from_pngs(&cannonMat, "resources/textures/cannon"a);

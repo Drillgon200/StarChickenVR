@@ -192,14 +192,14 @@ struct PanelTextureProcessing {
 
 	void build_ui() {
 		using namespace UI;
-		UI_BACKGROUND_COLOR((V4F{ 1.0F, 1.0F, 1.0F, 1.0F }))
+		UI_TEXT_COLOR(themeColor.text)
+		UI_BACKGROUND_COLOR(themeColor.background)
 		UI_BACKGROUND() {
 			workingBox->padding = 4.0F;
 			spacer(24.0F);
-			UI_TEXT_COLOR((V4F{ 0.1F, 0.1F, 0.1F, 1.0F }))
-			UI_BACKGROUND_COLOR((V4F{ 0.6F, 0.6F, 0.6F, 1.0F })) {
-				text_input("Test text 1"a, ""a, [](Box*){  });
-				text_input("Another text input"a, ""a, [](Box*){  });
+			UI_BACKGROUND_COLOR(themeColor.inputField) {
+				text_input("Test text 1"a, ""a, true, [](Box*){  });
+				text_input("Another text input"a, ""a, true, [](Box*){  });
 				path_input("File 1"a);
 				path_input("File 2"a);
 			}
@@ -395,7 +395,7 @@ struct Panel {
 
 			UI_WORKING_BOX(contentBox) {
 				Panel* panel = this;
-				Box* panelSwitcher = button(ResourceLoading::simpleWhite, [panel](Box* box) {
+				Box* panelSwitcher = button(Resources::uiWindowSwitch, [panel](Box* box) {
 					UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
 						text_button("3D Editor"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_EDITOR_3D); });
 						text_button("Texture Processing"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_TEXTURE_PROCESSING); });
@@ -405,7 +405,6 @@ struct Panel {
 				panelSwitcher->sizeModeX = panelSwitcher->sizeModeY = SIZE_MODE_ABSOLUTE;
 				panelSwitcher->pos = V2F{ 8.0F, 8.0F };
 				panelSwitcher->size = V2F{ 16.0F, 16.0F };
-				panelSwitcher->backgroundColor = RGBA8{ 255, 255, 255, 255 };
 				switch (panelType) {
 				case PANEL_TYPE_NONE: break;
 				case PANEL_TYPE_EDITOR_3D: editor3D.build_ui(); break;
@@ -676,109 +675,6 @@ void debug_render() {
 	tes.end_draw();
 }
 
-void build_test_ui() {
-	using namespace UI;
-	Box* b1 = generic_box().unsafeBox;
-	b1->size = V2F{ 100.0F, 100.0F };
-	b1->backgroundColor = RGBA8{ 255, 255, 255, 255 };
-	Box* b2 = generic_box().unsafeBox;
-	b2->size = V2F{ 50.0F, 100.0F };
-	b2->backgroundColor = RGBA8{ 255, 0, 255, 255 };
-	b2->padding = 10.0F;
-	UI_SIZE((V2F{ 100.0F, 20.0F }))
-		UI_WORKING_BOX(b2) {
-		Box* b3 = generic_box().unsafeBox;
-		b3->backgroundColor = RGBA8{ 0, 255, 255, 255 };
-		Box* b4 = generic_box().unsafeBox;
-		b4->backgroundColor = RGBA8{ 0, 0, 255, 255 };
-		Box* b5 = generic_box().unsafeBox;
-		b5->backgroundColor = RGBA8{ 255, 255, 0, 255 };
-		Box* b6 = generic_box().unsafeBox;
-		b6->backgroundColor = RGBA8{ 255, 255, 0, 255 };
-		Box* bi = text_button("Something"a, [](Box* box) {
-			print("Convolving...");
-			CubemapGen::equirectangular2convolved_cubemap("cubemap_test/cube"a, get_user_selected_file(globalArena), true);
-			print(" complete\n");
-		}).unsafeBox;
-		bi->padding = 2.0F;
-		Box* bj = text_input("A text input"a, ""a, [](Box* box){}).unsafeBox;
-		bj->padding = 2.0F;
-		Box* bk = button(Resources::uiArrowLeft, [](Box* box){}).unsafeBox;
-		bk->padding = 2.0F;
-		bk->size = V2F{ 20.0F, 20.0F };
-	}
-	Box* b7 = generic_box().unsafeBox;
-	b7->layoutDirection = LAYOUT_DIRECTION_RIGHT;
-	b7->align = ALIGN_MODE_TOP_LEFT;
-	b7->size = V2F{ 200.0F, 100.0F };
-	b7->backgroundColor = RGBA8{ 255, 255, 0, 255 };
-	b7->padding = 10.0F;
-	UI_SIZE((V2F{ 20.0F, 20.0F }))
-		UI_WORKING_BOX(b7) {
-
-		/*
-		Box* b8 = generic_box().unsafeBox;
-		b8->flags |= BOX_FLAG_WRAP_TEXT;
-		b8->backgroundColor = RGBA8{ 0, 25, 25, 255 };
-		b8->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
-		b8->size.x = 50.0F;
-		b8->size = {};
-		//b8->text = "\"';:~`?,|\\/=+-_><{}[]()*&^%$#@!.9876543210abcdefghij\nklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"a;
-		b8->text = "Ducks are really cool and they live in ponds all around the world"a;
-		b8->textSize = 12.0F;
-		b8->padding = 2.0F;
-		Box* b82 = generic_box().unsafeBox;
-		b82->backgroundColor = RGBA8{ 0, 25, 25, 255 };
-		b82->sizeModeX = SIZE_MODE_FIT_CHILDREN;
-		b82->size.x = 50.0F;
-		b82->size = {};
-		b82->text = "test@ test test"a;
-		b82->textSize = 12.0F;
-		b82->padding = 0.0F;
-		Box* b9 = generic_box().unsafeBox;
-		b9->backgroundColor = RGBA8{ 0, 0, 255, 255 };
-		//b9->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
-		b9->maxSize.x = 200.0F;
-		*/
-		Box* b10 = generic_box().unsafeBox;
-		b10->layoutDirection = LAYOUT_DIRECTION_DOWN;
-		b10->backgroundColor = RGBA8{ 255, 0, 255, 255 };
-		b10->sizeModeX = b10->sizeModeY = SIZE_MODE_PARENT_PERCENT;
-		b10->parentSizePercent.x = 0.25;
-		b10->parentSizePercent.y = 0.25;
-		//b10->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
-		b10->size.x = 100.0F;
-		b10->padding = 10.0F;
-		Box* b11 = generic_box().unsafeBox;
-		b11->backgroundColor = RGBA8{ 255, 0, 255, 255 };
-		b11->sizeModeX = SIZE_MODE_PARENT_PERCENT;
-		b11->parentSizePercent.x = 0.75F;
-		//b10->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
-		b11->size.x = 100.0F;
-		/*
-		UI_WORKING_BOX(b10) {
-		Box* b11 = generic_box().unsafeBox;
-		b11->backgroundColor = RGBA8{ 255, 255, 255, 255 };
-		b11->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
-		b11->size.y = 100.0F;
-		}
-		*/
-
-		growableBox = BoxHandle{ b7, b7->generation };
-	}
-
-	//UI_DBOX() {
-	//	workingBox->flags |= BOX_FLAG_DONT_LAYOUT_TO_FIT_CHILDREN | BOX_FLAG_CLIP_CHILDREN;
-	//	workingBox->sizeParentPercent = V2F{20.0F, 100.0F};
-	//	workingBox->idealSize = V2F{ 20.0F, F32_INF };
-	//	UI_BACKGROUND_COLOR((V4F32{ 0.2F, 0.2F, 0.5F, 1.0F })) {
-	//		text_button("Ducks are nice"a, [](Box* box) {});
-	//		slider_number(0.1F, [=](Box* box) { });
-	//		text_input("Input"a, ""a, [](Box* box){});
-	//	}
-	//}
-}
-
 void init() {
 	using namespace UI;
 	UI_WORKING_BOX(root) {
@@ -786,6 +682,7 @@ void init() {
 		toolbar->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 		toolbar->size.y = 16.0F;
 		toolbar->layoutDirection = LAYOUT_DIRECTION_RIGHT;
+		toolbar->backgroundColor = themeColor.header;
 		UI_WORKING_BOX(toolbar) {
 			UI_PADDING(2.0F)
 			text_button("File"a, [](Box* box) {
@@ -809,7 +706,6 @@ void init() {
 	DLL_INSERT_TAIL(panel->uiBox.unsafeBox, UI::root->childFirst, UI::root->childLast, prev, next);
 
 	init_physics();
-	//build_test_ui();
 }
 
 }

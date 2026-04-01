@@ -16,6 +16,19 @@ namespace UI {
 
 RWSpinLock modificationLock;
 
+struct {
+	RGBA8 header{ 0x6F, 0x10, 0x10, 0xFF };
+	RGBA8 subheader{ 0x3F, 0x18, 0x18, 0xFF };
+	RGBA8 background{ 0x20, 0x20, 0x20, 0xFF };
+	RGBA8 foreground{ 0x28, 0x28, 0x28, 0xFF };
+	RGBA8 inputField{ 0x10, 0x10, 0x10, 0xFF };
+	RGBA8 selectionOutline{ 0x3F, 0x3F, 0x3F, 0xFF };
+	RGBA8 button{ 0xD0, 0xD0, 0xD0, 0xFF };
+	RGBA8 text{ 0xE1, 0xEA, 0xF2, 0xFF };
+	RGBA8 defaultText{ 0xB2, 0xB9, 0xBF, 0xFF };
+	RGBA8 highlight{ 0x48, 0x6E, 0xB5, 0x7F };
+} themeColor;
+
 enum LayoutDirection : U8 {
 	// UP and LEFT are the same as DOWN and RIGHT, but the children are reversed.
 	// Use with the corresponding AlignMode to layout from opposite sides
@@ -58,9 +71,9 @@ ArenaArrayList<AlignMode> alignModeStack;
 #define UI_MAX_Z_OFFSET 2048.0F
 
 #define UI_SIZE(newSize) DEFER_LOOP(UI::sizeStack.push_back(newSize), UI::sizeStack.pop_back())
-#define UI_BACKGROUND_COLOR(newColor) DEFER_LOOP(UI::backgroundColorStack.push_back((newColor).to_rgba8()), UI::backgroundColorStack.pop_back())
-#define UI_TEXT_COLOR(newColor) DEFER_LOOP(UI::textColorStack.push_back((newColor).to_rgba8()), UI::textColorStack.pop_back())
-#define UI_BORDER_COLOR(newColor) DEFER_LOOP(UI::borderColorStack.push_back((newColor).to_rgba8()), UI::borderColorStack.pop_back())
+#define UI_BACKGROUND_COLOR(newColor) DEFER_LOOP(UI::backgroundColorStack.push_back(newColor), UI::backgroundColorStack.pop_back())
+#define UI_TEXT_COLOR(newColor) DEFER_LOOP(UI::textColorStack.push_back(newColor), UI::textColorStack.pop_back())
+#define UI_BORDER_COLOR(newColor) DEFER_LOOP(UI::borderColorStack.push_back(newColor), UI::borderColorStack.pop_back())
 #define UI_TEXT_SIZE(newSize) DEFER_LOOP(UI::textSizeStack.push_back(newSize), UI::textSizeStack.pop_back())
 #define UI_BORDER_WIDTH(newWidth) DEFER_LOOP(UI::borderWidthStack.push_back(newWidth), UI::borderWidthStack.pop_back())
 #define UI_PADDING(newPadding) DEFER_LOOP(UI::paddingStack.push_back(newPadding), UI::paddingStack.pop_back())
@@ -81,6 +94,7 @@ VK::DedicatedBuffer clipBoxBuffers[VK::FRAMES_IN_FLIGHT];
 U32 currentClipBoxCount;
 
 const U32 MAX_TEXT_INPUT = 2048;
+const F32 DOUBLE_CLICK_TIME = 0.2F;
 
 struct Box;
 // Amalgamation of anything interesting that might happen to a box.
@@ -227,6 +241,7 @@ struct TypedTextBuffer {
 	// cursorAnchor and cursor represent a highlighted range, both values are the same if nothing is selected
 	I32 cursorAnchor;
 	I32 cursor;
+	F64 lastCursorClickedTime; // For double/triple click
 	B8 allowMultiLine;
 
 	void set_buffer(char* data, U32 length, U32 cap) {
@@ -234,6 +249,15 @@ struct TypedTextBuffer {
 		bufferCap = cap;
 		textLength = length;
 		cursor = cursorAnchor = length;
+	}
+
+	enum CharClass {
+		// Could be expanded to group special characters or digits separately, not sure if I want that or not
+		CHAR_CLASS_WHITESPACE,
+		CHAR_CLASS_NON_WHITESPACE
+	};
+	CharClass char_class(char c) {
+		return SerializeTools::is_whitespace(c) ? CHAR_CLASS_WHITESPACE : CHAR_CLASS_NON_WHITESPACE;
 	}
 
 	void move_left() {
@@ -255,6 +279,16 @@ struct TypedTextBuffer {
 	}
 	void select_right() {
 		cursor = min(cursor + 1, I32(textLength));
+	}
+	void select_group_left() {
+		// Skip any whitespace, then a block of characters. Seems to match behavior of most editors I've tried.
+		for (; cursor > 0 && SerializeTools::is_whitespace(buffer[cursor - 1]); cursor--);
+		for (; cursor > 0 && !SerializeTools::is_whitespace(buffer[cursor - 1]); cursor--);
+	}
+	void select_group_right() {
+		// Skip a block of characters, then any whitespace that comes after. Seems to match behavior of most editors I've tried.
+		for (; cursor < textLength && !SerializeTools::is_whitespace(buffer[cursor]); cursor++);
+		for (; cursor < textLength && SerializeTools::is_whitespace(buffer[cursor]); cursor++);
 	}
 	void delete_selected() {
 		Rng1I32 selected; selected.init(cursor, cursorAnchor);
@@ -299,6 +333,30 @@ struct TypedTextBuffer {
 					cursor = cursorAnchor = cursor + clipLength;
 				}
 			} break;
+			case Win32::KEY_LEFT: {
+				select_group_left();
+				if (!Win32::keyboardState[Win32::KEY_SHIFT]) {
+					cursorAnchor = cursor;
+				}
+			} break;
+			case Win32::KEY_RIGHT: {
+				select_group_right();
+				if (!Win32::keyboardState[Win32::KEY_SHIFT]) {
+					cursorAnchor = cursor;
+				}
+			} break;
+			case Win32::KEY_BACKSPACE: {
+				if (cursor == cursorAnchor) {
+					select_group_left();
+				}
+				delete_selected();
+			} break;
+			case Win32::KEY_DELETE: {
+				if (cursor == cursorAnchor) {
+					select_group_right();
+				}
+				delete_selected();
+			} break;
 			default: break;
 			}
 		} else {
@@ -328,6 +386,20 @@ struct TypedTextBuffer {
 					select_right();
 				}
 				delete_selected();
+			} break;
+			case Win32::KEY_HOME: {
+				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
+					cursor = 0;
+				} else {
+					cursor = cursorAnchor = 0;
+				}
+			} break;
+			case Win32::KEY_END: {
+				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
+					cursor = textLength;
+				} else {
+					cursor = cursorAnchor = textLength;
+				}
 			} break;
 			default: {
 				char letter = Win32::key_to_typed_char(key);
@@ -370,7 +442,28 @@ struct TypedTextBuffer {
 			if (drag) {
 				cursor = originalLineOffsets[selectedLine] + selectedColumn;
 			} else {
+				Rng1I32 selected; selected.init(cursor, cursorAnchor);
 				cursorAnchor = cursor = originalLineOffsets[selectedLine] + selectedColumn;
+				F64 time = current_time_seconds();
+				if (F32(time - lastCursorClickedTime) < DOUBLE_CLICK_TIME) {
+					if (selected.area() == 0 && selected.minX == cursor) {
+						// Expand selection to group
+						if (textLength > 0) {
+							CharClass selectedClass = char_class(buffer[cursor == textLength ? textLength - 1 : cursor]);
+							for (; selected.minX > 0 && char_class(buffer[selected.minX - 1]) == selectedClass; selected.minX--);
+							for (; selected.maxX < textLength && char_class(buffer[selected.maxX]) == selectedClass; selected.maxX++);
+							cursorAnchor = selected.minX;
+							cursor = selected.maxX;
+						}
+					} else if (selected.contains_point(cursor)) {
+						// Expand selection to whole line
+						for (; selected.minX > 0 && buffer[selected.minX - 1] != '\n'; selected.minX--);
+						for (; selected.maxX < textLength && buffer[selected.maxX] != '\n'; selected.maxX++);
+						cursorAnchor = selected.minX;
+						cursor = selected.maxX;
+					}
+				}
+				lastCursorClickedTime = time;
 			}
 		}
 	}
@@ -394,6 +487,8 @@ F32 activeBoxTotalScale;
 // The box currently selected for typing
 BoxHandle activeTextBox;
 TypedTextBuffer textInputHandler;
+// For single line 
+F32 activeTextBoxTextRenderOffset;
 F64 lastKeyTypedSeconds;
 
 U64 currentGeneration = 1;
@@ -604,7 +699,7 @@ void compute_min_sizes_y_recurse(Box* box) {
 	F32 padding = box->padding;
 
 	StrA boxText = box->text;
-	if (box->typedTextBuffer) {
+	if (box->numTypedCharacters) {
 		boxText = StrA{ box->typedTextBuffer, box->numTypedCharacters };
 	}
 	if (!boxText.is_empty()) {
@@ -958,7 +1053,7 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 				}
 				V4F32 textColor = box->textColor.to_v4f32();
 				if (box->typedTextBuffer && box->numTypedCharacters == 0) {
-					textColor = V4F32{ textColor.x * 0.25F, textColor.y * 0.25F, textColor.z * 0.25F, textColor.w };
+					textColor = themeColor.defaultText.to_v4f32();
 				}
 				F32 strHeight = TextRenderer::lines_size_y(lines, lineCount, box->textSize * scale);
 				F32 textStartX = renderArea.minX + box->padding * scale;
@@ -976,11 +1071,18 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 				}
 				F32 strHeight = TextRenderer::lines_size_y(lines, lineCount, box->textSize * scale);
 				F32 textStartX = renderArea.minX + box->padding * scale;
-				F32 textStartY = 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight;
-				TextRenderer::draw_lines_batched(tes, lines, lineCount, textStartX, textStartY, z, box->textSize * scale, box->textColor.to_v4f32(), clipBoxIndexStack.back() << 16, false);
 				F32 charWidth = TextRenderer::get_character_width(' ', box->textSize * scale); // Only supporting monospaced for now
 				if (activeTextBox.get() == box) {
-					V4F highlightColor{ 0.14F, 0.34F, 0.71f, 0.5F };
+					if (!(box->flags & BOX_FLAG_WRAP_TEXT)) {
+						F32 cursorRenderPos = textStartX + charWidth * textInputHandler.cursor - activeTextBoxTextRenderOffset;
+						activeTextBoxTextRenderOffset += cursorRenderPos - clamp(cursorRenderPos, textStartX, renderArea.maxX - box->padding * scale);
+					}
+					textStartX -= activeTextBoxTextRenderOffset;
+				}
+				F32 textStartY = 0.5F * (renderArea.minY + renderArea.maxY) - 0.5F * strHeight;
+				TextRenderer::draw_lines_batched(tes, lines, lineCount, textStartX, textStartY, z, box->textSize * scale, box->textColor.to_v4f32(), clipBoxIndexStack.back() << 16, false);
+				if (activeTextBox.get() == box) {
+					V4F highlightColor = themeColor.highlight.to_v4f32();
 					F32 cursorOffsetX = 0.0F;
 					F32 cursorOffsetY = 0.0F;
 					Rng1I32 selected; selected.init(textInputHandler.cursor, textInputHandler.cursorAnchor);
@@ -1104,10 +1206,12 @@ B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::
 			comm.mouse4ClickStart = button == Win32::MOUSE_BUTTON_3;
 			comm.mouse5ClickStart = button == Win32::MOUSE_BUTTON_4;
 			activeBox = BoxHandle{ box, box->generation };
-			if (Box* textEntry = activeTextBox.get()) {
-				textEntry->borderWidth = 0.0F;
+			if (activeTextBox.get() != box) {
+				if (Box* textEntry = activeTextBox.get()) {
+					textEntry->borderWidth = 0.0F;
+				}
+				activeTextBox = BoxHandle{};
 			}
-			activeTextBox = BoxHandle{};
 			// This is a bit of a hack to avoid having to set parents while also having drag properly scaleed.
 			// It won't update correctly if the user scales while dragging
 			activeBoxTotalScale = scale;
@@ -1146,7 +1250,7 @@ contextMenuClicked:;
 		StrA str = textInputHandler.stra();
 		F32 wrapWidth = box->computedSize.x - box->padding * 2.0F;
 		F32 textStartY = box->renderPos.y + 0.5F * box->computedSize.y - 0.5F * (box->flags & BOX_FLAG_WRAP_TEXT ? TextRenderer::wrapped_size(str, wrapWidth, box->textSize).y : TextRenderer::string_size_y(str, box->textSize));
-		textInputHandler.handle_mouse_action(pos - V2F{ textStartX, textStartY }, false, box->flags & BOX_FLAG_WRAP_TEXT, wrapWidth, box->textSize);
+		textInputHandler.handle_mouse_action(pos - V2F{ textStartX - activeTextBoxTextRenderOffset, textStartY }, false, box->flags & BOX_FLAG_WRAP_TEXT, wrapWidth, box->textSize);
 	}
 	if (button != Win32::MOUSE_BUTTON_WHEEL && state.state == Win32::BUTTON_STATE_UP) {
 		activeBox = BoxHandle{};
@@ -1198,12 +1302,12 @@ void handle_mouse_update(V2F32 pos, V2F32 delta) {
 		active = nullptr;
 	}
 	if (active && active->actionCallback) {
-		if (activeTextBox.get() == active) {
+		if (activeTextBox.get() == active && delta != V2F{ 0.0F, 0.0F }) {
 			F32 textStartX = active->renderPos.x + active->padding * activeBoxTotalScale;
 			StrA str = textInputHandler.stra();
 			F32 wrapWidth = active->computedSize.x - active->padding * 2.0F;
 			F32 textStartY = active->renderPos.y + 0.5F * active->computedSize.y - 0.5F * (active->flags & BOX_FLAG_WRAP_TEXT ? TextRenderer::wrapped_size(str, wrapWidth, active->textSize).y : TextRenderer::string_size_y(str, active->textSize));
-			textInputHandler.handle_mouse_action(pos - V2F{ textStartX, textStartY }, true, active->flags & BOX_FLAG_WRAP_TEXT, wrapWidth, active->textSize);
+			textInputHandler.handle_mouse_action(pos - V2F{ textStartX - activeTextBoxTextRenderOffset, textStartY }, true, active->flags & BOX_FLAG_WRAP_TEXT, wrapWidth, active->textSize);
 		}
 		UserCommunication comm{};
 		comm.mousePos = pos;
@@ -1376,17 +1480,22 @@ BoxHandle text_button(StrA text, Callback&& onClick) {
 
 // onTextUpdated of type BoxConsumer
 template<typename Callback>
-BoxHandle text_input(StrA prompt, StrA defaultValue, Callback&& onTextUpdated) {
+BoxHandle text_input(StrA prompt, StrA defaultValue, bool multiline, Callback&& onTextUpdated) {
 	BoxHandle boxHandle = generic_box();
 	Box* box = boxHandle.unsafeBox;
-	box->flags = BOX_FLAG_CLIP_CHILDREN | BOX_FLAG_WRAP_TEXT;
+	box->flags = BOX_FLAG_CLIP_CHILDREN;
+	if (multiline) {
+		box->flags |= BOX_FLAG_WRAP_TEXT;
+	}
 	box->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 	box->sizeModeY = SIZE_MODE_FIT_CHILDREN;
 	box->size.x = 100.0F;
 	box->text = prompt;
 	box->borderWidth = 0.0F;
-	box->borderColor = RGBA8{ 0, 0, 0, 255 };
+	box->backgroundColor = themeColor.inputField;
+	box->borderColor = themeColor.selectionOutline;
 	box->padding = 2.0F;
+	box->hoverCursor = Win32::CURSOR_TYPE_BEAM;
 	box->typedTextBuffer = alloc_text_input();
 	defaultValue.length = min<U64>(defaultValue.length, MAX_TEXT_INPUT);
 	memcpy(box->typedTextBuffer, defaultValue.str, defaultValue.length);
@@ -1397,6 +1506,7 @@ BoxHandle text_input(StrA prompt, StrA defaultValue, Callback&& onTextUpdated) {
 			if (activeTextBox.get() != box) {
 				box->borderWidth = 1.0F;
 				activeTextBox = BoxHandle{ box, box->generation };
+				activeTextBoxTextRenderOffset = 0.0F;
 				textInputHandler.set_buffer(box->typedTextBuffer, box->numTypedCharacters, MAX_TEXT_INPUT);
 				textInputHandler.allowMultiLine = box->flags & BOX_FLAG_WRAP_TEXT;
 			}
@@ -1414,6 +1524,7 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 	box.unsafeBox->flags |= BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
 	box.unsafeBox->backgroundTexture = &tex;
 	box.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
+	box.unsafeBox->backgroundColor = themeColor.button;
 	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
 	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
 		if (com.leftClicked) {
@@ -1428,9 +1539,10 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 void path_input(StrA fieldName) {
 	UI_RBOX() {
 		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+		workingBox->align = ALIGN_MODE_CENTER_LEFT;
 		text(fieldName);
 		spacer(4.0F);
-		BoxHandle textInput = text_input("Enter file path"a, ""a, [](Box* box){});
+		BoxHandle textInput = text_input("Enter file path"a, ""a, false, [](Box* box){});
 		button(Resources::uiFolder, [textInput](Box* box) mutable {
 			if (Box* box = textInput.get()) {
 				MemoryArena& arena = get_scratch_arena();

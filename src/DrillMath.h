@@ -463,6 +463,13 @@ FINLINE V2F32 operator/=(V2F32& a, F32 b) {
 	return a;
 }
 
+FINLINE bool operator==(V2F32 a, V2F32 b) {
+	return a.x == b.x && a.y == b.y;
+}
+FINLINE bool operator!=(V2F32 a, V2F32 b) {
+	return a.x != b.x || a.y != b.y;
+}
+
 FINLINE F32 dot(V2F32 a, V2F32 b) {
 	return a.x * b.x + a.y * b.y;
 }

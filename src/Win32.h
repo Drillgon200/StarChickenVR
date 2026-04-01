@@ -120,6 +120,8 @@ enum Key {
 	KEY_DOWN = 0x28,
 	KEY_BACKSPACE = 0x08,
 	KEY_DELETE = 0x2E,
+	KEY_HOME = 0x24,
+	KEY_END = 0x23,
 
 	KEY_F1 = 0x70,
 	KEY_F2 = 0x71,

@@ -66,7 +66,7 @@ struct Vertex {
 	// Setting the cutoff to something a bit smaller makes the font look more bold,
 	// but it also takes care of some artifacts I don't feel like fixing
 	// (letter B has a hole and bad things happen at smaller font sizes)
-	F32 cutoff{ 0.46 };
+	F32 cutoff{ 0.45 };
 	return V4F(1.0, 1.0, 1.0, min(max((val - cutoff) / min(screenPxRange, 1.0 - cutoff), 0.0), 1.0));
 };
 

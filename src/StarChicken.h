@@ -233,9 +233,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 						VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 						if (VK::hasCubemap) {
 							// Fill in background
-							VK::BackgroundPushConstants backgroundPushConstants{};
+							VK::WorldDrawPushConstants backgroundPushConstants{};
 							backgroundPushConstants.camIdx = camIdx;
-							VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
+							VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
 							VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
 							VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
 						}
@@ -252,7 +252,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			} else {
 				if (VK::hasCubemap) {
 					// Fill in background
-					VK::BackgroundPushConstants backgroundPushConstants{};
+					VK::WorldDrawPushConstants backgroundPushConstants{};
 					backgroundPushConstants.camIdx = 0;
 					VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
 					VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
@@ -303,7 +303,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 		renderingInfo.viewMask = 0u;
 		renderingInfo.colorAttachmentCount = 1;
 		VkRenderingAttachmentInfo uiColorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
-		uiColorAttachment.imageView = VK::attachments.uiColor.imgView;
+		uiColorAttachment.imageView = VK::attachments.uiColorLinearView;
 		uiColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		uiColorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 		uiColorAttachment.loadOp = isInEditorMode ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;

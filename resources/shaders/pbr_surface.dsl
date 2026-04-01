@@ -61,7 +61,6 @@
 	^passTexCoord = texCoord;
 	^passCamPos = cam.position;
 	^passObjId = modelData.objId;
-	
 };
 
 #interface

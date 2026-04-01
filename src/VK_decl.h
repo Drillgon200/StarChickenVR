@@ -316,9 +316,6 @@ struct WorldDrawPushConstants {
 	U32 objId; // High bit set if object is selected
 	U32 materialId;
 };
-struct BackgroundPushConstants {
-	U32 camIdx;
-};
 struct FinalCompositePushConstants {
 	U32 activeObjectId;
 	V2U outputDimensions;

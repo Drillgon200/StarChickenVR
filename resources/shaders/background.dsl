@@ -32,13 +32,11 @@
 [uniform, set 0, binding 3] &ImageCubeSampled backgroundCube;
 [uniform, set 0, binding 4] &ImageCubeSampled diffuseCube;
 
-[push_constant, block] &struct {
-	I32 camIdx;
-} drawPushData;
+[push_constant, block] &WorldDrawPushConstants drawPushData;
 
 [entrypoint] @[][] frag_main{
 	I32 viewIdx{ ^passViewIndex };
-	Camera cam{ drawData.cams[viewIdx + drawPushData.camIdx] };
+	Camera cam{ drawData.cams[viewIdx + I32(drawPushData.camIdx)] };
 	V2F pos{ ^passPos };
 	V3F worldDirection{ -(pos.x - cam.projXZBias) / cam.projXScale, (pos.y - cam.projYZBias) / cam.projYScale, 1.0 };
 	worldDirection = normalize(worldDirection);
