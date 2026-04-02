@@ -177,6 +177,7 @@ struct Box {
 	V2F computedSize; // Size after the last layout pass
 
 	V2F renderPos; // Absolute screen pos after the last render pass
+	Rng2F32 clippedRenderArea; // The area this box was allowed to draw to last render pass
 
 	StrA text;
 	StrA tooltip;
@@ -795,6 +796,9 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 		U32 childCount = 0;
 		Box** growables = scratchArena0.alloc<Box*>(0);
 		for (Box* child = box->childFirst; child; child = child->next) {
+			if (child->flags & BOX_FLAG_DISABLED) {
+				continue;
+			}
 			if (!(child->flags & BOX_FLAG_FLOATING)) {
 				childrenSpace += child->computedSize.x;
 			}
@@ -855,12 +859,17 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 		if (spaceLeft > 0.0F) {
 			F32 alignSpacing = floorf32(spaceLeft * 0.5F * F32(alignMode));
 			for (Box* child = box->childFirst; child; child = child->next) {
-				child->computedPos.x += alignSpacing;
+				if (!(child->flags & BOX_FLAG_DISABLED)) {
+					child->computedPos.x += alignSpacing;
+				}
 			}
 		}
 	} else {
 		F32 growSizeX = box->computedSize.x - padding * 2.0F;
 		for (Box* child = box->childFirst; child; child = child->next) {
+			if (child->flags & BOX_FLAG_DISABLED) {
+				continue;
+			}
 			if (child->sizeModeX == SIZE_MODE_GROW_TO_PARENT) {
 				child->computedSize.x = clamp(growSizeX, child->computedSize.x, child->maxSize.x == 0.0F ? F32_LARGE : child->maxSize.x);
 			} else if (child->sizeModeX == SIZE_MODE_PARENT_PERCENT) {
@@ -902,6 +911,9 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 	if (layoutAxis == AXIS2_X) {
 		F32 growSizeY = box->computedSize.y - padding * 2.0F;
 		for (Box* child = box->childFirst; child; child = child->next) {
+			if (child->flags & BOX_FLAG_DISABLED) {
+				continue;
+			}
 			if (child->sizeModeY == SIZE_MODE_GROW_TO_PARENT) {
 				child->computedSize.y = clamp(growSizeY, child->computedSize.y, child->maxSize.y == 0.0F ? F32_LARGE : child->maxSize.y);
 			} else if (child->sizeModeY == SIZE_MODE_PARENT_PERCENT) {
@@ -920,6 +932,9 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 		U32 childCount = 0;
 		Box** growables = scratchArena0.alloc<Box*>(0);
 		for (Box* child = box->childFirst; child; child = child->next) {
+			if (child->flags & BOX_FLAG_DISABLED) {
+				continue;
+			}
 			if (!(child->flags & BOX_FLAG_FLOATING)) {
 				childrenSpace += child->computedSize.y;
 			}
@@ -981,7 +996,9 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 		if (spaceLeft > 0.0F) {
 			F32 alignSpacing = floorf32(spaceLeft * 0.5F * F32(alignMode));
 			for (Box* child = box->childFirst; child; child = child->next) {
-				child->computedPos.y += alignSpacing;
+				if (!(child->flags & BOX_FLAG_DISABLED)) {
+					child->computedPos.y += alignSpacing;
+				}
 			}
 		}
 	}
@@ -1049,13 +1066,14 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 	}
 	V2F boxPos = parentPos + box->computedPos;
 	Rng2F32 renderArea{ boxPos.x, boxPos.y, boxPos.x + box->computedSize.x, boxPos.y + box->computedSize.y };
+	Rng2F32 renderAreaClipped = renderArea.intersected(clipBoxStack.back());
 	box->renderPos = boxPos;
+	box->clippedRenderArea = renderAreaClipped;
 	U32 prevClipBox = clipBoxIndexStack.back();
 	if (box->flags & BOX_FLAG_CLIP_CHILDREN && currentClipBoxCount < MAX_CLIP_BOXES) {
-		Rng2F32 boxRange = renderArea.intersected(clipBoxStack.back());
-		reinterpret_cast<Rng2F32*>(clipBoxBuffers[VK::currentFrameInFlight].mapping)[currentClipBoxCount] = boxRange;
+		reinterpret_cast<Rng2F32*>(clipBoxBuffers[VK::currentFrameInFlight].mapping)[currentClipBoxCount] = renderAreaClipped;
 		clipBoxIndexStack.push_back(currentClipBoxCount);
-		clipBoxStack.push_back(boxRange);
+		clipBoxStack.push_back(renderAreaClipped);
 		currentClipBoxCount++;
 	}
 	if (!(box->flags & BOX_FLAG_INVISIBLE)) {
@@ -1484,16 +1502,23 @@ void background_box() {
 #define UI_BACKGROUND() DEFER_LOOP(UI::background_box(), UI::pop_box())
 BoxHandle spacer(F32 spacing) {
 	BoxHandle box = generic_box();
+	box.unsafeBox->sizeModeX = box.unsafeBox->sizeModeY = SIZE_MODE_FIT_CHILDREN;
 	if (workingBox->layoutDirection == LAYOUT_DIRECTION_LEFT || workingBox->layoutDirection == LAYOUT_DIRECTION_RIGHT) {
-		box.unsafeBox->size.x = spacing;
+		box.unsafeBox->size = V2F{ spacing, 0.0F };
 	} else {
-		box.unsafeBox->size.y = spacing;
+		box.unsafeBox->size = V2F{ 0.0F, spacing };
 	}
 	box.unsafeBox->flags |= BOX_FLAG_INVISIBLE;
 	return box;
 }
 BoxHandle spacer() {
-	return spacer(BOX_INF_SIZE);
+	BoxHandle box = spacer(0.0F);
+	if (workingBox->layoutDirection == LAYOUT_DIRECTION_LEFT || workingBox->layoutDirection == LAYOUT_DIRECTION_RIGHT) {
+		box.unsafeBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+	} else {
+		box.unsafeBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+	}
+	return box;
 }
 BoxHandle text(StrA str, BoxActionCallback actionCallback = nullptr) {
 	BoxHandle box = generic_box();
@@ -1575,7 +1600,7 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
-		};
+	};
 	return box;
 }
 
@@ -1715,6 +1740,105 @@ BoxHandle slider_number(F32 step, Callback&& onTextUpdated) {
 	return slider_number(-F32_INF, F32_INF, step, reinterpret_cast<Callback&&>(onTextUpdated));
 }
 */
+
+void do_scroll(Box* scrollHandler, Box* scrolled, F32 amount) {
+	F32 maxScroll = max(scrolled->computedSize.y - scrollHandler->clippedRenderArea.height(), 0.0F);
+	scrolled->pos.y = clamp(scrolled->pos.y + roundf32(amount), -maxScroll, 0.0F);
+}
+
+void scroll_window_begin() {
+	Box* containerBox = generic_box().unsafeBox;
+	containerBox->flags |= BOX_FLAG_INVISIBLE;
+	containerBox->sizeModeX = containerBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+	containerBox->layoutDirection = LAYOUT_DIRECTION_RIGHT;
+	workingBox = containerBox;
+
+	Box* scrollBox = generic_box().unsafeBox;
+	scrollBox->flags |= BOX_FLAG_INVISIBLE | BOX_FLAG_DONT_FIT_CHILDREN | BOX_FLAG_CUSTOM_DRAW;
+	scrollBox->sizeModeX = scrollBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+
+	F32 scrollBarWidth = 8.0F;
+	Box* scrollBar = generic_box().unsafeBox;
+	scrollBar->size = V2F{};
+	scrollBar->sizeModeX = SIZE_MODE_FIT_CHILDREN;
+	scrollBar->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+	scrollBar->backgroundColor = themeColor.subheader;
+	workingBox = scrollBar;
+
+	UI_SIZE((V2F{ scrollBarWidth, scrollBarWidth }))
+	button(Resources::uiArrowUp, [scrollBox](Box* box){
+		do_scroll(scrollBox, scrollBox->childFirst, 10.0F);
+	});
+
+	Box* spacerBefore = spacer().unsafeBox;
+	spacerBefore->sizeModeY = SIZE_MODE_PARENT_PERCENT;
+	spacerBefore->parentSizePercent.y = 0.95F;
+
+	Box* scrollHandle = button(Resources::simpleWhite, [](Box* box) {}).unsafeBox;
+	set_box_callback(scrollHandle, [scrollBox, scrollBar](Box* box, UserCommunication& com) {
+		if (com.drag.y != 0.0F) {
+			Box* scrollHandler = scrollBox;
+			Box* scrolled = scrollBox->childFirst;
+			F32 visibleHeight = scrollHandler->clippedRenderArea.height();
+			F32 maxScroll = max(scrolled->computedSize.y - visibleHeight, 0.0F);
+			F32 scrollBarEmptySpace = box->next->computedSize.y + box->prev->computedSize.y;
+			if (scrollBarEmptySpace > 0.001F) {
+				do_scroll(scrollHandler, scrolled, -com.drag.y / scrollBarEmptySpace * maxScroll);
+			}
+			return ACTION_HANDLED;
+		}
+		return ACTION_PASS;
+	});
+	scrollHandle->size = V2F{ scrollBarWidth, 10.0F };
+
+	Box* spacerAfter = spacer().unsafeBox;
+	spacerAfter->sizeModeY = SIZE_MODE_PARENT_PERCENT;
+	spacerAfter->parentSizePercent.y = 0.05F;
+
+	UI_SIZE((V2F{ scrollBarWidth, scrollBarWidth }))
+	button(Resources::uiArrowDown, [scrollBox](Box* box){
+		do_scroll(scrollBox, scrollBox->childFirst, -10.0F);
+	});
+
+	set_box_callback(scrollBox, [scrollHandle, scrollBar](Box* box, UserCommunication& com) {
+		if (com.scrollInput != 0.0F) {
+			do_scroll(box, box->childFirst, com.scrollInput * 0.1F);
+			return ACTION_HANDLED;
+		}
+		if (com.tessellator) {
+			// The render step will count as our layout update. This means we'll be one frame behind, but that's ok.
+			Box* scrollHandler = box;
+			Box* scrolled = box->childFirst;
+			F32 visibleHeight = scrollHandler->clippedRenderArea.height();
+			F32 maxScroll = max(scrolled->computedSize.y - visibleHeight, 0.0F);
+			if (maxScroll < 0.001F) {
+				scrollBar->flags |= BOX_FLAG_DISABLED;
+			} else {
+				scrollBar->flags &= ~BOX_FLAG_DISABLED;
+				F32 visibleToTotalRatio = visibleHeight / scrolled->computedSize.y;
+				F32 scrolledAmountPercent = clamp01(-scrolled->pos.y / (scrolled->computedSize.y - visibleHeight));
+				// Scroll bar height minus the two buttons
+				F32 totalScrollBarHeight = scrollBar->computedSize.y - scrollBar->childFirst->computedSize.y - scrollBar->childLast->computedSize.y;
+				scrollHandle->size.y = max(10.0F, floorf32(visibleToTotalRatio * totalScrollBarHeight));
+				scrollHandle->prev->parentSizePercent.y = scrolledAmountPercent;
+				scrollHandle->next->parentSizePercent.y = 1.0F - scrolledAmountPercent;
+				scrolled->pos.y = clamp(scrolled->pos.y, -maxScroll, 0.0F);
+			}
+		}
+		return ACTION_PASS;
+	});
+
+	workingBox = scrollBox;
+	dbox();
+	workingBox->sizeModeX = workingBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+}
+void scroll_window_end() {
+	pop_box(); // Pop scrolled container
+	pop_box(); // Pop scroll handler
+	pop_box(); // Pop container
+}
+
+#define UI_SCROLL_WINDOW() DEFER_LOOP(UI::scroll_window_begin(), UI::scroll_window_end())
 
 Box* context_menu_begin_helper() {
 	BoxHandle dummyParent = alloc_box();

@@ -195,15 +195,16 @@ struct PanelTextureProcessing {
 		UI_TEXT_COLOR(themeColor.text)
 		UI_BACKGROUND_COLOR(themeColor.background)
 		UI_BACKGROUND() {
-			workingBox->padding = 4.0F;
-			spacer(24.0F);
-			UI_BACKGROUND_COLOR(themeColor.inputField) {
-				text_input("Test text 1"a, ""a, true, [](Box*){  });
-				text_input("Another text input"a, ""a, true, [](Box*){  });
-				path_input("File 1"a);
-				path_input("File 2"a);
+			UI_SCROLL_WINDOW() {
+				workingBox->padding = 4.0F;
+				spacer(24.0F);
+				UI_BACKGROUND_COLOR(themeColor.inputField) {
+					text_input("Test text 1"a, ""a, true, [](Box*){  });
+					text_input("Another text input"a, ""a, true, [](Box*){  });
+					path_input("File 1"a);
+					path_input("File 2"a);
+				}
 			}
-			
 		}
 	}
 };
@@ -492,22 +493,22 @@ struct Panel {
 		draggableCenter->callbackData[0] = char(axis);
 		draggableCenter->actionCallback = [](UI::Box* box, UI::UserCommunication& com) {
 			Axis2 splitAxis = Axis2(box->callbackData[0]);
-			F32* dragAmount = splitAxis == AXIS2_X ? &com.drag.x : &com.drag.y;
+			F32 dragAmount = splitAxis == AXIS2_X ? com.drag.x : com.drag.y;
 			F32* prevSizePercent = splitAxis == AXIS2_X ? &box->prev->parentSizePercent.x : &box->prev->parentSizePercent.y;
 			F32* nextSizePercent = splitAxis == AXIS2_X ? &box->next->parentSizePercent.x : &box->next->parentSizePercent.y;
-			if (*dragAmount) {
+			if (dragAmount != 0.0F) {
 				F32 percentA = *prevSizePercent;
 				F32 percentB = *nextSizePercent;
 				F32 normalizedDistance = percentA / (percentA + percentB);
 				F32 parentRange = (splitAxis == AXIS2_X ? box->parent->computedSize.x : box->parent->computedSize.y) - CENTER_WIDTH;
 				F32 currentSplitPos = parentRange * normalizedDistance;
-				F32 nextSplitPos = clamp(currentSplitPos + *dragAmount, 0.0F, parentRange);
+				F32 nextSplitPos = clamp(currentSplitPos + dragAmount, 0.0F, parentRange);
 				*prevSizePercent = nextSplitPos / parentRange;
 				*nextSizePercent = 1.0F - *prevSizePercent;
 				return UI::ACTION_HANDLED;
 			}
 			return UI::ACTION_PASS;
-			};
+		};
 		UI::Box* parentBox = newParent->uiBox.unsafeBox;
 		parentBox->layoutDirection = axis == AXIS2_X ? UI::LAYOUT_DIRECTION_RIGHT : UI::LAYOUT_DIRECTION_DOWN;
 		DLL_INSERT_TAIL(a->uiBox.unsafeBox, parentBox->childFirst, parentBox->childLast, prev, next);

@@ -55,6 +55,8 @@ Texture diffuseCubemap;
 Texture fontAtlas;
 Texture uiArrowLeft;
 Texture uiArrowRight;
+Texture uiArrowUp;
+Texture uiArrowDown;
 Texture uiX;
 Texture uiFolder;
 Texture uiWindowSwitch;
@@ -79,6 +81,8 @@ void load_resources() {
 
 	load_png(&uiArrowLeft, "resources/textures/ui/arrow_left.png"a);
 	load_png(&uiArrowRight, "resources/textures/ui/arrow_right.png"a);
+	load_png(&uiArrowUp, "resources/textures/ui/arrow_up.png"a);
+	load_png(&uiArrowDown, "resources/textures/ui/arrow_down.png"a);
 	load_png(&uiX, "resources/textures/ui/x.png"a);
 	load_png(&uiFolder, "resources/textures/ui/folder.png"a);
 	load_png(&uiWindowSwitch, "resources/textures/ui/window_switch.png"a);
