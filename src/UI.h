@@ -113,8 +113,10 @@ struct UserCommunication {
 	Flags32 mouse4ClickStart : 1;
 	Flags32 mouse5ClickStart : 1;
 	Flags32 mouseHovered : 1;
+	Flags32 textBoxDeselected : 1;
 	Box* draggedTo;
 	V2F32 drag;
+	V2F32 totalDrag;
 	Win32::Key keyPressed;
 	char charTyped;
 	DynamicVertexBuffer::Tessellator* tessellator;
@@ -139,7 +141,8 @@ enum BoxFlag : U32 {
 	BOX_FLAG_DONT_CLOSE_CONTEXT_MENU_ON_INTERACTION = 1 << 5,
 	BOX_FLAG_WRAP_TEXT = 1 << 6,
 	BOX_FLAG_DONT_FIT_CHILDREN = 1 << 7,
-	BOX_FLAG_FLOATING = 1 << 8
+	BOX_FLAG_FLOATING = 1 << 8,
+	BOX_FLAG_SLIDER_MIN_MAX_ENFORCED = 1 << 9
 };
 typedef Flags32 BoxFlags;
 const F32 BOX_INF_SIZE = 100000.0F;
@@ -192,6 +195,27 @@ struct Box {
 	RGBA8 borderColor;
 	RGBA8 backgroundColor;
 	Resources::Texture* backgroundTexture;
+
+	union {
+		struct {
+			F64 minVal;
+			F64 maxVal;
+			F64 val;
+		} f64;
+		struct {
+			I64 minVal;
+			I64 maxVal;
+			I64 val;
+		} i64;
+		B8 b8;
+	} value;
+
+	union {
+		StrA* strA;
+		F64* f64;
+		I64* i64;
+		B8* b8;
+	} updatePtr;
 
 	BoxActionCallback actionCallback;
 	union {
@@ -525,12 +549,24 @@ F64 hotBoxStartTimeSeconds;
 // Active is an element a user started an interaction with (mouse click down, keyboard enter down)
 BoxHandle activeBox;
 F32 activeBoxTotalScale;
+V2F totalActiveDrag;
 // The box currently selected for typing
 BoxHandle activeTextBox;
 TypedTextBuffer textInputHandler;
 // For single line 
 F32 activeTextBoxTextRenderOffset;
 F64 lastKeyTypedSeconds;
+
+void set_active_text_box(Box* box) {
+	DEBUG_ASSERT(box->typedTextBuffer != nullptr, "Tried to set a non text box to active"a);
+	if (activeTextBox.get() != box) {
+		box->borderWidth = 1.0F;
+		activeTextBox = BoxHandle{ box, box->generation };
+		activeTextBoxTextRenderOffset = 0.0F;
+		textInputHandler.set_buffer(box->typedTextBuffer, box->numTypedCharacters, MAX_TEXT_INPUT);
+		textInputHandler.allowMultiLine = box->flags & BOX_FLAG_WRAP_TEXT;
+	}
+}
 
 U64 currentGeneration = 1;
 Box* boxFreeList = nullptr;
@@ -1267,9 +1303,15 @@ B32 mouse_input_for_box_recurse(bool* anyContained, Box* box, V2F32 pos, Win32::
 			if (activeTextBox.get() != box) {
 				if (Box* textEntry = activeTextBox.get()) {
 					textEntry->borderWidth = 0.0F;
+					if (textEntry->actionCallback) {
+						UserCommunication deselectComm{};
+						deselectComm.textBoxDeselected = true;
+						textEntry->actionCallback(textEntry, deselectComm);
+					}
 				}
 				activeTextBox = BoxHandle{};
 			}
+			totalActiveDrag = V2F{};
 			// This is a bit of a hack to avoid having to set parents while also having drag properly scaleed.
 			// It won't update correctly if the user scales while dragging
 			activeBoxTotalScale = scale;
@@ -1370,6 +1412,8 @@ void handle_mouse_update(V2F32 pos, V2F32 delta) {
 		UserCommunication comm{};
 		comm.mousePos = pos;
 		comm.drag = delta / activeBoxTotalScale;
+		totalActiveDrag += comm.drag;
+		comm.totalDrag = totalActiveDrag;
 		active->actionCallback(active, comm);
 	}
 	if (!active) {
@@ -1431,9 +1475,6 @@ void handle_keyboard_action(V2F32 mousePos, Win32::Key key, Win32::ButtonState s
 				textInputHandler.handle_key_press(key, wrapWidth, active->textSize);
 			}
 			activeTextInput->numTypedCharacters = textInputHandler.textLength;
-			if (activeTextInput->boxConsumerCallback) {
-				activeTextInput->boxConsumerCallback(activeTextInput); // Notify user that the field changed
-			}
 		}
 	} else {
 		for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
@@ -1542,7 +1583,7 @@ BoxHandle text_button(StrA text, Callback&& onClick) {
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
-		};
+	};
 	return box;
 }
 
@@ -1571,13 +1612,11 @@ BoxHandle text_input(StrA prompt, StrA defaultValue, bool multiline, Callback&& 
 	set_box_consumer_box_callback(box, reinterpret_cast<Callback&&>(onTextUpdated));
 	box->actionCallback = [](Box* box, UserCommunication& comm) {
 		if (comm.leftClickStart || comm.rightClickStart) {
-			if (activeTextBox.get() != box) {
-				box->borderWidth = 1.0F;
-				activeTextBox = BoxHandle{ box, box->generation };
-				activeTextBoxTextRenderOffset = 0.0F;
-				textInputHandler.set_buffer(box->typedTextBuffer, box->numTypedCharacters, MAX_TEXT_INPUT);
-				textInputHandler.allowMultiLine = box->flags & BOX_FLAG_WRAP_TEXT;
-			}
+			set_active_text_box(box);
+			return ACTION_HANDLED;
+		}
+		if (comm.textBoxDeselected) {
+			box->boxConsumerCallback(box);
 			return ACTION_HANDLED;
 		}
 		return ACTION_PASS;
@@ -1741,6 +1780,96 @@ BoxHandle slider_number(F32 step, Callback&& onTextUpdated) {
 }
 */
 
+void set_box_f64_val(Box* box, F64 newVal) {
+	if (box->flags & BOX_FLAG_SLIDER_MIN_MAX_ENFORCED) {
+		newVal = clamp(newVal, box->value.f64.minVal, box->value.f64.maxVal);
+	}
+	box->value.f64.val = newVal;
+	if (box->typedTextBuffer) {
+		U32 bufferSize = MAX_TEXT_INPUT;
+		SerializeTools::serialize_f64(box->typedTextBuffer, &bufferSize, newVal);
+		box->numTypedCharacters = bufferSize;
+	}
+	if (box->updatePtr.f64) {
+		*box->updatePtr.f64 = newVal;
+	}
+}
+
+void slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64_INF, F64 maxVal = F64_INF, F64 incrementAmount = 1.0, bool minMaxEnforced = false) {
+	if (maxVal < minVal) {
+		maxVal = minVal;
+	}
+	UI_RBOX() {
+		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+		button(Resources::uiArrowLeft, [incrementAmount](Box* box){
+			Box* slider = box->next;
+			set_box_f64_val(slider, slider->value.f64.val - incrementAmount);
+		});
+		Box* textBox = text_input(""a, "0.0"a, false, [](Box* box){
+			F64 newVal = box->value.f64.val;
+			F64 parsed;
+			if (SerializeTools::parse_f64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters })) {
+				newVal = parsed;
+			}
+			if (box->numTypedCharacters == 0) {
+				newVal = 0.0;
+			}
+			set_box_f64_val(box, newVal);
+		}).unsafeBox;
+		textBox->actionCallback = [](Box* box, UserCommunication& com) {
+			if (com.leftClicked || com.rightClicked) {
+				set_active_text_box(box);
+				return ACTION_HANDLED;
+			}
+			if (com.textBoxDeselected) {
+				box->boxConsumerCallback(box);
+				return ACTION_HANDLED;
+			}
+			if (com.drag.x) {
+				F64 dragAmount = com.drag.x / box->computedSize.x * (box->value.f64.maxVal - box->value.f64.minVal);
+				if (box->value.f64.minVal == -F64_INF || box->value.f64.maxVal == F64_INF) {
+					dragAmount = com.drag.x * 0.125;
+				}
+				set_box_f64_val(box, clamp(box->value.f64.val + dragAmount, box->value.f64.minVal, box->value.f64.maxVal));
+				return ACTION_HANDLED;
+			}
+			if (com.tessellator) {
+				F32 percentUsed = clamp01((box->value.f64.val - box->value.f64.minVal) / (box->value.f64.maxVal - box->value.f64.minVal));
+				F64 maxX = com.renderArea.minX + com.renderArea.width() * percentUsed;
+				V4F color = themeColor.button.to_v4f32();
+				color.w = 0.3F;
+				com.tessellator->ui_rect2d(com.renderArea.minX, com.renderArea.minY, maxX, com.renderArea.maxY, com.renderZ, 0.0F, 0.0F, 1.0F, 1.0F, color, Resources::simpleWhite.index, com.clipBoxIndex << 16);
+				return ACTION_HANDLED;
+			}
+			return ACTION_PASS;
+		};
+		textBox->value.f64.val = defaultVal;
+		textBox->value.f64.minVal = minVal;
+		textBox->value.f64.maxVal = maxVal;
+		textBox->updatePtr.f64 = toUpdate;
+		textBox->hoverCursor = Win32::CURSOR_TYPE_SIZE_HORIZONTAL;
+		bool usesMinMax = minVal != -F64_INF || maxVal != F64_INF;
+		if (usesMinMax) {
+			textBox->flags |= BOX_FLAG_CUSTOM_DRAW;
+		}
+		if (minMaxEnforced) {
+			textBox->flags |= BOX_FLAG_SLIDER_MIN_MAX_ENFORCED;
+		}
+		button(Resources::uiArrowRight, [incrementAmount](Box* box) {
+			Box* slider = box->prev;
+			set_box_f64_val(slider, slider->value.f64.val + incrementAmount);
+		});
+	}
+}
+
+void slider_i64() {
+
+}
+
+void slider_bool() {
+
+}
+
 void do_scroll(Box* scrollHandler, Box* scrolled, F32 amount) {
 	F32 maxScroll = max(scrolled->computedSize.y - scrollHandler->clippedRenderArea.height(), 0.0F);
 	scrolled->pos.y = clamp(scrolled->pos.y + roundf32(amount), -maxScroll, 0.0F);
@@ -1762,7 +1891,7 @@ void scroll_window_begin() {
 	scrollBar->size = V2F{};
 	scrollBar->sizeModeX = SIZE_MODE_FIT_CHILDREN;
 	scrollBar->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
-	scrollBar->backgroundColor = themeColor.subheader;
+	scrollBar->backgroundColor = themeColor.background;
 	workingBox = scrollBar;
 
 	UI_SIZE((V2F{ scrollBarWidth, scrollBarWidth }))

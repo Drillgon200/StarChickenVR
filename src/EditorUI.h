@@ -203,6 +203,8 @@ struct PanelTextureProcessing {
 					text_input("Another text input"a, ""a, true, [](Box*){  });
 					path_input("File 1"a);
 					path_input("File 2"a);
+					slider_f64();
+					slider_f64(nullptr, 0.0, 0.0F, 1.0F);
 				}
 			}
 		}

@@ -364,6 +364,7 @@
     <ClInclude Include="src\compression\BCCommon.h" />
     <ClInclude Include="src\compression\Huffman.h" />
     <ClInclude Include="src\compression\LZ.h" />
+    <ClInclude Include="src\compression\MipGen.h" />
     <ClInclude Include="src\CubemapGen.h" />
     <ClInclude Include="src\DrillLib.h" />
     <ClInclude Include="src\DrillLibDefs.h" />

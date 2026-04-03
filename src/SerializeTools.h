@@ -211,6 +211,20 @@ bool parse_f64(F64* f64Out, StrA* str) {
 		src++, srcLen--;
 	}
 
+	if (StrA{ src, srcLen } == "Inf"a) {
+		*f64Out = isNegative ? -F64_INF : F64_INF;
+		*str = StrA{ src + 3, srcLen - 3 };
+		return true;
+	} else if (StrA{ src, srcLen } == "QNaN"a) {
+		*f64Out = isNegative ? -F64_QNAN : F64_QNAN;
+		*str = StrA{ src + 4, srcLen - 4 };
+		return true;
+	} else if (StrA{ src, srcLen } == "SNaN"a) {
+		*f64Out = isNegative ? -F64_SNAN : F64_SNAN;
+		*str = StrA{ src + 4, srcLen - 4 };
+		return true;
+	}
+
 	U64 number = 0;
 	U32 significandDigitCount = 0;
 	U32 totalDigitCount = 0;

@@ -295,6 +295,15 @@ FINLINE U32 next_power_of_two(U32 x) {
 FINLINE U64 next_power_of_two(U64 x) {
 	return 1ull << (64ull - __lzcnt64(x - 1ull));
 }
+FINLINE U32 popcnt32(U32 x) {
+	return _mm_popcnt_u32(x);
+}
+FINLINE U64 popcnt64(U64 x) {
+	return _mm_popcnt_u64(x);
+}
+FINLINE bool is_power_of_2(U64 x) {
+	return popcnt64(x) == 1;
+}
 
 bool quadratic_formula_stable(F32* results, F32 a, F32 b, F32 c) {
 	// https://math.stackexchange.com/questions/866331/numerically-stable-algorithm-for-solving-the-quadratic-equation-when-a-is-very
@@ -2298,7 +2307,6 @@ RGBA8 tonemap_E5B9G9R9(U32 packed) {
 	V3F tonemapped = raw;// uncharted2_filmic(raw);
 	return RGBA8{ U8(clamp01(tonemapped.x) * 255.0F), U8(clamp01(tonemapped.y) * 255.0F), U8(clamp01(tonemapped.z) * 255.0F), 255 };
 }
-
 
 template <typename T>
 FINLINE T eval_bezier_quadratic(T start, T control, T end, F32 t) {

@@ -79,13 +79,13 @@ void load_resources() {
 	load_dtf(&diffuseCubemap, "./resources/textures/city_diffuse.dtf"a);
 	VK::set_pbr_params(specularCubemap.imageView, diffuseCubemap.imageView, trowbridgeReitzBRDFLut.imageView);
 
-	load_png(&uiArrowLeft, "resources/textures/ui/arrow_left.png"a);
-	load_png(&uiArrowRight, "resources/textures/ui/arrow_right.png"a);
-	load_png(&uiArrowUp, "resources/textures/ui/arrow_up.png"a);
-	load_png(&uiArrowDown, "resources/textures/ui/arrow_down.png"a);
-	load_png(&uiX, "resources/textures/ui/x.png"a);
-	load_png(&uiFolder, "resources/textures/ui/folder.png"a);
-	load_png(&uiWindowSwitch, "resources/textures/ui/window_switch.png"a);
+	load_png(&uiArrowLeft, "resources/textures/ui/arrow_left.png"a, true, true);
+	load_png(&uiArrowRight, "resources/textures/ui/arrow_right.png"a, true, true);
+	load_png(&uiArrowUp, "resources/textures/ui/arrow_up.png"a, true, true);
+	load_png(&uiArrowDown, "resources/textures/ui/arrow_down.png"a, true, true);
+	load_png(&uiX, "resources/textures/ui/x.png"a, true, true);
+	load_png(&uiFolder, "resources/textures/ui/folder.png"a, true, true);
+	load_png(&uiWindowSwitch, "resources/textures/ui/window_switch.png"a, true, true);
 	load_msdf(&fontAtlas, "resources/textures/font2.ddf"a);
 
 	create_material_from_pngs(&cannonMat, "resources/textures/cannon"a);

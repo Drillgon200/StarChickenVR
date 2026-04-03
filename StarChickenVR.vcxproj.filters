@@ -170,6 +170,9 @@
     <ClInclude Include="tests\CompressionTests.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\compression\MipGen.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />

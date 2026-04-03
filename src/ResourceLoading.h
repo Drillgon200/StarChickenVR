@@ -2,6 +2,7 @@
 #include "VKGeometry.h"
 #include "VK_decl.h"
 #include "PNG.h"
+#include "compression/MipGen.h"
 
 namespace ResourceLoading {
 
@@ -352,14 +353,18 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	currentTextureCount++;
 }
 
-void load_png(Texture* result, StrA path, bool isSRGB = true) {
+void load_png(Texture* result, StrA path, bool isSRGB = true, bool genMipmaps = false) {
 	MemoryArena& stackArena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(stackArena) {
 		RGBA8* image;
 		U32 width, height;
 		PNG::read_image(stackArena, &image, &width, &height, path);
+		U32 mipCount = 1;
+		if (genMipmaps) {
+			image = MipGen::build_lame_mipmaps(stackArena, &mipCount, image, width, height);
+		}
 		if (image) {
-			create_texture(result, image, width, height, 1, TEXTURE_FORMAT_RGBA_U8, isSRGB, false);
+			create_texture(result, image, width, height, mipCount, TEXTURE_FORMAT_RGBA_U8, isSRGB, false);
 		} else {
 			*result = missing;
 		}
