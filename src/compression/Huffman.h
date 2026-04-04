@@ -85,7 +85,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	if (queueSize <= 1) {
 		Byte* result = arena.alloc<Byte>(5);
 		STORE_LE32(result, SINGLE_SYMBOL_BIT | dataLen);
-		result[4] = dataLen == 0 ? 0 : data[0];
+		result[4] = dataLen == 0 ? Byte(0) : data[0];
 		*encodedLen = 5;
 		return result;
 	}
@@ -131,8 +131,8 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 			}
 			nodes[next.child0].depth = next.depth + 1;
 			nodes[next.child1].depth = next.depth + 1;
-			queue[queueSize++] = next.child0;
-			queue[queueSize++] = next.child1;
+			queue[queueSize++] = U32(next.child0);
+			queue[queueSize++] = U32(next.child1);
 		} else { // Leaf node
 			if (next.depth > HUFFMAN_MAX_DEPTH) {
 				debt++;
@@ -165,9 +165,9 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 		U32* toSort = sortedSymbols + start;
 		for (U32 i = 0; i < count; i++) {
 			U32 bestIdx = i;
-			U32 bestFreq = nodes[toSort[bestIdx]].freq;
+			U32 bestFreq = U32(nodes[toSort[bestIdx]].freq);
 			for (U32 j = i + 1; j < count; j++) {
-				U32 testFreq = nodes[toSort[j]].freq;
+				U32 testFreq = U32(nodes[toSort[j]].freq);
 				if (testFreq > bestFreq) {
 					bestIdx = j;
 					bestFreq = testFreq;
@@ -181,7 +181,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	// Idea from Yann Collet
 	// https://fastcompression.blogspot.com/2015/07/huffman-revisited-part-3-depth-limited.html
 	while (debt > 0) {
-		U32 depthToDemote = HUFFMAN_MAX_DEPTH - (32 - lzcnt32(debt)) - 1;
+		U32 depthToDemote = HUFFMAN_MAX_DEPTH - (32 - lzcnt32(U32(debt))) - 1;
 		// Try to demote less frequent symbols first before we go up the tree and demote frequent ones
 		for (U32 toDemote = depthToDemote; toDemote < HUFFMAN_MAX_DEPTH - 1; toDemote++) {
 			if (symbolDepthCounts[toDemote] != 0) {
@@ -198,7 +198,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 		debt -= 1 << HUFFMAN_MAX_DEPTH - depthToDemote - 2;
 	}
 	while (debt < 0) {
-		U32 depthToPromote = HUFFMAN_MAX_DEPTH - (31 - lzcnt32(-debt)) - 1;
+		U32 depthToPromote = HUFFMAN_MAX_DEPTH - (31 - lzcnt32(U32(-debt))) - 1;
 		while (symbolDepthCounts[depthToPromote] == 0) {
 			depthToPromote++;
 		}
@@ -223,7 +223,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 		TreeNode& node = nodes[i];
 		if (node.freq > 0) {
 			totalSymbolSlots += 1 << HUFFMAN_MAX_DEPTH - node.depth;
-			symCodes[i].len = node.depth;
+			symCodes[i].len = U16(node.depth);
 			// We create the code MSB first because it's easier to work with, then write it LSB first because the decoder loop is faster that way
 			symCodes[i].code = bitswap32(startingCodes[node.depth - 1]);
 			startingCodes[node.depth - 1] += 1u << 32 - node.depth;
@@ -256,14 +256,14 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	U32 streamOffsets[HUFFMAN_PARALLEL_STREAMS];
 	// Scalar streams get encoded to twice. Vector decode latency is much longer than scalar decode latency, so we need multiple scalar decodes per vector decode
 	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
-		U32 streamByteSize = (streamBitLengths[i] + 7) / 8 + 8;
+		U32 streamByteSize = U32((streamBitLengths[i] + 7) / 8) + 8;
 		STORE_LE32(out, nextStreamOffset);
 		out += sizeof(U32);
 		streamOffsets[i] = nextStreamOffset;
 		nextStreamOffset += streamByteSize;
 	}
 	for (U32 i = 0; i < 256; i += 2) {
-		*out++ = symCodes[i].len | symCodes[i + 1].len << 4;
+		*out++ = Byte(symCodes[i].len | symCodes[i + 1].len << 4);
 	}
 	Byte* dataStreams[HUFFMAN_PARALLEL_STREAMS];
 	for (U32 i = 0; i < HUFFMAN_PARALLEL_STREAMS; i++) {
@@ -334,7 +334,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		printf("Huffman stream too small, corrupted?\n"a);
 		return nullptr;
 	}
-	F64 beginTime = current_time_seconds();
+	//F64 beginTime = current_time_seconds();
 	U32 outputLen = LOAD_LE32(data);
 	bool isSingleSymbol = outputLen & SINGLE_SYMBOL_BIT;
 	outputLen &= ~SINGLE_SYMBOL_BIT;
@@ -367,8 +367,8 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 	U32 symbolDepthCounts[HUFFMAN_MAX_DEPTH + 4]{}; // + 4 to satisfy visual studio warning
 	U32 totalSymbolSlots = 0;
 	for (U32 i = 0; i < 256; i += 2) {
-		U32 len0 = data[i >> 1] & 0xF;
-		U32 len1 = data[i >> 1] >> 4;
+		U32 len0 = U32(data[i >> 1] & 0xF);
+		U32 len1 = U32(data[i >> 1] >> 4);
 		if (len0 > 0) {
 			symbolDepthCounts[len0 - 1]++;
 			totalSymbolSlots += 1 << HUFFMAN_MAX_DEPTH - len0;
@@ -389,18 +389,18 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 	}
 	// According to ryg's blog, it's faster to build the tree MSB first, then use a SIMD index bitswap to permute the table to LSB first. That keeps all the stores as linear fills.
 	for (U32 sym = 0; sym < 256; sym++) {
-		U32 len = data[sym >> 1] >> (sym & 1) * 4 & 0xF;
+		U32 len = U32(data[sym >> 1] >> (sym & 1) * 4 & 0xF);
 		if (len > 0) {
 			U32 invDepth = HUFFMAN_MAX_DEPTH - len;
 			HuffmanEntry* start = &decodeTableReversed[startingCodes[len - 1]];
 			startingCodes[len - 1] += 1 << invDepth;
-			U16 entry = len | sym << 8;
+			U16 entry = U16(len | sym << 8);
 			switch (invDepth) {
 			case 0: {
 				STORE_LE16(start, entry);
 			} break;
 			case 1: {
-				U32 entry2 = entry | entry << 16;
+				U32 entry2 = U32(entry) | U32(entry) << 16;
 				STORE_LE32(start, entry2);
 			} break;
 			case 2: {
@@ -413,8 +413,8 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 				STORE_LE64(start + 4, entry4);
 			} break;
 			default: {
-				U32 size = 1 << invDepth;
-				__m256i entry16 = _mm256_set1_epi16(entry);
+				U32 size = 1u << invDepth;
+				__m256i entry16 = _mm256_set1_epi16(I16(entry));
 				__m256i* storeTo = (__m256i*)start;
 				for (U32 i = 0; i < size; i += 16) {
 					_mm256_store_si256(storeTo++, entry16);
@@ -426,17 +426,19 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 	data += 128;
 	dataLen -= 128;
 
-	F64 tableBuildTime = current_time_seconds();
+	//F64 tableBuildTime = current_time_seconds();
 
 	{ // The table was built in MSB first order, so now we bit reverse it, since the data is in LSB first order
 	  // Based on my bit reverse code for the FFT which performed significantly better than the non vectorized algorithm
 		__m256i bitReverseLookup = _mm256_setr_epi8(0b0000, 0b1000, 0b0100, 0b1100, 0b0010, 0b1010, 0b0110, 0b1110, 0b0001, 0b1001, 0b0101, 0b1101, 0b0011, 0b1011, 0b0111, 0b1111, 0b0000, 0b1000, 0b0100, 0b1100, 0b0010, 0b1010, 0b0110, 0b1110, 0b0001, 0b1001, 0b0101, 0b1101, 0b0011, 0b1011, 0b0111, 0b1111);
+// "'argument' truncation of constant value" doesn't matter, 8 bit quantities fit into a char just fine.
+#pragma warning(suppress: 4309)
 		__m256i bitReverseLookupHi = _mm256_setr_epi8(0b00000000, 0b10000000, 0b01000000, 0b11000000, 0b00100000, 0b10100000, 0b01100000, 0b11100000, 0b00010000, 0b10010000, 0b01010000, 0b11010000, 0b00110000, 0b10110000, 0b01110000, 0b11110000, 0b00000000, 0b10000000, 0b01000000, 0b11000000, 0b00100000, 0b10100000, 0b01100000, 0b11100000, 0b00010000, 0b10010000, 0b01010000, 0b11010000, 0b00110000, 0b10110000, 0b01110000, 0b11110000);
 		__m256i bswap16Shuffle = _mm256_setr_epi8(1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14, 1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14);
 		__m256i lowBitMask = _mm256_set1_epi32(0x0F0F0F0F);
 		__m256i indices = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
 		__m256i sixteen = _mm256_set1_epi32(16);
-		__m256i bitReversedEight = _mm256_set1_epi32(bitswap32(8) >> 32 - HUFFMAN_MAX_DEPTH);
+		__m256i bitReversedEight = _mm256_set1_epi32(I32(bitswap32(8) >> 32 - HUFFMAN_MAX_DEPTH));
 		__m256i mask16 = _mm256_set1_epi32(0xFFFF);
 		__m256i halfTable = _mm256_set1_epi32(1 << HUFFMAN_MAX_DEPTH - 1);
 		__m256i* outputFirstHalf = (__m256i*) & decodeTable[0];
@@ -461,7 +463,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		}
 	}
 
-	F64 tableReverseTime = current_time_seconds();
+	//F64 tableReverseTime = current_time_seconds();
 
 	Byte* result = arena.alloc_aligned<Byte>(outputLen, 32);
 	Byte* writePtr = result;
@@ -483,7 +485,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 		writePtr = huff_16_stream_vector_decode(&args);
 	}
 #elif defined HUFFMAN_HYBRID_16V9S
-	RUNTIME_ASSERT(HUFFMAN_PARALLEL_STREAMS == 25, "9+16 stream vector decoder needs 25 streams");
+	static_assert(HUFFMAN_PARALLEL_STREAMS == 25, "9+16 stream vector decoder needs 25 streams");
 	{
 		HuffHybrid9Plus16DecodeCallArgs args{};
 		args.decodeTable = (U16*)decodeTable;
@@ -807,11 +809,11 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 	Reverse: 0.026862343018754817%
 	Decode: 99.83882529038696%
 	*/
-	F64 tableTime = tableBuildTime - beginTime;
-	F64 reverseTime = tableReverseTime - tableBuildTime;
-	F64 decodeTime = current_time_seconds() - tableReverseTime;
+	//F64 tableTime = tableBuildTime - beginTime;
+	//F64 reverseTime = tableReverseTime - tableBuildTime;
+	//F64 decodeTime = current_time_seconds() - tableReverseTime;
 	//printf("Table time: %\nReverse time: %\nDecode time: %\n"a, tableTime, reverseTime, decodeTime);
-	F64 total = tableTime + reverseTime + decodeTime;
+	//F64 total = tableTime + reverseTime + decodeTime;
 	//printf("Table: %\\%\nReverse: %\\%\nDecode: %\\%\n"a, tableTime / total * 100.0, reverseTime / total * 100.0, decodeTime / total * 100.0);
 	return result;
 }

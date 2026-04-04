@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../DrillLib.h"
+#include "Huffman.h"
 
 struct DLZ2DecodeCallArgs {
 	Byte* writePtr;
@@ -108,7 +109,7 @@ Byte* encode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		U32 totalLiteralOrMatchCount = 0;
 		U64 bitBuf = 0;
 		U64 bitBufBits = 0;
-		for (I32 i = dataLen; i >= 1;) {
+		for (I32 i = I32(dataLen); i >= 1;) {
 			U32 bestOffset = bestOffsetTable[i];
 			U32 bestLength = bestLengthTable[i];
 			if (bestLength <= 1) {
@@ -153,9 +154,9 @@ Byte* encode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		}
 		if (bitBufBits != 0) {
 			STORE_LE64(offsetOrLiteralBuffer + dataLen - offsetOrLiteralBufferSize - sizeof(U64), bitBuf);
-			U32 extraBytes = (bitBufBits + 7) / 8;
+			U32 extraBytes = U32((bitBufBits + 7) / 8);
 			offsetOrLiteralBufferSize += extraBytes;
-			U32 excessToShift = extraBytes * 8 - bitBufBits;
+			U32 excessToShift = U32(U64(extraBytes) * 8 - bitBufBits);
 			U8* offsetOrLiteralBufferStart = offsetOrLiteralBuffer + dataLen - offsetOrLiteralBufferSize;
 			if (excessToShift) {
 				// Since we wrote the bits out in reverse, we may have bits we didn't write at the beginning byte. Shift the whole buffer down so those extra bits are at the end instead.
@@ -241,7 +242,6 @@ Byte* encode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 
 				U32 threeBytesPrev = LOAD_LE32(&data[i - 4]) & 0x00FFFFFF;
 				U32 hashIdxPrev = hash32(threeBytesPrev) & LZ_WINDOW_SIZE - 1;
-				HashChainEntry* lastMatchPrev = &matchEntries[hashTable[hashIdxPrev]];
 				matchEntries[i - 4 & LZ_WINDOW_SIZE - 1] = HashChainEntry{ threeBytesPrev, i - 4, hashTable[hashIdxPrev]};
 				hashTable[hashIdxPrev] = i - 4 & LZ_WINDOW_SIZE - 1;
 			}
@@ -267,7 +267,7 @@ Byte* encode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		U64 bitBuf = 0;
 		U64 bitBufBits = 0;
 		F64 avgLengths = 0.0;
-		for (I32 i = dataLen; i >= 1;) {
+		for (I32 i = I32(dataLen); i >= 1;) {
 			U32 bestOffset = bestOffsetTable[i];
 			U32 bestLength = bestLengthTable[i];
 			if (bestLength <= 1) {
@@ -324,9 +324,9 @@ Byte* encode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		printf("AVG lengths: %\n"a, avgLengths);
 		if (bitBufBits != 0) {
 			STORE_LE64(offsetOrLiteralBuffer + dataLen - offsetOrLiteralBufferSize - sizeof(U64), bitBuf);
-			U32 extraBytes = (bitBufBits + 7) / 8;
+			U32 extraBytes = U32((bitBufBits + 7) / 8);
 			offsetOrLiteralBufferSize += extraBytes;
-			U32 excessToShift = extraBytes * 8 - bitBufBits;
+			U32 excessToShift = U32(U64(extraBytes) * 8 - bitBufBits);
 			U8* offsetOrLiteralBufferStart = offsetOrLiteralBuffer + dataLen - offsetOrLiteralBufferSize;
 			if (excessToShift) {
 				// Since we wrote the bits out in reverse, we may have bits we didn't write at the beginning byte. Shift the whole buffer down so those extra bits are at the end instead.
@@ -381,7 +381,7 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 	Byte* result = outputArena.alloc<Byte>(header.srcLength);
 	MEMORY_ARENA_FRAME(outputArena) {
 		Byte* matchOrLiteralRunBuffer = data + sizeof(header);
-		F64 huffDecodeStart = current_time_seconds();
+		//F64 huffDecodeStart = current_time_seconds();
 		U32 literalBufferLen;
 		Byte* literalBuffer = Huffman::decode(outputArena, &literalBufferLen, data + header.literalBufferOffset, header.literalBufferEncodedSize);
 		U32 literalLengthBufferLen;
@@ -390,9 +390,8 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		Byte* matchLengthBuffer = Huffman::decode(outputArena, &matchLengthBufferLen, data + header.matchLengthBufferOffset, header.matchLengthBufferEncodedSize);
 		U32 offsetBufferLen;
 		Byte* offsetBuffer = Huffman::decode(outputArena, &offsetBufferLen, data + header.offsetBufferOffset, header.offsetBufferEncodedSize);
-		Byte* ogOffsetBuf = offsetBuffer;
 
-		F64 lzDecodeStart = current_time_seconds();
+		//F64 lzDecodeStart = current_time_seconds();
 
 		*outLen = header.srcLength;
 		Byte* writePtr = result;
@@ -402,7 +401,7 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		for (U32 i = 0; i < header.matchOrLiteralRunCount; i++) {
 			U32 count;
 			if (bitBuf & 1) { // Match
-				count = *matchLengthBuffer++ + 1;
+				count = U32(*matchLengthBuffer++) + 1u;
 				/*U32 bitsToRead = *offsetBuffer++;
 				bitBuf >>= 1;
 				U32 offset = (1 << bitsToRead) + (U32(bitBuf) & (1 << bitsToRead) - 1);
@@ -428,7 +427,7 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 					__movsb(writePtr, fromPtr, count);
 				}
 			} else { // Literal run
-				count = *literalLengthBuffer++ + 1;
+				count = U32(*literalLengthBuffer++) + 1u;
 				if (count <= 16) {
 					_mm_storeu_si128((__m128i*)writePtr, _mm_loadu_si128((__m128i*)literalBuffer));
 				} else {
@@ -448,7 +447,7 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		// Baseline opt:
 		// Huff time: 0.011819200124591589
 		// LZ time: 0.007234199903905392 
-		F64 lzTime = current_time_seconds() - lzDecodeStart;
+		//F64 lzTime = current_time_seconds() - lzDecodeStart;
 		//printf("Huff time: %\nLZ time: %\nLZ throughput: % MBps\n"a, lzDecodeStart - huffDecodeStart, lzTime, header.srcLength / lzTime / MEGABYTE);
 	}
 	return result;
@@ -468,7 +467,7 @@ Byte* decode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 	Byte* result = outputArena.alloc<Byte>(header.srcLength);
 	MEMORY_ARENA_FRAME(outputArena) {
 		Byte* matchOrLiteralRunBuffer = data + sizeof(header);
-		F64 huffDecodeStart = current_time_seconds();
+		//F64 huffDecodeStart = current_time_seconds();
 		U32 literalBufferLen;
 		Byte* literalBuffer = Huffman::decode(outputArena, &literalBufferLen, data + header.literalBufferOffset, header.literalBufferEncodedSize);
 		U32 lengthBufferLen;
@@ -476,7 +475,7 @@ Byte* decode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		U32 offsetBufferLen;
 		Byte* offsetBuffer = Huffman::decode(outputArena, &offsetBufferLen, data + header.offsetBufferOffset, header.offsetBufferEncodedSize);
 
-		F64 lzDecodeStart = current_time_seconds();
+		//F64 lzDecodeStart = current_time_seconds();
 
 		*outLen = header.srcLength;
 #ifdef DLZ2_ASM_DECODER
@@ -530,7 +529,7 @@ Byte* decode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		// Baseline opt:
 		// Huff time: 0.011819200124591589
 		// LZ time: 0.007234199903905392 
-		F64 lzTime = current_time_seconds() - lzDecodeStart;
+		//F64 lzTime = current_time_seconds() - lzDecodeStart;
 		//printf("Huff time: %\nLZ time: %\nLZ throughput: % MBps\n"a, lzDecodeStart - huffDecodeStart, lzTime, header.srcLength / lzTime / MEGABYTE);
 	}
 	return result;

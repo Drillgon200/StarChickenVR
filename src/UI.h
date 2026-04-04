@@ -261,8 +261,8 @@ struct BoxHandle {
 
 struct TypedTextBuffer {
 	char* buffer;
-	U32 bufferCap;
-	U32 textLength;
+	I32 bufferCap;
+	I32 textLength;
 	// cursorAnchor and cursor represent a highlighted range, both values are the same if nothing is selected
 	I32 cursorAnchor;
 	I32 cursor;
@@ -271,13 +271,13 @@ struct TypedTextBuffer {
 
 	void set_buffer(char* data, U32 length, U32 cap) {
 		buffer = data;
-		bufferCap = cap;
-		textLength = length;
+		bufferCap = I32(cap);
+		textLength = I32(length);
 		cursor = cursorAnchor = length;
 	}
 
 	StrA stra() {
-		return StrA{ buffer, textLength };
+		return StrA{ buffer, U64(textLength) };
 	}
 
 	enum CharClass {
@@ -321,7 +321,7 @@ struct TypedTextBuffer {
 	}
 	void delete_selected() {
 		Rng1I32 selected; selected.init(cursor, cursorAnchor);
-		memmove(buffer + selected.minX, buffer + selected.maxX, textLength - selected.maxX);
+		memmove(buffer + selected.minX, buffer + selected.maxX, U32(textLength - selected.maxX));
 		textLength -= selected.area();
 		cursor = cursorAnchor = selected.minX;
 	}
@@ -334,11 +334,11 @@ struct TypedTextBuffer {
 			} break;
 			case Win32::KEY_C: {
 				Rng1I32 selected; selected.init(cursor, cursorAnchor);
-				Win32::set_clipboard(buffer + selected.minX, selected.area());
+				Win32::set_clipboard(buffer + selected.minX, U32(selected.area()));
 			} break;
 			case Win32::KEY_X: {
 				Rng1I32 selected; selected.init(cursor, cursorAnchor);
-				Win32::set_clipboard(buffer + selected.minX, selected.area());
+				Win32::set_clipboard(buffer + selected.minX, U32(selected.area()));
 				delete_selected();
 			} break;
 			case Win32::KEY_V: {
@@ -355,8 +355,8 @@ struct TypedTextBuffer {
 						}
 					}
 				}
-				if (textLength + clipLength <= bufferCap) {
-					memmove(buffer + cursor + clipLength, buffer + cursor, textLength - cursor);
+				if (textLength + I32(clipLength) <= bufferCap) {
+					memmove(buffer + cursor + clipLength, buffer + cursor, U32(textLength - cursor));
 					memcpy(buffer + cursor, clipData, clipLength);
 					textLength += clipLength;
 					cursor = cursorAnchor = cursor + clipLength;
@@ -414,7 +414,7 @@ struct TypedTextBuffer {
 						StrA* lines = TextRenderer::wrap_text(arena, &lineCount, &originalOffsets, stra(), wrapWidth, sizeY);
 						U32 cursorLine = lineCount - 1;
 						for (U32 i = 0; i < lineCount; i++) {
-							if (cursor >= originalOffsets[i] && cursor < originalOffsets[i] + I32(lines[i].length)) {
+							if (cursor >= originalOffsets[i] && cursor < I32(originalOffsets[i]) + I32(lines[i].length)) {
 								cursorLine = i;
 								break;
 							}
@@ -476,7 +476,7 @@ struct TypedTextBuffer {
 				}
 				Rng1I32 selected; selected.init(cursor, cursorAnchor);
 				if (letter != '\0' && textLength - selected.area() < bufferCap) {
-					memmove(buffer + selected.minX + 1, buffer + selected.maxX, textLength - selected.maxX);
+					memmove(buffer + selected.minX + 1, buffer + selected.maxX, U32(textLength - selected.maxX));
 					buffer[selected.minX] = letter;
 					textLength = textLength - selected.area() + 1;
 					cursor = cursorAnchor = selected.minX + 1;
@@ -488,7 +488,7 @@ struct TypedTextBuffer {
 	void handle_mouse_action(V2F pos, bool drag, bool wrap, F32 wrapWidth, F32 sizeY) {
 		MemoryArena& arena = get_scratch_arena();
 		MEMORY_ARENA_FRAME(arena) {
-			StrA baseStr{ buffer, textLength };
+			StrA baseStr = stra();
 			StrA* lines = &baseStr;
 			U32 lineCount = 1;
 			U32 zero = 0;
@@ -502,7 +502,7 @@ struct TypedTextBuffer {
 				selectedLine = 0;
 				selectedColumn = 0;
 			}
-			if (selectedLine >= lineCount) {
+			if (selectedLine >= I32(lineCount)) {
 				selectedLine = lineCount - 1;
 				selectedColumn = I32_MAX;
 			}
@@ -1168,7 +1168,7 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 				F32 charWidth = TextRenderer::get_character_width(' ', box->textSize * scale); // Only supporting monospaced for now
 				if (activeTextBox.get() == box) {
 					if (!(box->flags & BOX_FLAG_WRAP_TEXT)) {
-						F32 cursorRenderPos = textStartX + charWidth * textInputHandler.cursor - activeTextBoxTextRenderOffset;
+						F32 cursorRenderPos = textStartX + charWidth * F32(textInputHandler.cursor) - activeTextBoxTextRenderOffset;
 						activeTextBoxTextRenderOffset += cursorRenderPos - clamp(cursorRenderPos, textStartX, renderArea.maxX - box->padding * scale);
 					}
 					textStartX -= activeTextBoxTextRenderOffset;
@@ -1188,10 +1188,10 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 						if (highlightEnd > highlightStart) {
 							tes.ui_rect2d(textStartX + charWidth * F32(highlightStart), textStartY + yOffset, textStartX + charWidth * F32(highlightEnd), textStartY + yOffset + box->textSize * scale, z, 0.0F, 0.0F, 1.0F, 1.0F, highlightColor, Resources::simpleWhite.index, clipBoxIndexStack.back() << 16);
 						}
-						if (textInputHandler.cursor >= originalLineOffsets[i] && textInputHandler.cursor < originalLineOffsets[i] + line.length ||
+						if (textInputHandler.cursor >= I32(originalLineOffsets[i]) && textInputHandler.cursor < I32(originalLineOffsets[i]) + I32(line.length) ||
 							i == lineCount - 1 && textInputHandler.cursor == originalLineOffsets[i] + line.length) {
 
-							cursorOffsetX = charWidth * (textInputHandler.cursor - originalLineOffsets[i]);
+							cursorOffsetX = charWidth * F32(textInputHandler.cursor - originalLineOffsets[i]);
 							cursorOffsetY = yOffset;
 						}
 					}
@@ -1474,7 +1474,7 @@ void handle_keyboard_action(V2F32 mousePos, Win32::Key key, Win32::ButtonState s
 				F32 wrapWidth = active->computedSize.x - active->padding * 2.0F;
 				textInputHandler.handle_key_press(key, wrapWidth, active->textSize);
 			}
-			activeTextInput->numTypedCharacters = textInputHandler.textLength;
+			activeTextInput->numTypedCharacters = U32(textInputHandler.textLength);
 		}
 	} else {
 		for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
@@ -1650,7 +1650,7 @@ void path_input(StrA fieldName) {
 		text(fieldName);
 		spacer(4.0F);
 		BoxHandle textInput = text_input("Enter file path"a, ""a, false, [](Box* box){});
-		button(Resources::uiFolder, [textInput](Box* box) mutable {
+		button(Resources::uiFolder, [textInput](Box* buttonBox) mutable {
 			if (Box* box = textInput.get()) {
 				MemoryArena& arena = get_scratch_arena();
 				MEMORY_ARENA_FRAME(arena) {
@@ -1834,8 +1834,8 @@ void slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64
 				return ACTION_HANDLED;
 			}
 			if (com.tessellator) {
-				F32 percentUsed = clamp01((box->value.f64.val - box->value.f64.minVal) / (box->value.f64.maxVal - box->value.f64.minVal));
-				F64 maxX = com.renderArea.minX + com.renderArea.width() * percentUsed;
+				F32 percentUsed = F32(clamp01((box->value.f64.val - box->value.f64.minVal) / (box->value.f64.maxVal - box->value.f64.minVal)));
+				F32 maxX = com.renderArea.minX + com.renderArea.width() * percentUsed;
 				V4F color = themeColor.button.to_v4f32();
 				color.w = 0.3F;
 				com.tessellator->ui_rect2d(com.renderArea.minX, com.renderArea.minY, maxX, com.renderArea.maxY, com.renderZ, 0.0F, 0.0F, 1.0F, 1.0F, color, Resources::simpleWhite.index, com.clipBoxIndex << 16);
@@ -1904,7 +1904,7 @@ void scroll_window_begin() {
 	spacerBefore->parentSizePercent.y = 0.95F;
 
 	Box* scrollHandle = button(Resources::simpleWhite, [](Box* box) {}).unsafeBox;
-	set_box_callback(scrollHandle, [scrollBox, scrollBar](Box* box, UserCommunication& com) {
+	set_box_callback(scrollHandle, [scrollBox](Box* box, UserCommunication& com) {
 		if (com.drag.y != 0.0F) {
 			Box* scrollHandler = scrollBox;
 			Box* scrolled = scrollBox->childFirst;
@@ -1988,7 +1988,9 @@ void context_menu_end_helper(BoxHandle parent, V2F32 offset) {
 	context_menu(parent, BoxHandle{ workingBox, workingBox->generation }, offset);
 }
 
-#define UI_ADD_CONTEXT_MENU(parent, offset) for (UI::Box* oldWorkingBox = UI::workingBox, * contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
+// Suppress "hides previous local declaration" and "local variable is initialized but not referenced", intended behavior for this construct
+#define UI_ADD_CONTEXT_MENU(parent, offset) __pragma(warning(suppress : 4456 4189))\
+	for (UI::Box* oldWorkingBox = UI::workingBox, * contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
 
 
 }

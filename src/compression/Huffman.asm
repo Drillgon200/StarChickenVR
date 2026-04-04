@@ -320,8 +320,8 @@ EXTRACT_STEP_SCALAR_SINGLE_REG_LAST macro idx, bitBuf, bitBufLo
 	add bitBufLo, cl
 	mov [rdi + idx], ch
 endm
-	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 0, rdx, dl,
-	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 1, rbx, bl,
+	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 0, rdx, dl
+	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 1, rbx, bl
 	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 2, rbp, bpl
 	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 3, rsi, sil
 	EXTRACT_STEP_SCALAR_SINGLE_REG_LAST writeOffset + 4, r8, r8b

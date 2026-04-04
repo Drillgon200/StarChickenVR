@@ -267,7 +267,7 @@ struct PanelEditor3D {
 			V3F eyePos = editor.get_render_eye_pos();
 			if (panelContainsMouse) {
 				translateWidget.do_mouse_over(eyePos, mousePickRay);
-				F32 scale = 0.125F * distance(eyePos, translateWidget.transform.translation());
+				//F32 scale = 0.125F * distance(eyePos, translateWidget.transform.translation());
 				//printf("%\n"a, vector_in_screen_space(translateWidget.transform.translation(), translateWidget.transform.get_row(1) * scale));
 			} else {
 				translateWidget.activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
@@ -308,7 +308,6 @@ struct PanelEditor3D {
 					I32 maxY = clamp(I32(dragArea.maxY) + 1, 0, I32(VK::attachments.mainHeight));
 					MemoryArena& arena = get_scratch_arena();
 					MEMORY_ARENA_FRAME(arena) {
-						U32* someData = arena.zalloc<U32>(VK::attachments.mainWidth * VK::attachments.mainHeight);
 						ArenaArrayList<U32> selectedSet{ &arena };
 						for (I32 y = minY; y <= maxY; y++) {
 							for (I32 x = minX; x <= maxX; x++) {

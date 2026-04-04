@@ -5,20 +5,20 @@ namespace BCCommon {
 
 RGBA8 decode_5_6_5(U16 compressed) {
 	// Extract the quantized bits
-	U8 r = compressed >> 11;
-	U8 g = (compressed >> 5) & 0b111111;
-	U8 b = compressed & 0b11111;
+	U8 r = U8(compressed >> 11);
+	U8 g = U8((compressed >> 5) & 0b111111);
+	U8 b = U8(compressed & 0b11111);
 	// Expand 5 to 8 bits by putting the 5 bits in the most significant, then putting the most significant of the 5 bits in the remaining 3 bits
-	r = (r << 3) | (r >> 2);
+	r = U8((r << 3) | (r >> 2));
 	// Same but with 6 bits instead;
-	g = (g << 2) | (g >> 4);
+	g = U8((g << 2) | (g >> 4));
 	// Same as 1
-	b = (b << 3) | (b >> 2);
+	b = U8((b << 3) | (b >> 2));
 	return RGBA8{ r, g, b, 255 };
 }
 
 U16 encode_5_6_5(RGB8 data) {
-	return ((data.r << 8) & 0b1111100000000000) | ((data.g << 3) & 0b0000011111100000) | ((data.b >> 3) & 0b0000000000011111);
+	return U16(((data.r << 8) & 0b1111100000000000) | ((data.g << 3) & 0b0000011111100000) | ((data.b >> 3) & 0b0000000000011111));
 }
 
 U16 encode_5_6_5_f(F32 data[3]) {
@@ -39,10 +39,10 @@ void quantize_565_f(F32 rgb[3]) {
 
 U32 get_difference(RGB8 rgb1, RGB8 rgb2) {
 	// Numbers come from inverse of 0.2989 0.5870 0.1140 color perception weights
-	U32 diff = (abs(I32(rgb1.r) - I32(rgb2.r)) * 100) / 335;
+	I32 diff = (abs(I32(rgb1.r) - I32(rgb2.r)) * 100) / 335;
 	diff += (abs(I32(rgb1.g) - I32(rgb2.g)) * 100) / 170;
 	diff += (abs(I32(rgb1.b) - I32(rgb2.b)) * 100) / 877;
-	return diff;
+	return U32(diff);
 }
 
 void get_average3d(F32* outVec, F32* inputVectors, U32 inputCount) {
@@ -262,7 +262,7 @@ void fill_pixel_block(RGBA8* image, RGBA8 pixels[16], U32 blockX, U32 blockY, U3
 void fill_pixel_blockx8(RGBA8* image, F32* pixels, I32 index, U32 blockX, U32 blockY, U32 finalWidth, U32 finalHeight) {
 	// Every 8 indices, move to the next block of 8 4x4 color blocks
 	// Add the lower part of index to offset for the in block offset for this pixel block
-	U32 blockOffset = (index / 8) * 32 * 16 + index % 8;
+	U32 blockOffset = U32((index / 8) * 32 * 16 + index % 8);
 	for (U32 pixY = 0; pixY < 4; pixY++) {
 		for (U32 pixX = 0; pixX < 4; pixX++) {
 			U32 imageIndex = min(blockY * 4 + pixY, finalHeight - 1) * finalWidth + min(blockX * 4 + pixX, finalWidth - 1);

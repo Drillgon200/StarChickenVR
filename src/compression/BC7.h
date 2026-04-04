@@ -118,7 +118,7 @@ FINLINE U32x8 find_index(const F32x8 endpoints[2], const F32x8& pixel) {
 
 
 U8 bc7_interpolate(U8 e0, U8 e1, U32 interpolationFactor) {
-	return ((64 - interpolationFactor) * e0 + interpolationFactor * e1 + 32) >> 6;
+	return U8(((64 - interpolationFactor) * e0 + interpolationFactor * e1 + 32) >> 6);
 }
 
 template<typename T>
@@ -163,7 +163,7 @@ F32 quantize_to_index(V4F endpoints[2], V4F pixel) {
 	const F32 scale = F32((1 << bits) - 1);
 	const F32 invScale = 1.0F / scale;
 	F32 normalizedProject = get_distance_between_endpoints(endpoints, pixel);
-	return truncf32(normalizedProject * scale + 0.5) * invScale;
+	return truncf32(normalizedProject * scale + 0.5F) * invScale;
 }
 
 template<U32 bits>
@@ -171,7 +171,7 @@ F32 quantize_to_index(V3F endpoints[2], V3F pixel) {
 	const F32 scale = F32((1 << bits) - 1);
 	const F32 invScale = 1.0F / scale;
 	F32 normalizedProject = get_distance_between_endpoints(endpoints, pixel);
-	return truncf32(normalizedProject * scale + 0.5) * invScale;
+	return truncf32(normalizedProject * scale + 0.5F) * invScale;
 }
 
 template<U32 bits>
@@ -179,7 +179,7 @@ F32 quantize_to_index(F32 endpoints[2], F32 pixel) {
 	const F32 scale = F32((1 << bits) - 1);
 	const F32 invScale = 1.0F / scale;
 	F32 normalizedProject = clamp01((pixel - endpoints[0]) / (endpoints[1] - endpoints[0]));
-	return truncf32(normalizedProject * scale + 0.5) * invScale;
+	return truncf32(normalizedProject * scale + 0.5F) * invScale;
 }
 
 template<U32 bits>
@@ -376,7 +376,7 @@ void least_squares_optimize_endpoints(V4Fx8 pixels[16], Endpoint endpoints[2], c
 template<typename Endpoint, U32 indexResolution, U32 partitions>
 void least_squares_optimize_endpointsx8(V4Fx8 pixels[16], Endpoint endpoints[6], const BC7PartitionTable& table) {
 	F32x8 endpointsEqual[3]{ endpoints[0] == endpoints[1], endpoints[2] == endpoints[3], endpoints[4] == endpoints[5] };
-	U32 endpointsEqualMasks[3]{ _mm256_movemask_ps(endpointsEqual[0]), _mm256_movemask_ps(endpointsEqual[1]), _mm256_movemask_ps(endpointsEqual[2]) };
+	U32 endpointsEqualMasks[3]{ U32(_mm256_movemask_ps(endpointsEqual[0])), U32(_mm256_movemask_ps(endpointsEqual[1])), U32(_mm256_movemask_ps(endpointsEqual[2])) };
 	if ((endpointsEqualMasks[0] & endpointsEqualMasks[1] & endpointsEqualMasks[2]) == 0xFF) {
 		// All of them have no axis to optimize along
 		return;
@@ -545,7 +545,7 @@ F32 pixels_dist_to_line_sq(V4F pixels[16], V4F line[2]) {
 	for (U32 i = 0; i < 16; i++) {
 		V4F point = pixels[i];
 		F32 proj = dot(point - line[0], lineVector) / length_sq(lineVector);
-		return length_sq(point - (line[0] + proj * lineVector));
+		dist += length_sq(point - (line[0] + proj * lineVector));
 	}
 	return dist;
 }
@@ -617,7 +617,7 @@ void choose_best_diagonals(V4F pixels[16], V3F boundingBoxes[6], const BC7Partit
 		if (boundingBoxes[partition * 2] == boundingBoxes[partition * 2 + 1]) {
 			continue;
 		}
-		U32 minDistanceDiag;
+		U32 minDistanceDiag = 0;
 		F32 minDistance = F32_LARGE;
 		for (U32 diag = 0; diag < 3; diag++) {
 			F32 dist = distancesSq[partition][diag];
@@ -1030,14 +1030,24 @@ F32x8 quantize_bc7_endpointsx8(V4Fx8 pixels[16], Endpoint endpoints[partitions *
 	Endpoint quantizeScale; if constexpr (alphaBits > 0) { quantizeScale = Endpoint{ quantizeScaleXYZ, quantizeScaleXYZ, quantizeScaleXYZ, quantizeScaleAlpha }; } else { quantizeScale = splat<Endpoint>(quantizeScaleXYZ); }
 	Endpoint invQuantizeScale = rcp(quantizeScale);
 	const F32x8 pBitShiftXYZ = _mm256_set1_ps(static_cast<F32>(1 << (8 - componentBits - 1)));
-	const F32x8 pBitShiftAlpha = _mm256_set1_ps(static_cast<F32>(1 << (8 - alphaBits - 1)));
-	Endpoint pBitShift; if constexpr (alphaBits > 0) { pBitShift = Endpoint{ pBitShiftXYZ, pBitShiftXYZ, pBitShiftXYZ, pBitShiftAlpha }; } else { pBitShift = splat<Endpoint>(pBitShiftXYZ); }
+	Endpoint pBitShift;
+	if constexpr (alphaBits > 0) {
+		const F32x8 pBitShiftAlpha = _mm256_set1_ps(static_cast<F32>(1 << (8 - alphaBits - 1)));
+		pBitShift = Endpoint{ pBitShiftXYZ, pBitShiftXYZ, pBitShiftXYZ, pBitShiftAlpha };
+	} else {
+		pBitShift = splat<Endpoint>(pBitShiftXYZ);
+	}
 	const F32x8 dataShiftXYZ = _mm256_set1_ps(static_cast<F32>(1 << (8 - componentBits)));
 	const F32x8 dataShiftAlpha = _mm256_set1_ps(static_cast<F32>(1 << (8 - alphaBits)));
 	Endpoint dataShift; if constexpr (alphaBits > 0) { dataShift = Endpoint{ dataShiftXYZ, dataShiftXYZ, dataShiftXYZ, dataShiftAlpha }; } else { dataShift = splat<Endpoint>(dataShiftXYZ); }
 	const F32x8 bottomDataShiftXYZ = _mm256_set1_ps(numPBits > 0 ? static_cast<F32>(1 << (componentBits - (8 - componentBits - 1))) : static_cast<F32>(1 << (componentBits - (8 - componentBits))));
-	const F32x8 bottomDataShiftAlpha = _mm256_set1_ps(numPBits > 0 ? static_cast<F32>(1 << (alphaBits - (8 - alphaBits - 1))) : static_cast<F32>(1 << (alphaBits - (8 - alphaBits))));
-	Endpoint bottomDataShift; if constexpr (alphaBits > 0) { bottomDataShift = Endpoint{ bottomDataShiftXYZ, bottomDataShiftXYZ, bottomDataShiftXYZ, bottomDataShiftAlpha }; } else { bottomDataShift = splat<Endpoint>(bottomDataShiftXYZ); }
+	Endpoint bottomDataShift;
+	if constexpr (alphaBits > 0) {
+		const F32x8 bottomDataShiftAlpha = _mm256_set1_ps(numPBits > 0 ? static_cast<F32>(1 << (alphaBits - (8 - alphaBits - 1))) : static_cast<F32>(1 << (alphaBits - (8 - alphaBits))));
+		bottomDataShift = Endpoint{ bottomDataShiftXYZ, bottomDataShiftXYZ, bottomDataShiftXYZ, bottomDataShiftAlpha };
+	} else {
+		bottomDataShift = splat<Endpoint>(bottomDataShiftXYZ);
+	}
 	Endpoint invBottomDataShift = rcp(bottomDataShift);
 
 
@@ -1119,8 +1129,8 @@ F32x8 quantize_bc7_endpointsx8(V4Fx8 pixels[16], Endpoint endpoints[partitions *
 				// (index * 68 + 8) >> 4, same as above but for bc7InterpolationFactors4
 				interpolationFactor = _mm256_srli_epi32(_mm256_add_epi32(_mm256_mullo_epi32(index, _mm256_set1_epi32(68)), _mm256_set1_epi32(8)), 4);
 			}
-			U64x4 indicesLow = _mm256_slli_epi64(_mm256_cvtepi32_epi64(_mm256_extracti128_si256(index, 0)), pixel * indexResolution);
-			U64x4 indicesHigh = _mm256_slli_epi64(_mm256_cvtepi32_epi64(_mm256_extracti128_si256(index, 1)), pixel * indexResolution);
+			U64x4 indicesLow = _mm256_slli_epi64(_mm256_cvtepi32_epi64(_mm256_extracti128_si256(index, 0)), I32(pixel * indexResolution));
+			U64x4 indicesHigh = _mm256_slli_epi64(_mm256_cvtepi32_epi64(_mm256_extracti128_si256(index, 1)), I32(pixel * indexResolution));
 			indices[partition][0] = _mm256_or_si256(indices[partition][0], indicesLow);
 			indices[partition][1] = _mm256_or_si256(indices[partition][1], indicesHigh);
 
@@ -1158,7 +1168,7 @@ void write_bc7_block_mode0(BC7Block& block, U32 bestPartition, V3F bestEndpoints
 	// mode 0
 	block.data[0] = 0b1;
 	block.data[1] = 0;
-	block.data[0] |= bestPartition << 1;
+	block.data[0] |= U64(bestPartition) << 1;
 	U64 endpointReds = 0;
 	U64 endpointGreens = 0;
 	U64 endpointBlues = 0;
@@ -1167,10 +1177,10 @@ void write_bc7_block_mode0(BC7Block& block, U32 bestPartition, V3F bestEndpoints
 		U32 r = static_cast<U32>(bestEndpoints[endpoint].x);
 		U32 g = static_cast<U32>(bestEndpoints[endpoint].y);
 		U32 b = static_cast<U32>(bestEndpoints[endpoint].z);
-		endpointReds |= ((r >> 4) & 0b1111) << (endpoint * 4);
-		endpointGreens |= ((g >> 4) & 0b1111) << (endpoint * 4);
-		endpointBlues |= ((b >> 4) & 0b1111) << (endpoint * 4);
-		endpointPBits |= ((r >> 3) & 1) << endpoint;
+		endpointReds |= U64((r >> 4) & 0b1111) << (endpoint * 4);
+		endpointGreens |= U64((g >> 4) & 0b1111) << (endpoint * 4);
+		endpointBlues |= U64((b >> 4) & 0b1111) << (endpoint * 4);
+		endpointPBits |= U64((r >> 3) & 1) << endpoint;
 	}
 	block.data[0] |= endpointReds << 5;
 	block.data[0] |= endpointGreens << 29;
@@ -1202,7 +1212,7 @@ void write_bc7_block_mode1(BC7Block& block, U32 bestPartition, V3F bestEndpoints
 	// mode 1
 	block.data[0] = 0b10;
 	block.data[1] = 0;
-	block.data[0] |= bestPartition << 2;
+	block.data[0] |= U64(bestPartition) << 2;
 	U64 endpointReds = 0;
 	U64 endpointGreens = 0;
 	U64 endpointBlues = 0;
@@ -1211,10 +1221,10 @@ void write_bc7_block_mode1(BC7Block& block, U32 bestPartition, V3F bestEndpoints
 		U32 r = static_cast<U32>(bestEndpoints[endpoint].x);
 		U32 g = static_cast<U32>(bestEndpoints[endpoint].y);
 		U32 b = static_cast<U32>(bestEndpoints[endpoint].z);
-		endpointReds |= ((r >> 2) & 0b111111) << (endpoint * 6);
-		endpointGreens |= ((g >> 2) & 0b111111) << (endpoint * 6);
-		endpointBlues |= ((b >> 2) & 0b111111) << (endpoint * 6);
-		endpointPBits |= ((r >> 1) & 1) << (endpoint >> 1);
+		endpointReds |= U64((r >> 2) & 0b111111) << (endpoint * 6);
+		endpointGreens |= U64((g >> 2) & 0b111111) << (endpoint * 6);
+		endpointBlues |= U64((b >> 2) & 0b111111) << (endpoint * 6);
+		endpointPBits |= U64((r >> 1) & 1) << (endpoint >> 1);
 	}
 	block.data[0] |= endpointReds << 8;
 	block.data[0] |= endpointGreens << 32;
@@ -1277,11 +1287,13 @@ void check_flip_indices(Endpoint endpoints[partitions * 2], U64x4 outIndices[2],
 	constexpr U32 highBitCheck = indexMask >> 1;
 	const U32x4 highBitCheck4 = _mm_set1_epi32(highBitCheck);
 
-	U32x8 shouldFlip[partitions];
+	U32x8 shouldFlip[3];
 	// (indices & indexMask) > highBitCheck
 	U32x4 cmpA = _mm_cmpgt_epi32(cvt_int64x4_int32x4(_mm256_and_si256(indices[0], indexMask4)), highBitCheck4);
 	U32x4 cmpB = _mm_cmpgt_epi32(cvt_int64x4_int32x4(_mm256_and_si256(indices[1], indexMask4)), highBitCheck4);
 	shouldFlip[0] = _mm256_inserti128_si256(_mm256_castsi128_si256(cmpA), cmpB, 1);
+	shouldFlip[1] = _mm256_undefined_si256();
+	shouldFlip[2] = _mm256_undefined_si256();
 
 	if constexpr (partitions == 2) {
 		//shouldFlip[1] = ((indices >> (bc7PartitionTable2Anchors2ndSubset[partitionTable] * indexResolution)) & indexMask) > highBitCheck;
@@ -1342,21 +1354,17 @@ void check_flip_indices(Endpoint endpoints[partitions * 2], U64x4 outIndices[2],
 		// equals1 ? shouldFlip[1] : 
 		// equals2 ? shouldFlip[2] : 
 		// zero
-		U32x8 shouldFlipMask = _mm256_castps_si256(
-			_mm256_blendv_ps(
-				_mm256_blendv_ps(
-					_mm256_blendv_ps(
-						_mm256_setzero_ps(),
-						_mm256_castsi256_ps(shouldFlip[2]), equals2),
-					_mm256_castsi256_ps(shouldFlip[1]), equals1),
-				_mm256_castsi256_ps(shouldFlip[0]), equals0));
+		F32x8 shouldFlipMask = _mm256_blendv_ps(_mm256_setzero_ps(), _mm256_castsi256_ps(shouldFlip[2]), equals2);
+		shouldFlipMask = _mm256_blendv_ps(shouldFlipMask, _mm256_castsi256_ps(shouldFlip[1]), equals1);
+		shouldFlipMask = _mm256_blendv_ps(shouldFlipMask, _mm256_castsi256_ps(shouldFlip[0]), equals0);
+		U32x8 shouldFlipMaskInt = _mm256_castps_si256(shouldFlipMask);
 
 		// If shouldFlipMask or flipMask is 0, the index won't be flipped
-		U64x4 flipMask = _mm256_set1_epi64x(indexMask << (i * indexResolution));
+		U64x4 flipMask = _mm256_set1_epi64x(I64(indexMask << (i * indexResolution)));
 		// indices[0] ^= flipMask & shouldFlipMask[0-3]
-		indices[0] = _mm256_xor_si256(indices[0], _mm256_and_si256(flipMask, _mm256_cvtepi32_epi64(_mm256_castsi256_si128(shouldFlipMask))));
+		indices[0] = _mm256_xor_si256(indices[0], _mm256_and_si256(flipMask, _mm256_cvtepi32_epi64(_mm256_castsi256_si128(shouldFlipMaskInt))));
 		// indices[1] ^= flipMask & shouldFlipMask[4-7]
-		indices[1] = _mm256_xor_si256(indices[1], _mm256_and_si256(flipMask, _mm256_cvtepi32_epi64(_mm256_extracti128_si256(shouldFlipMask, 1))));
+		indices[1] = _mm256_xor_si256(indices[1], _mm256_and_si256(flipMask, _mm256_cvtepi32_epi64(_mm256_extracti128_si256(shouldFlipMaskInt, 1))));
 	}
 	outIndices[0] = indices[0];
 	outIndices[1] = indices[1];
@@ -1388,9 +1396,9 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 	U32 indexBits = bc7IndexBits[mode];
 	U32 indexBits2 = bc7SecondaryIndexBits[mode];
 
-	block.data[0] = 1 << mode;
+	block.data[0] = 1ull << mode;
 	block.data[1] = 0;
-	block.data[0] |= bestPartition << (mode + 1);
+	block.data[0] |= U64(bestPartition) << (mode + 1);
 
 	U32 dataOffset = mode + 1 + partitionBits;
 	block.data[0] |= rotation << dataOffset;
@@ -1401,9 +1409,9 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 	U64 endpointRGBA8[4]{};
 	U32 pBits = 0;
 
-	U64 colorMask = (1 << colorBits) - 1;
-	U64 alphaMask = (1 << alphaBits) - 1;
-	U64 cutoffBits = 8 - colorBits;
+	U64 colorMask = (1u << colorBits) - 1u;
+	U64 alphaMask = (1u << alphaBits) - 1u;
+	U64 cutoffBits = 8u - colorBits;
 	U64 alphaCutoffBits = 8 - alphaBits;
 	for (U32 endpoint = 0; endpoint < (numSubsets * 2); endpoint++) {
 		U32 r = static_cast<U32>(bestEndpoints[endpoint].x);
@@ -1421,7 +1429,7 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 	}
 
 	U32 blockIndex = 0;
-	for (U32 i = 0; i < (3 + (alphaBits > 0)); i++) {
+	for (U32 i = 0; i < (3u + (alphaBits > 0)); i++) {
 		U32 dataSize = ((i == 3) ? alphaBits : colorBits) * numSubsets * 2;
 		write_to_bc7_block(block, endpointRGBA8[i], dataSize, blockIndex, dataOffset);
 	}
@@ -1437,7 +1445,7 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 
 	U64 encodedIndices = 0;
 	U32 shift = 0;
-	U32 indexMask = (1 << indexBits) - 1;
+	U32 indexMask = (1u << indexBits) - 1u;
 	for (U32 i = 0; i < 16; i++) {
 		encodedIndices |= ((bestIndices >> (i * indexBits)) & indexMask) << shift;
 		if (i == 0 || i == anchor2nd || i == anchor3rd) {
@@ -1452,7 +1460,7 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 	if (indexBits2) {
 		encodedIndices = 0;
 		shift = 0;
-		indexMask = (1 << indexBits2) - 1;
+		indexMask = (1u << indexBits2) - 1u;
 		for (U32 i = 0; i < 16; i++) {
 			encodedIndices |= ((bestIndices2 >> (i * indexBits2)) & indexMask) << shift;
 			if (i == 0 || i == anchor2nd || i == anchor3rd) {
@@ -1466,20 +1474,20 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 }
 
 FINLINE void write_to_bc7_blockx8(BC7Blockx4 blocks[2], U64x4& data0, U64x4& data1, U32 dataSize, U32& blockIndex, U32& dataOffset) {
-	blocks[0].data[blockIndex] = _mm256_or_si256(blocks[0].data[blockIndex], _mm256_slli_epi64(data0, dataOffset));
-	blocks[1].data[blockIndex] = _mm256_or_si256(blocks[1].data[blockIndex], _mm256_slli_epi64(data1, dataOffset));
+	blocks[0].data[blockIndex] = _mm256_or_si256(blocks[0].data[blockIndex], _mm256_slli_epi64(data0, I32(dataOffset)));
+	blocks[1].data[blockIndex] = _mm256_or_si256(blocks[1].data[blockIndex], _mm256_slli_epi64(data1, I32(dataOffset)));
 	dataOffset += dataSize;
 	if (dataOffset >= 64) {
 		// This branch won't be hit more than once
 		blockIndex = 1;
 		dataOffset -= 64;
-		blocks[0].data[1] = _mm256_or_si256(blocks[0].data[1], _mm256_srli_epi64(data0, dataSize - dataOffset));
-		blocks[1].data[1] = _mm256_or_si256(blocks[1].data[1], _mm256_srli_epi64(data1, dataSize - dataOffset));
+		blocks[0].data[1] = _mm256_or_si256(blocks[0].data[1], _mm256_srli_epi64(data0, I32(dataSize - dataOffset)));
+		blocks[1].data[1] = _mm256_or_si256(blocks[1].data[1], _mm256_srli_epi64(data1, I32(dataSize - dataOffset)));
 	}
 }
 
 FINLINE void encode_bc7_block_indicesx8(BC7Blockx4 blocks[2], U64x4 bestIndices[2], U32 indexBits, U32 numSubsets, U32x8& anchor2nd, U32x8& anchor3rd, U32& blockIndex, U32& dataOffset) {
-	U32x8 indexBitsx8 = _mm256_set1_epi32(indexBits);
+	U32x8 indexBitsx8 = _mm256_set1_epi32(I32(indexBits));
 
 	U64x4 encodedIndices[2]{ _mm256_setzero_si256(), _mm256_setzero_si256() };
 	U32x8 shift = _mm256_setzero_si256();
@@ -1488,11 +1496,11 @@ FINLINE void encode_bc7_block_indicesx8(BC7Blockx4 blocks[2], U64x4 bestIndices[
 		// encodedIndices |= ((bestIndices >> (i * indexBits)) & indexMask) << shift;
 		U64x4 shiftLow = _mm256_cvtepu32_epi64(_mm256_castsi256_si128(shift));
 		U64x4 shiftHigh = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(shift, 1));
-		encodedIndices[0] = _mm256_or_si256(encodedIndices[0], _mm256_sllv_epi64(_mm256_and_si256(_mm256_srli_epi64(bestIndices[0], i * indexBits), indexMask), shiftLow));
-		encodedIndices[1] = _mm256_or_si256(encodedIndices[1], _mm256_sllv_epi64(_mm256_and_si256(_mm256_srli_epi64(bestIndices[1], i * indexBits), indexMask), shiftHigh));
+		encodedIndices[0] = _mm256_or_si256(encodedIndices[0], _mm256_sllv_epi64(_mm256_and_si256(_mm256_srli_epi64(bestIndices[0], I32(i * indexBits)), indexMask), shiftLow));
+		encodedIndices[1] = _mm256_or_si256(encodedIndices[1], _mm256_sllv_epi64(_mm256_and_si256(_mm256_srli_epi64(bestIndices[1], I32(i * indexBits)), indexMask), shiftHigh));
 
 		// Update shift
-		U32x8 ix8 = _mm256_set1_epi32(i);
+		U32x8 ix8 = _mm256_set1_epi32(I32(i));
 		U32x8 cmp1st = _mm256_cmpeq_epi32(ix8, _mm256_setzero_si256());
 		U32x8 cmp2nd = _mm256_cmpeq_epi32(ix8, anchor2nd);
 		U32x8 cmp3rd = _mm256_cmpeq_epi32(ix8, anchor3rd);
@@ -1506,17 +1514,17 @@ FINLINE void encode_bc7_block_indicesx8(BC7Blockx4 blocks[2], U64x4 bestIndices[
 
 template<typename Endpoint, U32 mode>
 void write_bc7_blockx8(BC7Blockx4 blocks[2], U32x8 bestPartition, Endpoint bestEndpoints[6], U64x4 bestIndices[2], U64x4 bestIndices2[2] = nullptr, U32x8 indexSelection = _mm256_setzero_si256(), U32x8 rotation = _mm256_setzero_si256()) {
-	const U32 numSubsets = bc7NumSubsets[mode];
-	const U32 partitionBits = bc7PartitionBitCounts[mode];
-	const U32 rotationBits = bc7RotationBitCounts[mode];
-	const U32 indexSelectionBit = bc7IndexSelectionBit[mode];
-	const U32 colorBits = bc7ColorBits[mode];
-	const U32 alphaBits = bc7AlphaBits[mode];
-	const U32 endpointPBits = bc7EndpointPBits[mode];
-	const U32 sharedPBits = bc7SharedPBits[mode];
-	const U32 numPBits = (endpointPBits << 1) + sharedPBits;
-	const U32 indexBits = bc7IndexBits[mode];
-	const U32 indexBits2 = bc7SecondaryIndexBits[mode];
+	constexpr U32 numSubsets = bc7NumSubsets[mode];
+	constexpr U32 partitionBits = bc7PartitionBitCounts[mode];
+	constexpr U32 rotationBits = bc7RotationBitCounts[mode];
+	constexpr U32 indexSelectionBit = bc7IndexSelectionBit[mode];
+	constexpr U32 colorBits = bc7ColorBits[mode];
+	constexpr U32 alphaBits = bc7AlphaBits[mode];
+	constexpr U32 endpointPBits = bc7EndpointPBits[mode];
+	constexpr U32 sharedPBits = bc7SharedPBits[mode];
+	constexpr U32 numPBits = (endpointPBits << 1) + sharedPBits;
+	constexpr U32 indexBits = bc7IndexBits[mode];
+	constexpr U32 indexBits2 = bc7SecondaryIndexBits[mode];
 
 	// Write out the first easy parts: mode, partition, rotation (if present), index selection (if present)
 	U32x8 startData = _mm256_or_si256(_mm256_or_si256(_mm256_or_si256(
@@ -1545,21 +1553,27 @@ void write_bc7_blockx8(BC7Blockx4 blocks[2], U32x8 bestPartition, Endpoint bestE
 		U32x8 r = _mm256_cvtps_epi32(bestEndpoints[endpoint].x);
 		U32x8 g = _mm256_cvtps_epi32(bestEndpoints[endpoint].y);
 		U32x8 b = _mm256_cvtps_epi32(bestEndpoints[endpoint].z);
-		endpointRGBA8[0] = _mm256_or_si256(endpointRGBA8[0], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(r, cutoffBits), colorMask), endpoint * colorBits));
-		endpointRGBA8[1] = _mm256_or_si256(endpointRGBA8[1], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(g, cutoffBits), colorMask), endpoint * colorBits));
-		endpointRGBA8[2] = _mm256_or_si256(endpointRGBA8[2], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(b, cutoffBits), colorMask), endpoint * colorBits));
+		endpointRGBA8[0] = _mm256_or_si256(endpointRGBA8[0], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(r, I32(cutoffBits)), colorMask), I32(endpoint * colorBits)));
+		endpointRGBA8[1] = _mm256_or_si256(endpointRGBA8[1], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(g, I32(cutoffBits)), colorMask), I32(endpoint * colorBits)));
+		endpointRGBA8[2] = _mm256_or_si256(endpointRGBA8[2], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(b, I32(cutoffBits)), colorMask), I32(endpoint * colorBits)));
 		if constexpr (alphaBits != 0) {
 			U32x8 a = _mm256_cvtps_epi32(bestEndpoints[endpoint].w);
-			endpointRGBA8[3] = _mm256_or_si256(endpointRGBA8[3], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(a, alphaCutoffBits), alphaMask), endpoint * alphaBits));
+			endpointRGBA8[3] = _mm256_or_si256(endpointRGBA8[3], _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(a, I32(alphaCutoffBits)), alphaMask), I32(endpoint * alphaBits)));
 		}
-		if (numPBits == 2 || endpoint & numPBits) {
+		bool shouldSetPBits = false;
+		if constexpr (numPBits == 2) {
+			shouldSetPBits = true;
+		}
+		if constexpr (numPBits == 1) {
+			shouldSetPBits = endpoint & 1;
+		}
+		if (shouldSetPBits) {
 			U32 pShift = numPBits == 2 ? endpoint : endpoint >> 1;
-			pBits = _mm256_or_si256(pBits, _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(r, cutoffBits - 1), _mm256_set1_epi32(1)), pShift));
+			pBits = _mm256_or_si256(pBits, _mm256_slli_epi32(_mm256_and_si256(_mm256_srli_epi32(r, I32(cutoffBits - 1)), _mm256_set1_epi32(1)), I32(pShift)));
 		}
 	}
 
 	// Write the endpoint data
-	U32 colorFinalDataIndex = 0;
 	for (U32 i = 0; i < (3 + (alphaBits > 0)); i++) {
 		U32 componentSize = ((i == 3) ? alphaBits : colorBits) * numSubsets * 2;
 		U64x4 endpointCompLow = _mm256_cvtepu32_epi64(_mm256_castsi256_si128(endpointRGBA8[i]));
@@ -1704,7 +1718,7 @@ F32x8 compress_bc7_block_mode01237x8(V4Fx8 pixels[16], BC7Blockx4 blocks[2], V3F
 	U64x4 bestIndices[2]{};
 	// It might be much better for speed to try to find the best pattern or several patterns first with a basic distance from points to line rather than checking them all.
 	constexpr const BC7PartitionTable* partitionTables = modePartitions == 2 ? bc7PartitionTable2Subsets : bc7PartitionTable3Subsets;
-	constexpr U32 partitionTablesToCheck = 1 << bc7PartitionBitCounts[mode];
+	constexpr U32 partitionTablesToCheck = 1u << bc7PartitionBitCounts[mode];
 	for (U32 partitionTable = 0; partitionTable < partitionTablesToCheck; partitionTable++) {
 		const BC7PartitionTable& table = partitionTables[partitionTable];
 		// Original endpoints can be min and max
@@ -1746,7 +1760,7 @@ F32x8 compress_bc7_block_mode01237x8(V4Fx8 pixels[16], BC7Blockx4 blocks[2], V3F
 
 		// Check if the errors are the current best, and write out the best values
 		F32x8 errorLessThan = _mm256_cmp_ps(error, bestError, _CMP_LT_OQ);
-		U32x8 partitionTablex8 = _mm256_set1_epi32(partitionTable);
+		U32x8 partitionTablex8 = _mm256_set1_epi32(I32(partitionTable));
 		for (U32 i = 0; i < (modePartitions * 2); i++) {
 			bestEndpoints[i] = blend(bestEndpoints[i], endpoints[i], errorLessThan);
 		}
@@ -2015,7 +2029,6 @@ F32x8 compress_bc7_block_mode6x8(V4Fx8 pixels[16], BC7Blockx4 blocks[2], V3Fx8 m
 	}
 	constexpr U32 mode6Partitions = 1;
 	constexpr U32 mode6ComponentBits = 7;
-	constexpr U32 mode6ComponentAlphaBits = 7;
 	constexpr U32 mode6PBitsPerParition = 2;
 	constexpr U32 mode6IndexResolution = 4;
 
@@ -2101,9 +2114,9 @@ F32 compress_bc7_block_mode1(V4F pixels[16], BC7Block& block, V3F mins[numPartit
 
 	// Check each possible partition and find the one with lowest error
 	F32 bestError = F32_LARGE;
-	U32 bestPartition;
-	V4F bestEndpoints[4];
-	U64 bestIndices;
+	U32 bestPartition = 0;
+	V4F bestEndpoints[4]{};
+	U64 bestIndices = 0;
 	// It might be much better for speed to try to find the best pattern or several patterns first with a basic distance from points to line rather than checking them all.
 	for (U32 partitionTable = 0; partitionTable < numPartitionTablesPerSubset; partitionTable++) {
 		const BC7PartitionTable& table = bc7PartitionTable2Subsets[partitionTable];
@@ -2741,16 +2754,15 @@ BC7Block* compress_bc7(MemoryArena& resultArena, RGBA8* image, U32 width, U32 he
 	MEMORY_ARENA_FRAME(scratchArena) {
 		U32 simdBlockCount = (numBlocks + 7) / 8 + 1;
 		// YMM align to 32
-		U64 alignment = 32;
+		U32 alignment = 32;
 		V4Fx8* pixelBlocks = scratchArena.alloc_aligned<V4Fx8>(16 * simdBlockCount, alignment);
 		// Add 7 extra blocks so we can read over the edge safely
 		U32* blockIndices = scratchArena.alloc<U32>(numBlocks + 7);
 
 		U32 opaqueIndex = 0;
-		U32 transparentIndex = simdBlockCount - 1;
 		for (U32 y = 0; y < blockHeight; y++) {
 			for (U32 x = 0; x < blockWidth; x++) {
-				BCCommon::fill_pixel_blockx8(image, (F32*)pixelBlocks, opaqueIndex, x, y, width, height);
+				BCCommon::fill_pixel_blockx8(image, (F32*)pixelBlocks, I32(opaqueIndex), x, y, width, height);
 				blockIndices[opaqueIndex] = y * blockWidth + x;
 				opaqueIndex++;
 			}
@@ -2771,6 +2783,9 @@ BC7Block* compress_bc7(MemoryArena& resultArena, RGBA8* image, U32 width, U32 he
 			ranges[i].blockIndices = blockIndices;
 			ranges[i].opaqueIndex = opaqueIndex;
 			threads[i] = CreateThread(NULL, 512 * KILOBYTE, bc7_avx_compress_block_range, &ranges[i], 0, NULL);
+			if (!threads[i]) {
+				abort("Failed to create thread"a);
+			}
 		}
 		WaitForMultipleObjects(workerThreadCount, threads, TRUE, INFINITE);
 		for (U32 i = 0; i < workerThreadCount; i++) {
@@ -2797,13 +2812,13 @@ void decompress_bc7_mode0(BC7Block& block, RGBA8 pixels[16]) {
 	U32 partitionSelection = (block.data[0] >> 1) & 0b1111;
 	// 3 partitions
 	const BC7PartitionTable& partition = bc7PartitionTable3Subsets[partitionSelection];
-	U8 anchor2nd = bc7PartitionTable3Anchors2ndSubset[partitionSelection];
-	U8 anchor3rd = bc7PartitionTable3Anchors3rdSubset[partitionSelection];
+	U32 anchor2nd = bc7PartitionTable3Anchors2ndSubset[partitionSelection];
+	U32 anchor3rd = bc7PartitionTable3Anchors3rdSubset[partitionSelection];
 
-	U32 endpointReds = block.data[0] >> 5;
-	U32 endpointGreens = block.data[0] >> 29;
-	U32 endpointBlues = (block.data[0] >> 53) | (block.data[1] << (64 - 53));
-	U32 endpointPBits = block.data[1] >> 13;
+	U32 endpointReds = U32(block.data[0] >> 5);
+	U32 endpointGreens = U32(block.data[0] >> 29);
+	U32 endpointBlues = U32((block.data[0] >> 53) | (block.data[1] << (64 - 53)));
+	U32 endpointPBits = U32(block.data[1] >> 13);
 	// Mode 0 has 3 endpoints
 	RGB8 endpoints[6];
 	for (U32 i = 0; i < 6; i++) {
@@ -2848,12 +2863,12 @@ void decompress_bc7_mode1(BC7Block& block, RGBA8 pixels[16]) {
 	U32 partitionSelection = (block.data[0] >> 2) & 0b111111;
 	// 2 partitions
 	const BC7PartitionTable& partition = bc7PartitionTable2Subsets[partitionSelection];
-	U8 anchor2nd = bc7PartitionTable2Anchors2ndSubset[partitionSelection];
+	U32 anchor2nd = bc7PartitionTable2Anchors2ndSubset[partitionSelection];
 
-	U32 endpointReds = block.data[0] >> 8;
-	U32 endpointGreens = block.data[0] >> 32;
-	U32 endpointBlues = (block.data[0] >> 56) | (block.data[1] << (64 - 56));
-	U32 endpointPBits = block.data[1] >> 16;
+	U32 endpointReds = U32(block.data[0] >> 8);
+	U32 endpointGreens = U32(block.data[0] >> 32);
+	U32 endpointBlues = U32((block.data[0] >> 56) | (block.data[1] << (64 - 56)));
+	U32 endpointPBits = U32(block.data[1] >> 16);
 	// Mode 1 has 2 endpoints
 	RGB8 endpoints[4];
 	for (U32 i = 0; i < 4; i++) {
@@ -2898,22 +2913,22 @@ void decompress_bc7_mode2(BC7Block& block, RGBA8 pixels[16]) {
 	U32 partitionSelection = (block.data[0] >> 3) & 0b111111;
 	// 3 partitions
 	const BC7PartitionTable& partition = bc7PartitionTable3Subsets[partitionSelection];
-	U8 anchor2nd = bc7PartitionTable3Anchors2ndSubset[partitionSelection];
-	U8 anchor3rd = bc7PartitionTable3Anchors3rdSubset[partitionSelection];
+	U32 anchor2nd = bc7PartitionTable3Anchors2ndSubset[partitionSelection];
+	U32 anchor3rd = bc7PartitionTable3Anchors3rdSubset[partitionSelection];
 
-	U32 endpointReds = block.data[0] >> 9;
-	U32 endpointGreens = (block.data[0] >> 39) | (block.data[1] << (64 - 39));
-	U32 endpointBlues = block.data[1] >> 5;
+	U32 endpointReds = U32(block.data[0] >> 9);
+	U32 endpointGreens = U32((block.data[0] >> 39) | (block.data[1] << (64 - 39)));
+	U32 endpointBlues = U32(block.data[1] >> 5);
 	// Mode 2 has 3 endpoints
 	RGB8 endpoints[6];
 	for (U32 i = 0; i < 6; i++) {
 		// 5 bit colors
-		endpoints[i].r = (endpointReds >> (i * 5)) & 0b11111;
-		endpoints[i].r = (endpoints[i].r << 3) | (endpoints[i].r >> 2);
-		endpoints[i].g = (endpointGreens >> (i * 5)) & 0b11111;
-		endpoints[i].g = (endpoints[i].g << 3) | (endpoints[i].g >> 2);
-		endpoints[i].b = (endpointBlues >> (i * 5)) & 0b11111;
-		endpoints[i].b = (endpoints[i].b << 3) | (endpoints[i].b >> 2);
+		endpoints[i].r = Byte((endpointReds >> (i * 5)) & 0b11111);
+		endpoints[i].r = Byte((endpoints[i].r << 3) | (endpoints[i].r >> 2));
+		endpoints[i].g = Byte((endpointGreens >> (i * 5)) & 0b11111);
+		endpoints[i].g = Byte((endpoints[i].g << 3) | (endpoints[i].g >> 2));
+		endpoints[i].b = Byte((endpointBlues >> (i * 5)) & 0b11111);
+		endpoints[i].b = Byte((endpoints[i].b << 3) | (endpoints[i].b >> 2));
 	}
 
 	U64 indices = block.data[1] >> 35;
@@ -2947,12 +2962,12 @@ void decompress_bc7_mode3(BC7Block& block, RGBA8 pixels[16]) {
 	U32 partitionSelection = (block.data[0] >> 4) & 0b111111;
 	// 2 partitions
 	const BC7PartitionTable& partition = bc7PartitionTable2Subsets[partitionSelection];
-	U8 anchor2nd = bc7PartitionTable2Anchors2ndSubset[partitionSelection];
+	U32 anchor2nd = bc7PartitionTable2Anchors2ndSubset[partitionSelection];
 
-	U32 endpointReds = block.data[0] >> 10;
-	U32 endpointGreens = (block.data[0] >> 38) | (block.data[1] << (64 - 38));
-	U32 endpointBlues = block.data[1] >> 2;
-	U32 endpointPBits = block.data[1] >> 30;
+	U32 endpointReds = U32(block.data[0] >> 10);
+	U32 endpointGreens = U32((block.data[0] >> 38) | (block.data[1] << (64 - 38)));
+	U32 endpointBlues = U32(block.data[1] >> 2);
+	U32 endpointPBits = U32(block.data[1] >> 30);
 	// Mode 3 has 2 endpoints
 	RGB8 endpoints[4];
 	for (U32 i = 0; i < 4; i++) {
@@ -3064,7 +3079,6 @@ void decompress_bc7_mode4(BC7Block& block, RGBA8 pixels[16]) {
 
 void decompress_bc7_mode5(BC7Block& block, RGBA8 pixels[16]) {
 	U32 rotationBits = (block.data[0] >> 6) & 0b11;
-	U32 indexSelection = (block.data[0] >> 7) & 1;
 
 	RGBA8 endpoints[2];
 	// 8 bit alpha, can extract directly
@@ -3112,7 +3126,7 @@ void decompress_bc7_mode5(BC7Block& block, RGBA8 pixels[16]) {
 }
 
 void decompress_bc7_mode6(BC7Block& block, RGBA8 pixels[16]) {
-	U32 pBits = (block.data[0] >> 63) | (block.data[1] << 1);
+	U32 pBits = U32((block.data[0] >> 63) | (block.data[1] << 1));
 	// Mode 6 has 1 endpoint
 	RGBA8 endpoints[2];
 	for (U32 i = 0; i < 2; i++) {
@@ -3157,13 +3171,13 @@ void decompress_bc7_mode7(BC7Block& block, RGBA8 pixels[16]) {
 	U32 partitionSelection = (block.data[0] >> 8) & 0b111111;
 	// 2 partitions
 	const BC7PartitionTable& partition = bc7PartitionTable2Subsets[partitionSelection];
-	U8 anchor2nd = bc7PartitionTable2Anchors2ndSubset[partitionSelection];
+	U32 anchor2nd = bc7PartitionTable2Anchors2ndSubset[partitionSelection];
 
-	U32 endpointReds = block.data[0] >> 14;
-	U32 endpointGreens = block.data[0] >> 34;
-	U32 endpointBlues = (block.data[0] >> 54) | (block.data[1] << (64 - 54));
-	U32 endpointAlphas = block.data[1] >> 10;
-	U32 endpointPBits = block.data[1] >> 30;
+	U32 endpointReds = U32(block.data[0] >> 14);
+	U32 endpointGreens = U32(block.data[0] >> 34);
+	U32 endpointBlues = U32((block.data[0] >> 54) | (block.data[1] << (64 - 54)));
+	U32 endpointAlphas = U32(block.data[1] >> 10);
+	U32 endpointPBits = U32(block.data[1] >> 30);
 	// Mode 7 has 2 endpoints
 	RGBA8 endpoints[4];
 	for (U32 i = 0; i < 4; i++) {

@@ -420,7 +420,7 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 			}
 			CloseHandle(timestampFile);
 		} else {
-			if (timestampFile = CreateFileA(stracat(stackArena, outputDir, "_timestamp\0"a).str, GENERIC_WRITE | FILE_WRITE_ATTRIBUTES, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)) {
+			if ((timestampFile = CreateFileA(stracat(stackArena, outputDir, "_timestamp\0"a).str, GENERIC_WRITE | FILE_WRITE_ATTRIBUTES, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL))) {
 				CloseHandle(timestampFile);
 			}
 		}

@@ -64,7 +64,7 @@ StrA* wrap_text(MemoryArena& arena, U32* stringCountOut, U32** originalLineOffse
 		char c = str.str[i];
 		if (c == '\n') {
 			*writePtr++ = '\n';
-			StrA nextStr{ nextString, writePtr - nextString };
+			StrA nextStr{ nextString, U64(writePtr - nextString) };
 			arena.stackPtr += nextStr.length;
 			result.push_back(nextStr);
 			originalLineOffsets.push_back(lastLineOffset);
@@ -75,7 +75,7 @@ StrA* wrap_text(MemoryArena& arena, U32* stringCountOut, U32** originalLineOffse
 		}
 		current += characterStep;
 		if (current > width) {
-			StrA nextStr{ nextString, writePtr - nextString };
+			StrA nextStr{ nextString, U64(writePtr - nextString) };
 			arena.stackPtr += nextStr.length;
 			result.push_back(nextStr);
 			originalLineOffsets.push_back(lastLineOffset);
@@ -96,7 +96,7 @@ StrA* wrap_text(MemoryArena& arena, U32* stringCountOut, U32** originalLineOffse
 				speculativeWordSize += characterStep;
 			}
 			if (speculativeWordSize > width) {
-				StrA nextStr{ nextString, writePtr - nextString };
+				StrA nextStr{ nextString, U64(writePtr - nextString) };
 				arena.stackPtr += nextStr.length;
 				result.push_back(nextStr);
 				originalLineOffsets.push_back(lastLineOffset);
@@ -106,7 +106,7 @@ StrA* wrap_text(MemoryArena& arena, U32* stringCountOut, U32** originalLineOffse
 			}
 		}
 	}
-	StrA lastString{ nextString, writePtr - nextString };
+	StrA lastString{ nextString, U64(writePtr - nextString) };
 	arena.stackPtr += lastString.length;
 	result.push_back(lastString);
 	originalLineOffsets.push_back(lastLineOffset);

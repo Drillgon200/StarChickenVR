@@ -318,10 +318,10 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 		U32 mipWidth = width;
 		U32 mipHeight = width;
 		for (U32 mipLevel = 0; mipLevel < mipLevels; mipLevel++) {
-			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, width, height, isCube ? 6 : 1, TEXTURE_FORMAT_TEXEL_SIZE[format], mipLevel);
-			data = (Byte*)data + width * height * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6 : 1);
-			width = max(width / 2u, 1u);
-			height = max(height / 2u, 1u);
+			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, mipWidth, mipHeight, isCube ? 6 : 1, TEXTURE_FORMAT_TEXEL_SIZE[format], mipLevel);
+			data = (Byte*)data + mipWidth * mipHeight * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6 : 1);
+			mipWidth = max(mipWidth / 2u, 1u);
+			mipHeight = max(mipHeight / 2u, 1u);
 		}
 		VK::img_barrier(stagingCmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_NONE_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	}
@@ -482,9 +482,9 @@ Material basicWhiteMaterial;
 
 void material_updated(const Material& mat) {
 	GPUMaterial gpuMat{};
-	gpuMat.baseColorIdx = mat.baseColor ? mat.baseColor->index : -1;
-	gpuMat.normalMapIdx = mat.normalMap ? mat.normalMap->index : -1;
-	gpuMat.armMapIdx = mat.armMap ? mat.armMap->index : -1;
+	gpuMat.baseColorIdx = mat.baseColor ? I32(mat.baseColor->index) : -1;
+	gpuMat.normalMapIdx = mat.normalMap ? I32(mat.normalMap->index) : -1;
+	gpuMat.armMapIdx = mat.armMap ? I32(mat.armMap->index) : -1;
 	gpuMat.packedBaseColor = pack_unorm4x8(mat.color);
 	gpuMat.packedARMI = pack_unorm4x8(V4F{ mat.ambientOcclusion, mat.roughness, mat.metallic, clamp01((mat.ior - 1.0F) * 0.25F) });
 	((GPUMaterial*)materialsBuffer.mapping)[mat.gpuIdx] = gpuMat;

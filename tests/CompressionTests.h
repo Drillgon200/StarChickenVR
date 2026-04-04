@@ -84,27 +84,27 @@ void huffman_5_elements_short() {
 		*/
 		StrA data = "ABBBCCCDDDDEEEEEEEE"a;
 		U32 encodedLen;
-		Byte* encoded = Huffman::encode(arena, &encodedLen, (Byte*)data.str, data.length);
+		Byte* encoded = Huffman::encode(arena, &encodedLen, (Byte*)data.str, U32(data.length));
 		TEST_EXPECT(encoded != nullptr);
 		if (encoded) {
 			U8* lenTable = encoded + sizeof(U32) + HUFFMAN_PARALLEL_STREAMS * sizeof(U32);
-			U32 aLen = lenTable['A' >> 1] >> ('A' & 1) * 4 & 0xF;
-			U32 bLen = lenTable['B' >> 1] >> ('B' & 1) * 4 & 0xF;
-			U32 cLen = lenTable['C' >> 1] >> ('C' & 1) * 4 & 0xF;
-			U32 dLen = lenTable['D' >> 1] >> ('D' & 1) * 4 & 0xF;
-			U32 eLen = lenTable['E' >> 1] >> ('E' & 1) * 4 & 0xF;
+			U32 aLen = U32(lenTable['A' >> 1] >> ('A' & 1) * 4 & 0xF);
+			U32 bLen = U32(lenTable['B' >> 1] >> ('B' & 1) * 4 & 0xF);
+			U32 cLen = U32(lenTable['C' >> 1] >> ('C' & 1) * 4 & 0xF);
+			U32 dLen = U32(lenTable['D' >> 1] >> ('D' & 1) * 4 & 0xF);
+			U32 eLen = U32(lenTable['E' >> 1] >> ('E' & 1) * 4 & 0xF);
 			TEST_EXPECT(aLen == 4 && bLen == 4 && cLen == 3 && dLen == 2 && eLen == 1);
 			bool anyOtherLen = false;
 			for (U32 i = 0; i < 256; i++) {
 				if (i >= 'A' && i <= 'E') {
 					continue;
 				}
-				U32 len = lenTable[i >> 1] >> (i & 1) * 4 & 0xF;
+				U32 len = U32(lenTable[i >> 1] >> (i & 1) * 4 & 0xF);
 				anyOtherLen |= len != 0;
 			}
 			TEST_EXPECT(anyOtherLen == false);
-			U64 huffData = 0b00000000010101010110110111111111111110111ull;
-			U64 mask =    0b11111111111111111111111111111111111111111ull;
+			//U64 huffData = 0b00000000010101010110110111111111111110111ull;
+			//U64 mask =    0b11111111111111111111111111111111111111111ull;
 			// This test it outdated given the 4 stream encoder
 			//TEST_EXPECT((LOAD_LE64(lenTable + 128) & mask) == huffData);
 
@@ -148,8 +148,8 @@ void huffman_tree_limit() {
 		U32 srcLen = 0;
 		// This data pattern will build a linked list style tree down to HUFFMAN_MAX_DEPTH, then add some low frequency elements past HUFFMAN_MAX_DEPTH
 		for (U32 i = 0; i < Huffman::HUFFMAN_MAX_DEPTH; i++) {
-			for (U32 j = 0; j < 1 << Huffman::HUFFMAN_MAX_DEPTH - i + 2; j++) {
-				data[srcLen++] = i;
+			for (U32 j = 0; j < 1u << Huffman::HUFFMAN_MAX_DEPTH - i + 2; j++) {
+				data[srcLen++] = Byte(i);
 			}
 		}
 		data[srcLen++] = 64;
@@ -181,8 +181,8 @@ void huffman_random_stress() {
 		MEMORY_ARENA_FRAME(arena) {
 			U32 dataSize = random.next() % randomSizeRange;
 			U8* data = arena.alloc<U8>(dataSize);
-			for (U32 i = 0; i < dataSize; i++) {
-				data[i] = U8(random.next());
+			for (U32 j = 0; j < dataSize; j++) {
+				data[j] = U8(random.next());
 			}
 			Testing::testOutputDisabled = true;
 			randomNumbersSuccess &= huffman_test_encode_decode_data(arena, data, dataSize);
@@ -199,7 +199,7 @@ void huffman_random_stress() {
 			U32 dataSize = 0;
 			for (U32 j = 0; j < 1024; j++) {
 				U32 count = random.next() % 100;
-				memset(data + dataSize, dataSize, count);
+				memset(data + dataSize, char(dataSize), count);
 				dataSize += count;
 			}
 			arena.stackPtr += dataSize;
@@ -235,7 +235,7 @@ void lz_basic() {
 	MemoryArena& arena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(arena) {
 		StrA toTest = "aaaaaaaxyzbbbbxbbbb"a;
-		lz_test_encode_decode_data(arena, (Byte*)toTest.str, toTest.length);
+		lz_test_encode_decode_data(arena, (Byte*)toTest.str, U32(toTest.length));
 	}
 }
 
@@ -262,7 +262,7 @@ void lz_random4() {
 		Xoshiro256 random{}; random.seed(1984);
 		Byte* data = arena.alloc<Byte>(randomAmount);
 		for (U32 i = 0; i < randomAmount; i++) {
-			data[i] = (Byte)random.next() % 4;
+			data[i] = Byte(random.next() % 4);
 		}
 		lz_test_encode_decode_data(arena, data, randomAmount);
 	}
@@ -343,8 +343,8 @@ void lz_bc7_full_test() {
 			U32 decodedLen;
 			Byte* decoded = LZ::decode2(arena, &decodedLen, encoded, encodedLen);
 			F64 t2 = current_time_seconds();
-			for (U32 i = 0; i < decodedLen; i++) {
-				if (decoded[i] != file[i]) {
+			for (U32 j = 0; j < decodedLen; j++) {
+				if (decoded[j] != file[j]) {
 					__debugbreak();
 				}
 			}
@@ -387,8 +387,8 @@ void test_huff_throughput() {
 			U64 rt2 = __rdtsc();
 			F64 t2 = current_time_seconds();
 			bestRDTSC = min(bestRDTSC, rt2 - rt);
-			for (U32 i = 0; i < decodedLen; i++) {
-				if (decoded[i] != file[i]) {
+			for (U32 j = 0; j < decodedLen; j++) {
+				if (decoded[j] != file[j]) {
 					__debugbreak();
 				}
 			}
@@ -412,15 +412,15 @@ void test_huff_throughput() {
 	// Scalar 9 with simple addressing load: 4610
 	// Scalar 9 with early load: 4800
 	printf("Throughput avg: %\nThroughput max: %\n"a, avgThroughput, bestThroughput);
-	U64 clocksExecuted = bestRDTSC * (5.4 / 4.3);
-	U64 instructionsExecuted = 963 * 24672.37;
-	printf("Cycles per iteration: %, IPC: %\n"a, clocksExecuted / 24672.37, F64(instructionsExecuted) / F64(clocksExecuted));
+	U64 clocksExecuted = U64(F64(bestRDTSC) * (5.4 / 4.3));
+	U64 instructionsExecuted = U64(963 * 24672.37);
+	printf("Cycles per iteration: %, IPC: %\n"a, F64(clocksExecuted) / 24672.37, F64(instructionsExecuted) / F64(clocksExecuted));
 	for (U32 i = 0; i < 100; i++) {
 		U64 timestampVal = test_ports();
 		// 4.3 ghz rdtsc, 5.56 ghz core clock
-		U64 clocksExecuted = timestampVal * (5.56 / 4.3);
-		U64 instructionsExecuted = (6 * 16 + 1) * 10000000;
-		printf("Cycles per iteration: %, RDTSC: %, IPC: %\n"a, timestampVal / 10000000.0 / (4.3 / 5.56) / 16.0, timestampVal, F64(instructionsExecuted) / F64(clocksExecuted));
+		clocksExecuted = U64(F64(timestampVal) * (5.56 / 4.3));
+		instructionsExecuted = (6 * 16 + 1) * 10000000;
+		printf("Cycles per iteration: %, RDTSC: %, IPC: %\n"a, F64(timestampVal) / 10000000.0 / (4.3 / 5.56) / 16.0, timestampVal, F64(instructionsExecuted) / F64(clocksExecuted));
 	}
 }
 

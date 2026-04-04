@@ -196,7 +196,7 @@ FINLINE F64 absf64(F64 f) {
 	return _mm_cvtsd_f64(_mm_and_pd(_mm_set_sd(f), _mm_castsi128_pd(_mm_set1_epi64x(0x7FFFFFFFFFFFFFFFULL))));
 }
 FINLINE F32 normalize(F32 f) {
-	return signumf32(f);
+	return F32(signumf32(f));
 }
 
 FINLINE U32 bswap32(U32 val) {
@@ -296,10 +296,10 @@ FINLINE U64 next_power_of_two(U64 x) {
 	return 1ull << (64ull - __lzcnt64(x - 1ull));
 }
 FINLINE U32 popcnt32(U32 x) {
-	return _mm_popcnt_u32(x);
+	return U32(_mm_popcnt_u32(x));
 }
 FINLINE U64 popcnt64(U64 x) {
-	return _mm_popcnt_u64(x);
+	return U64(_mm_popcnt_u64(x));
 }
 FINLINE bool is_power_of_2(U64 x) {
 	return popcnt64(x) == 1;
@@ -324,7 +324,7 @@ bool quadratic_formula_stable(F32* results, F32 a, F32 b, F32 c) {
 	if (discriminant < 0.0F) {
 		return false;
 	}
-	F32 r1 = (-b - signumf32(b) * sqrtf32(discriminant)) * (0.5 / a);
+	F32 r1 = (-b - F32(signumf32(b)) * sqrtf32(discriminant)) * (0.5F / a);
 	F32 r2 = c / (a * r1);
 	results[0] = r1, results[1] = r2;
 	return true;
@@ -1332,7 +1332,7 @@ bool ray_cyliner_intersect(F32* tOut, V3F pos, V3F dir, V3F cylinderCenter, V3F 
 	V3F flattenedOrigin = pos - axis * dot(pos, axis);
 	V3F flattenedDir = dir - axis * dot(dir, axis);
 	F32 a = dot(flattenedDir, flattenedDir);
-	F32 b = dot(flattenedOrigin, flattenedDir) * 2.0;
+	F32 b = dot(flattenedOrigin, flattenedDir) * 2.0F;
 	F32 c = dot(flattenedOrigin, flattenedOrigin);
 	F32 results[2]{};
 	if (!quadratic_formula_stable(results, a, b, c - radius * radius)) {

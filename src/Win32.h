@@ -159,7 +159,6 @@ struct ErrCode {
 StrA get_error_text(MemoryArena& arena, DWORD err) {
 	arena.commit_bytes(U16_MAX);
 	DWORD numChars = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, LANG_SYSTEM_DEFAULT, (char*)arena.stackBase + arena.stackPtr, U16_MAX, NULL);
-	DWORD errCode = GetLastError();
 	if (numChars == 0) {
 		return ""a;
 	} else {
