@@ -275,7 +275,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	Texture& tex = *result;
 	tex = {};
 	VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-	imageCreateInfo.flags = isCube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+	imageCreateInfo.flags = isCube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u;
 	imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
 	VkFormat createFormat = VK_FORMAT_R8G8B8A8_UNORM;
 	switch (format) {
@@ -289,7 +289,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	imageCreateInfo.format = createFormat;
 	imageCreateInfo.extent = VkExtent3D{ width, height, 1 };
 	imageCreateInfo.mipLevels = mipLevels;
-	imageCreateInfo.arrayLayers = isCube ? 6 : 1;
+	imageCreateInfo.arrayLayers = isCube ? 6u : 1u;
 	imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 	imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 	imageCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -318,8 +318,8 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 		U32 mipWidth = width;
 		U32 mipHeight = width;
 		for (U32 mipLevel = 0; mipLevel < mipLevels; mipLevel++) {
-			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, mipWidth, mipHeight, isCube ? 6 : 1, TEXTURE_FORMAT_TEXEL_SIZE[format], mipLevel);
-			data = (Byte*)data + mipWidth * mipHeight * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6 : 1);
+			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, mipWidth, mipHeight, isCube ? 6u : 1u, TEXTURE_FORMAT_TEXEL_SIZE[format], mipLevel);
+			data = (Byte*)data + mipWidth * mipHeight * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6u : 1u);
 			mipWidth = max(mipWidth / 2u, 1u);
 			mipHeight = max(mipHeight / 2u, 1u);
 		}

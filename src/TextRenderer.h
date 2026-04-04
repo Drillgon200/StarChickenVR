@@ -60,7 +60,8 @@ StrA* wrap_text(MemoryArena& arena, U32* stringCountOut, U32** originalLineOffse
 	U32 lastLineOffset = 0;
 	// Wrap text by cutting it at either the space before the word the crosses the size boundry or the character that does. Make sure to put at least one character per line
 	F32 current = 0.0F;
-	for (U64 i = 0; i < str.length; i++) {
+	DEBUG_ASSERT(str.length < U64(I32_MAX), "Can't wrap huge string"a);
+	for (U32 i = 0; i < U32(str.length); i++) {
 		char c = str.str[i];
 		if (c == '\n') {
 			*writePtr++ = '\n';
@@ -87,7 +88,7 @@ StrA* wrap_text(MemoryArena& arena, U32* stringCountOut, U32** originalLineOffse
 		// Attempt to insert extra newlines after spaces to keep words from splitting
 		if (is_whitespace(c)) {
 			F32 speculativeWordSize = current;
-			U64 j = i + 1;
+			U32 j = i + 1;
 			// Treat a block of characters + a block of whitespace as one unit
 			for (; j < str.length && !is_whitespace(str.str[j]); j++) {
 				speculativeWordSize += characterStep;

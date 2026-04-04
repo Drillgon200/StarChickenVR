@@ -62,7 +62,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 	TreeNode nodes[512]{};
 	U32 queue[512];
 	for (U32 i = 0; i < 256; i++) {
-		nodes[i].symbol = i;
+		nodes[i].symbol = I32(i);
 		nodes[i].child0 = -1;
 		nodes[i].child1 = -1;
 		queue[i] = i;
@@ -96,8 +96,8 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 		bool firstBetter = nodes[queue[0]].freq < nodes[queue[1]].freq;
 		U32 minFreq0 = firstBetter ? queue[0] : queue[1];
 		U32 minFreq1 = firstBetter ? queue[1] : queue[0];
-		U32 queueIdx0 = firstBetter ? 0 : 1;
-		U32 queueIdx1 = firstBetter ? 1 : 0;
+		U32 queueIdx0 = firstBetter ? 0u : 1u;
+		U32 queueIdx1 = firstBetter ? 1u : 0u;
 		for (U32 i = 2; i < queueSize; i++) {
 			I32 checkFreq = nodes[queue[i]].freq;
 			if (checkFreq < nodes[minFreq1].freq) {
@@ -111,8 +111,8 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 		}
 		U32 combined = maxInternalnode++;
 		nodes[combined].freq = nodes[minFreq0].freq + nodes[minFreq1].freq;
-		nodes[combined].child0 = minFreq0;
-		nodes[combined].child1 = minFreq1;
+		nodes[combined].child0 = I32(minFreq0);
+		nodes[combined].child1 = I32(minFreq1);
 		queue[queueIdx0] = combined;
 		queue[queueIdx1] = queue[--queueSize];
 	}
@@ -225,7 +225,7 @@ Byte* encode(MemoryArena& arena, U32* encodedLen, Byte* data, U32 dataLen) {
 			totalSymbolSlots += 1 << HUFFMAN_MAX_DEPTH - node.depth;
 			symCodes[i].len = U16(node.depth);
 			// We create the code MSB first because it's easier to work with, then write it LSB first because the decoder loop is faster that way
-			symCodes[i].code = bitswap32(startingCodes[node.depth - 1]);
+			symCodes[i].code = U16(bitswap32(startingCodes[node.depth - 1]));
 			startingCodes[node.depth - 1] += 1u << 32 - node.depth;
 		} else {
 			symCodes[i].len = 0;
@@ -747,7 +747,7 @@ Byte* decode(MemoryArena& arena, U32* decodedLen, Byte* data, U32 dataLen) {
 #endif
 	
 
-	*decodedLen = writePtr - result;
+	*decodedLen = U32(writePtr - result);
 	arena.stackPtr += *decodedLen;
 
 	// Early tests indicate that the decode loop always takes at least 99% of the time for a 2k texture

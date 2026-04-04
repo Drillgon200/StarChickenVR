@@ -273,7 +273,7 @@ struct TypedTextBuffer {
 		buffer = data;
 		bufferCap = I32(cap);
 		textLength = I32(length);
-		cursor = cursorAnchor = length;
+		cursor = cursorAnchor = I32(length);
 	}
 
 	StrA stra() {
@@ -358,8 +358,8 @@ struct TypedTextBuffer {
 				if (textLength + I32(clipLength) <= bufferCap) {
 					memmove(buffer + cursor + clipLength, buffer + cursor, U32(textLength - cursor));
 					memcpy(buffer + cursor, clipData, clipLength);
-					textLength += clipLength;
-					cursor = cursorAnchor = cursor + clipLength;
+					textLength += I32(clipLength);
+					cursor = cursorAnchor = cursor + I32(clipLength);
 				}
 			} break;
 			case Win32::KEY_LEFT: {
@@ -414,7 +414,7 @@ struct TypedTextBuffer {
 						StrA* lines = TextRenderer::wrap_text(arena, &lineCount, &originalOffsets, stra(), wrapWidth, sizeY);
 						U32 cursorLine = lineCount - 1;
 						for (U32 i = 0; i < lineCount; i++) {
-							if (cursor >= originalOffsets[i] && cursor < I32(originalOffsets[i]) + I32(lines[i].length)) {
+							if (cursor >= I32(originalOffsets[i]) && cursor < I32(originalOffsets[i]) + I32(lines[i].length)) {
 								cursorLine = i;
 								break;
 							}
@@ -503,15 +503,15 @@ struct TypedTextBuffer {
 				selectedColumn = 0;
 			}
 			if (selectedLine >= I32(lineCount)) {
-				selectedLine = lineCount - 1;
+				selectedLine = I32(lineCount) - 1;
 				selectedColumn = I32_MAX;
 			}
 			selectedColumn = clamp(selectedColumn, 0, I32(lines[selectedLine].length));
 			if (drag) {
-				cursor = originalLineOffsets[selectedLine] + selectedColumn;
+				cursor = I32(originalLineOffsets[selectedLine]) + selectedColumn;
 			} else {
 				Rng1I32 selected; selected.init(cursor, cursorAnchor);
-				cursorAnchor = cursor = originalLineOffsets[selectedLine] + selectedColumn;
+				cursorAnchor = cursor = I32(originalLineOffsets[selectedLine]) + selectedColumn;
 				F64 time = current_time_seconds();
 				if (F32(time - lastCursorClickedTime) < DOUBLE_CLICK_TIME) {
 					if (selected.area() == 0 && selected.minX == cursor) {
@@ -1189,7 +1189,7 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 							tes.ui_rect2d(textStartX + charWidth * F32(highlightStart), textStartY + yOffset, textStartX + charWidth * F32(highlightEnd), textStartY + yOffset + box->textSize * scale, z, 0.0F, 0.0F, 1.0F, 1.0F, highlightColor, Resources::simpleWhite.index, clipBoxIndexStack.back() << 16);
 						}
 						if (textInputHandler.cursor >= I32(originalLineOffsets[i]) && textInputHandler.cursor < I32(originalLineOffsets[i]) + I32(line.length) ||
-							i == lineCount - 1 && textInputHandler.cursor == originalLineOffsets[i] + line.length) {
+							i == lineCount - 1 && U64(textInputHandler.cursor) == originalLineOffsets[i] + line.length) {
 
 							cursorOffsetX = charWidth * F32(textInputHandler.cursor - originalLineOffsets[i]);
 							cursorOffsetY = yOffset;
@@ -1657,7 +1657,7 @@ void path_input(StrA fieldName) {
 					StrA path = get_user_selected_file(arena);
 					if (path.length <= MAX_TEXT_INPUT) {
 						memcpy(box->typedTextBuffer, path.str, path.length);
-						box->numTypedCharacters = path.length;
+						box->numTypedCharacters = U32(path.length);
 					}
 				}
 			}

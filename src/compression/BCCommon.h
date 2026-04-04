@@ -126,7 +126,7 @@ void ordered_permute(U8* order, I32 index, U32 iterations) {
 		printf("% % % %\n"a, order[3], order[2], order[1], order[0]);
 	} else {
 		for (U32 i = order[index+1]; i < iterations; i++) {
-			order[index] = i;
+			order[index] = U8(i);
 			ordered_permute(order, index - 1, iterations);
 		}
 	}

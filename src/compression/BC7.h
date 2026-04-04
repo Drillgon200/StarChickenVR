@@ -923,14 +923,14 @@ F32 quantize_bc7_endpoints(V4F pixels[16], Endpoint endpoints[partitions * 2], c
 	constexpr F32 quantizeScaleXYZ = static_cast<F32>((1 << componentBits) - 1);
 	constexpr F32 quantizeScaleAlpha = static_cast<F32>((1 << alphaBits) - 1);
 	Endpoint quantizeScale; if constexpr (alphaBits > 0) { quantizeScale = Endpoint{ quantizeScaleXYZ, quantizeScaleXYZ, quantizeScaleXYZ, quantizeScaleAlpha }; } else { quantizeScale = splat<Endpoint>(quantizeScaleXYZ); };
-	constexpr F32 pBitShiftXYZ = static_cast<F32>(1 << (8 - componentBits - 1));
+	constexpr F32 pBitShiftXYZ = static_cast<F32>(1 << (componentBits <= 7 ? (8 - I32(componentBits) - 1) : 0));
 	constexpr F32 pBitShiftAlpha = static_cast<F32>(1 << (8 - alphaBits - 1));
 	Endpoint pBitShift; if constexpr (alphaBits > 0) { pBitShift = Endpoint{ pBitShiftXYZ, pBitShiftXYZ, pBitShiftXYZ, pBitShiftAlpha }; } else { pBitShift = splat<Endpoint>(pBitShiftXYZ); };
 	constexpr F32 dataShiftXYZ = static_cast<F32>(1 << (8 - componentBits));
 	constexpr F32 dataShiftAlpha = static_cast<F32>(1 << (8 - alphaBits));
 	Endpoint dataShift; if constexpr (alphaBits > 0) { dataShift = Endpoint{ dataShiftXYZ, dataShiftXYZ, dataShiftXYZ, dataShiftAlpha }; } else { dataShift = splat<Endpoint>(dataShiftXYZ); };
 	constexpr F32 bottomDataShiftXYZ = numPBits > 0 ? static_cast<F32>(1 << (componentBits - (8 - componentBits - 1))) : static_cast<F32>(1 << (componentBits - (8 - componentBits)));
-	constexpr F32 bottomDataShiftAlpha = numPBits > 0 ? static_cast<F32>(1 << (alphaBits - (8 - alphaBits - 1))) : static_cast<F32>(1 << (alphaBits - (8 - alphaBits)));
+	constexpr F32 bottomDataShiftAlpha = numPBits > 0 ? F32(1 << ((I32(alphaBits) - (8 - I32(alphaBits) - 1)) >= 0 ? (I32(alphaBits) - (8 - I32(alphaBits) - 1)) : 0)) : F32(1 << ((I32(alphaBits) - (8 - I32(alphaBits))) >= 0 ? I32((alphaBits - (8 - alphaBits))) : 0));
 	Endpoint bottomDataShift; if constexpr (alphaBits > 0) { bottomDataShift = Endpoint{ bottomDataShiftXYZ, bottomDataShiftXYZ, bottomDataShiftXYZ, bottomDataShiftAlpha }; } else { bottomDataShift = splat<Endpoint>(bottomDataShiftXYZ); };
 
 	// Do most of the quantization work beforehand so we don't repeat it 4 times
@@ -1029,7 +1029,7 @@ F32x8 quantize_bc7_endpointsx8(V4Fx8 pixels[16], Endpoint endpoints[partitions *
 	const F32x8 quantizeScaleAlpha = _mm256_set1_ps(static_cast<F32>((1 << alphaBits) - 1));
 	Endpoint quantizeScale; if constexpr (alphaBits > 0) { quantizeScale = Endpoint{ quantizeScaleXYZ, quantizeScaleXYZ, quantizeScaleXYZ, quantizeScaleAlpha }; } else { quantizeScale = splat<Endpoint>(quantizeScaleXYZ); }
 	Endpoint invQuantizeScale = rcp(quantizeScale);
-	const F32x8 pBitShiftXYZ = _mm256_set1_ps(static_cast<F32>(1 << (8 - componentBits - 1)));
+	const F32x8 pBitShiftXYZ = _mm256_set1_ps(F32(1 << max(0, (8 - I32(componentBits) - 1))));
 	Endpoint pBitShift;
 	if constexpr (alphaBits > 0) {
 		const F32x8 pBitShiftAlpha = _mm256_set1_ps(static_cast<F32>(1 << (8 - alphaBits - 1)));
@@ -2824,12 +2824,12 @@ void decompress_bc7_mode0(BC7Block& block, RGBA8 pixels[16]) {
 	for (U32 i = 0; i < 6; i++) {
 		U32 pBit = ((endpointPBits >> i) & 1) << 3;
 		// 4 bit colors
-		endpoints[i].r = (endpointReds >> (i * 4)) & 0b1111;
-		endpoints[i].r = (endpoints[i].r << 4) | pBit | (endpoints[i].r >> 1);
-		endpoints[i].g = (endpointGreens >> (i * 4)) & 0b1111;
-		endpoints[i].g = (endpoints[i].g << 4) | pBit | (endpoints[i].g >> 1);
-		endpoints[i].b = (endpointBlues >> (i * 4)) & 0b1111;
-		endpoints[i].b = (endpoints[i].b << 4) | pBit | (endpoints[i].b >> 1);
+		endpoints[i].r = U8((endpointReds >> (i * 4)) & 0b1111);
+		endpoints[i].r = U8((endpoints[i].r << 4) | pBit | (endpoints[i].r >> 1));
+		endpoints[i].g = U8((endpointGreens >> (i * 4)) & 0b1111);
+		endpoints[i].g = U8((endpoints[i].g << 4) | pBit | (endpoints[i].g >> 1));
+		endpoints[i].b = U8((endpointBlues >> (i * 4)) & 0b1111);
+		endpoints[i].b = U8((endpoints[i].b << 4) | pBit | (endpoints[i].b >> 1));
 	}
 
 	U64 indices = block.data[1] >> 19;
@@ -2874,12 +2874,12 @@ void decompress_bc7_mode1(BC7Block& block, RGBA8 pixels[16]) {
 	for (U32 i = 0; i < 4; i++) {
 		U32 pBit = ((endpointPBits >> (i >> 1)) & 1) << 1;
 		// 6 bit colors
-		endpoints[i].r = (endpointReds >> (i * 6)) & 0b111111;
-		endpoints[i].r = (endpoints[i].r << 2) | pBit | (endpoints[i].r >> 5);
-		endpoints[i].g = (endpointGreens >> (i * 6)) & 0b111111;
-		endpoints[i].g = (endpoints[i].g << 2) | pBit | (endpoints[i].g >> 5);
-		endpoints[i].b = (endpointBlues >> (i * 6)) & 0b111111;
-		endpoints[i].b = (endpoints[i].b << 2) | pBit | (endpoints[i].b >> 5);
+		endpoints[i].r = U8((endpointReds >> (i * 6)) & 0b111111);
+		endpoints[i].r = U8((endpoints[i].r << 2) | pBit | (endpoints[i].r >> 5));
+		endpoints[i].g = U8((endpointGreens >> (i * 6)) & 0b111111);
+		endpoints[i].g = U8((endpoints[i].g << 2) | pBit | (endpoints[i].g >> 5));
+		endpoints[i].b = U8((endpointBlues >> (i * 6)) & 0b111111);
+		endpoints[i].b = U8((endpoints[i].b << 2) | pBit | (endpoints[i].b >> 5));
 	}
 
 	U64 indices = block.data[1] >> 18;
@@ -2973,12 +2973,12 @@ void decompress_bc7_mode3(BC7Block& block, RGBA8 pixels[16]) {
 	for (U32 i = 0; i < 4; i++) {
 		U32 pBit = (endpointPBits >> i) & 1;
 		// 7 bit colors
-		endpoints[i].r = (endpointReds >> (i * 7)) & 0b1111111;
-		endpoints[i].r = (endpoints[i].r << 1) | pBit;
-		endpoints[i].g = (endpointGreens >> (i * 7)) & 0b1111111;
-		endpoints[i].g = (endpoints[i].g << 1) | pBit;
-		endpoints[i].b = (endpointBlues >> (i * 7)) & 0b1111111;
-		endpoints[i].b = (endpoints[i].b << 1) | pBit;
+		endpoints[i].r = U8((endpointReds >> (i * 7)) & 0b1111111);
+		endpoints[i].r = U8((endpoints[i].r << 1) | pBit);
+		endpoints[i].g = U8((endpointGreens >> (i * 7)) & 0b1111111);
+		endpoints[i].g = U8((endpoints[i].g << 1) | pBit);
+		endpoints[i].b = U8((endpointBlues >> (i * 7)) & 0b1111111);
+		endpoints[i].b = U8((endpoints[i].b << 1) | pBit);
 	}
 
 	U64 indices = block.data[1] >> 34;
@@ -3030,10 +3030,10 @@ void decompress_bc7_mode4(BC7Block& block, RGBA8 pixels[16]) {
 		// 6 bit alpha
 		U32 a = (block.data[0] >> (38 + i * 6)) & 0b111111;
 
-		endpoints[i].r = (r << 3) | (r >> 2);
-		endpoints[i].g = (g << 3) | (g >> 2);
-		endpoints[i].b = (b << 3) | (b >> 2);
-		endpoints[i].a = (a << 2) | (a >> 4);
+		endpoints[i].r = U8((r << 3) | (r >> 2));
+		endpoints[i].g = U8((g << 3) | (g >> 2));
+		endpoints[i].b = U8((b << 3) | (b >> 2));
+		endpoints[i].a = U8((a << 2) | (a >> 4));
 	}
 
 	U64 indicesPrimary = (block.data[0] >> 50) | (block.data[1] << (64 - 50));
@@ -3091,9 +3091,9 @@ void decompress_bc7_mode5(BC7Block& block, RGBA8 pixels[16]) {
 		// Ah man, spotted an error in the specification here (listed 35 instead of 36). Turns out I was using an outdated spec version and it was fixed later. I hope I didn't embed any other old spec errors in my code.
 		U32 b = (block.data[0] >> (36 + i * 7)) & 0b1111111;
 
-		endpoints[i].r = (r << 1) | (r >> 6);	
-		endpoints[i].g = (g << 1) | (g >> 6);
-		endpoints[i].b = (b << 1) | (b >> 6);
+		endpoints[i].r = U8((r << 1) | (r >> 6));	
+		endpoints[i].g = U8((g << 1) | (g >> 6));
+		endpoints[i].b = U8((b << 1) | (b >> 6));
 	}
 
 	U64 indicesPrimary = block.data[1] >> 2;
@@ -3137,10 +3137,10 @@ void decompress_bc7_mode6(BC7Block& block, RGBA8 pixels[16]) {
 		U32 b = (block.data[0] >> (35 + i * 7)) & 0b1111111;
 		U32 a = (block.data[0] >> (49 + i * 7)) & 0b1111111;
 
-		endpoints[i].r = (r << 1) | pBit;
-		endpoints[i].g = (g << 1) | pBit;
-		endpoints[i].b = (b << 1) | pBit;
-		endpoints[i].a = (a << 1) | pBit;
+		endpoints[i].r = U8((r << 1) | pBit);
+		endpoints[i].g = U8((g << 1) | pBit);
+		endpoints[i].b = U8((b << 1) | pBit);
+		endpoints[i].a = U8((a << 1) | pBit);
 	}
 
 	U64 indices = block.data[1] >> 1;
@@ -3183,14 +3183,14 @@ void decompress_bc7_mode7(BC7Block& block, RGBA8 pixels[16]) {
 	for (U32 i = 0; i < 4; i++) {
 		U32 pBit = ((endpointPBits >> i) & 1) << 2;
 		// 5 bit colors
-		endpoints[i].r = (endpointReds >> (i * 5)) & 0b11111;
-		endpoints[i].r = (endpoints[i].r << 3) | pBit | (endpoints[i].r >> 3);
-		endpoints[i].g = (endpointGreens >> (i * 5)) & 0b11111;
-		endpoints[i].g = (endpoints[i].g << 3) | pBit | (endpoints[i].g >> 3);
-		endpoints[i].b = (endpointBlues >> (i * 5)) & 0b11111;
-		endpoints[i].b = (endpoints[i].b << 3) | pBit | (endpoints[i].b >> 3);
-		endpoints[i].a = (endpointAlphas >> (i * 5)) & 0b11111;
-		endpoints[i].a = (endpoints[i].a << 3) | pBit | (endpoints[i].a >> 3);
+		endpoints[i].r = U8((endpointReds >> (i * 5)) & 0b11111);
+		endpoints[i].r = U8((endpoints[i].r << 3) | pBit | (endpoints[i].r >> 3));
+		endpoints[i].g = U8((endpointGreens >> (i * 5)) & 0b11111);
+		endpoints[i].g = U8((endpoints[i].g << 3) | pBit | (endpoints[i].g >> 3));
+		endpoints[i].b = U8((endpointBlues >> (i * 5)) & 0b11111);
+		endpoints[i].b = U8((endpoints[i].b << 3) | pBit | (endpoints[i].b >> 3));
+		endpoints[i].a = U8((endpointAlphas >> (i * 5)) & 0b11111);
+		endpoints[i].a = U8((endpoints[i].a << 3) | pBit | (endpoints[i].a >> 3));
 	}
 
 	U64 indices = block.data[1] >> 34;

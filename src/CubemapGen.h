@@ -528,7 +528,7 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 				header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
 				header.flags = ResourceLoading::TEXTURE_FLAG_CUBE;
 				header.format = ResourceLoading::TEXTURE_FORMAT_R9G9B9E5;
-				header.mipCount = cubeMipLevels;
+				header.mipCount = U8(cubeMipLevels);
 				header.width = CUBEMAP_SPECULAR_RES;
 				header.height = CUBEMAP_SPECULAR_RES;
 				write_file(file, &header, sizeof(header));

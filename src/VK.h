@@ -1510,7 +1510,7 @@ struct GraphicsPipelineBuilder {
 			mainAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 			VkPipelineColorBlendAttachmentState& idAttachmentState = attachmentBlendStates[1];
 			idAttachmentState.blendEnable = VK_FALSE;
-			idAttachmentState.colorWriteMask = renderPass == RENDER_PASS_WORLD_NO_ID ? 0 : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+			idAttachmentState.colorWriteMask = renderPass == RENDER_PASS_WORLD_NO_ID ? 0u : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 			colorBlendStateInfo.attachmentCount = 2;
 		} else if (renderPass == RENDER_PASS_UI) {
 			VkPipelineColorBlendAttachmentState& mainAttachmentState = attachmentBlendStates[0];

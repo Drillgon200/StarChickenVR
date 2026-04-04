@@ -124,14 +124,14 @@ Byte* encode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 				i--;
 			} else {
 				if (literalRunCount) {
-					literalLengthBuffer[dataLen - ++literalLengthCount] = literalRunCount - 1;
+					literalLengthBuffer[dataLen - ++literalLengthCount] = U8(literalRunCount - 1);
 					literalRunCount = 0;
 					bitBufBits++;
 					totalLiteralOrMatchCount++;
 				}
 				// Write match
-				matchLengthBuffer[dataLen - ++matchLengthCount] = bestLength - 1;
-				offsetBuffer[dataLen - ++offsetCount] = bestOffset >= 128 ? bestOffset >> 7 : bestOffset;
+				matchLengthBuffer[dataLen - ++matchLengthCount] = U8(bestLength - 1);
+				offsetBuffer[dataLen - ++offsetCount] = U8(bestOffset >= 128 ? bestOffset >> 7 : bestOffset);
 				if (bestOffset >= 128) {
 					offsetBuffer[dataLen - ++offsetCount] = bestOffset & 0x7F | 0x80;
 				}
@@ -148,7 +148,7 @@ Byte* encode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 			}
 		}
 		if (literalRunCount) {
-			literalLengthBuffer[dataLen - ++literalLengthCount] = literalRunCount - 1;
+			literalLengthBuffer[dataLen - ++literalLengthCount] = U8(literalRunCount - 1);
 			bitBufBits++;
 			totalLiteralOrMatchCount++;
 		}
@@ -194,7 +194,7 @@ Byte* encode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		memcpy(outputArena.stackBase + resultOffset, &header, sizeof(header));
 
 		result = outputArena.stackBase + resultOffset;
-		*outLen = outputArena.stackPtr - resultOffset;
+		*outLen = U32(outputArena.stackPtr - resultOffset);
 	}
 	return result;
 }
@@ -283,14 +283,14 @@ Byte* encode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 				i--;
 			} else {
 				if (literalRunCount) {
-					lengthBuffer[dataLen - ++lengthCount] = literalRunCount;
+					lengthBuffer[dataLen - ++lengthCount] = U8(literalRunCount);
 					avgLengths += literalRunCount;
 					literalRunCount = 0;
 					bitBufBits++;
 					totalLiteralOrMatchCount++;
 				}
 				// Write match
-				lengthBuffer[dataLen - ++lengthCount] = bestLength;
+				lengthBuffer[dataLen - ++lengthCount] = U8(bestLength);
 				avgLengths += bestLength;
 #ifdef DLZ2_FIXED_WIDTH_OFFSETS
 				offsetBuffer[dataLen - ++offsetCount] = U8(bestOffset >> 8);
@@ -315,7 +315,7 @@ Byte* encode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 			}
 		}
 		if (literalRunCount) {
-			lengthBuffer[dataLen - ++lengthCount] = literalRunCount;
+			lengthBuffer[dataLen - ++lengthCount] = U8(literalRunCount);
 			avgLengths += literalRunCount;
 			bitBufBits++;
 			totalLiteralOrMatchCount++;
@@ -360,7 +360,7 @@ Byte* encode2(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 		memcpy(outputArena.stackBase + resultOffset, &header, sizeof(header));
 
 		result = outputArena.stackBase + resultOffset;
-		*outLen = outputArena.stackPtr - resultOffset;
+		*outLen = U32(outputArena.stackPtr - resultOffset);
 	}
 	return result;
 }
@@ -410,7 +410,7 @@ Byte* decode(MemoryArena& outputArena, U32* outLen, Byte* data, U32 dataLen) {
 
 				// The branchless instruction sequence seems to be slightly faster (not by much though)
 				U32 tentativeOffset = LOAD_LE16(offsetBuffer++);
-				U32 offset = _pext_u32(tentativeOffset, (tentativeOffset & 0x80) != 0 ? 0xFF7F : 0x7F);
+				U32 offset = _pext_u32(tentativeOffset, (tentativeOffset & 0x80) != 0 ? 0xFF7Fu : 0x7Fu);
 				offsetBuffer += (tentativeOffset & 0x80) != 0;
 				/*U32 offset = *offsetBuffer++;
 				if (offset & 0x80) {
