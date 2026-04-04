@@ -275,7 +275,7 @@ F32x8 ray_cast_unit_box(const V4Fx8& pos, const V4Fx8& dir) {
 
 template<typename Endpoint>
 FINLINE Endpoint convert_v4fx8_to_endpoint(V4Fx8 v) {
-	static_assert(false, "Unimplemented endpoint");
+	static_assert(sizeof(Endpoint) == -1, "Unimplemented endpoint");
 }
 template<>
 FINLINE F32x8 convert_v4fx8_to_endpoint<F32x8>(V4Fx8 v) {
@@ -291,7 +291,7 @@ FINLINE V4Fx8 convert_v4fx8_to_endpoint<V4Fx8>(V4Fx8 v) {
 }
 template<typename Endpoint>
 FINLINE Endpoint convert_v4f_to_endpoint(V4F v) {
-	static_assert(false, "Unimplemented endpoint");
+	static_assert(sizeof(Endpoint) == -1, "Unimplemented endpoint");
 }
 template<>
 FINLINE F32 convert_v4f_to_endpoint<F32>(V4F v) {

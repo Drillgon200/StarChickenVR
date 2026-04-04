@@ -332,7 +332,7 @@ bool quadratic_formula_stable(F32* results, F32 a, F32 b, F32 c) {
 
 template<typename Vec, typename T>
 FINLINE Vec splat(T a) {
-	static_assert(false, "Not implemented for type");
+	static_assert(sizeof(Vec) == -1, "Not implemented for type");
 }
 template<>
 FINLINE F32 splat<F32, F32>(F32 a) {
