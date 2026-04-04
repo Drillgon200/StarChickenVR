@@ -804,9 +804,9 @@ F32 quantize_bc7_endpoints3_mode0(V4F pixels[16], V3F endpoints[6], const BC7Par
 	}
 	// Find best p bits to compress this endpoint
 	F32 bestError[3] = { F32_LARGE, F32_LARGE, F32_LARGE };
-	V3F bestQuantizedEndpoints[6];
+	V3F bestQuantizedEndpoints[6]{};
 	//U32 bestPBits[3];
-	U64 bestIndices[3];
+	U64 bestIndices[3]{};
 	// Try every combination of p bits and check the error each time. Not fast, but it should provide much better results for gradients where the endpoints would normally quantize to the same value
 	for (U32 pBits = 0; pBits < 4; pBits++) {
 		// Quantize all endpoints with this set of p bits
@@ -880,8 +880,8 @@ F32 quantize_bc7_endpoints3_mode1(V4F pixels[16], V3F endpoints[4], const BC7Par
 	}
 	// Find best p bits to compress this endpoint
 	F32 bestError[2] = { F32_LARGE, F32_LARGE };
-	V3F bestQuantizedEndpoints[4];
-	U64 bestIndices[2];
+	V3F bestQuantizedEndpoints[4]{};
+	U64 bestIndices[2]{};
 	// Try both p bits and check the error each time to get the best result. Could try optimizing this to find the p bit without brute forcing both
 	for (U32 pBit = 0; pBit < 2; pBit++) {
 		// Quantize all endpoints with this p bit
@@ -969,7 +969,7 @@ F32 quantize_bc7_endpoints(V4F pixels[16], Endpoint endpoints[partitions * 2], c
 	for (U32 i = 0; i < partitions; i++) {
 		bestError[i] = F32_LARGE;
 	}
-	Endpoint bestQuantizedEndpoints[numEndpoints];
+	Endpoint bestQuantizedEndpoints[numEndpoints]{};
 	U64 bestIndices[3]{};
 	// Try both p bits and check the error each time to get the best result. Could try optimizing this to find the p bit without brute forcing both
 	for (U32 pBit = 0; pBit < (1 << numPBits); pBit++) {
@@ -1090,7 +1090,7 @@ F32x8 quantize_bc7_endpointsx8(V4Fx8 pixels[16], Endpoint endpoints[partitions *
 	for (U32 i = 0; i < partitions; i++) {
 		bestError[i] = _mm256_set1_ps(F32_LARGE);
 	}
-	Endpoint bestQuantizedEndpoints[numEndpoints];
+	Endpoint bestQuantizedEndpoints[numEndpoints]{};
 	U64x4 bestIndices[3][2]{};
 	// Try both p bits and check the error each time to get the best result. Could try optimizing this to find the p bit without brute forcing both
 	for (U32 pBit = 0; pBit < (1 << numPBits); pBit++) {
@@ -1401,9 +1401,9 @@ void write_bc7_block(BC7Block& block, U32 mode, U32 bestPartition, V4F bestEndpo
 	block.data[0] |= U64(bestPartition) << (mode + 1);
 
 	U32 dataOffset = mode + 1 + partitionBits;
-	block.data[0] |= rotation << dataOffset;
+	block.data[0] |= U64(rotation) << dataOffset;
 	dataOffset += rotationBits;
-	block.data[0] |= indexSelection << dataOffset;
+	block.data[0] |= U64(indexSelection) << dataOffset;
 	dataOffset += indexSelectionBit;
 
 	U64 endpointRGBA8[4]{};
@@ -2570,6 +2570,8 @@ void blend_bc7blockx8(BC7Blockx4 dst[2], BC7Blockx4 src[2], F32x8 mask) {
 	dst[1].data[1] = _mm256_castps_si256(_mm256_blendv_ps(_mm256_castsi256_ps(dst[1].data[1]), _mm256_castsi256_ps(src[1].data[1]), maskHigh));
 }
 
+// "Function uses '' bytes of stack. Consider moving some data to heap." The stack usage is fine, it's not like we're calling this recursively
+#pragma warning(suppress: 6262)
 F32 compress_bc7_blockx8(V4Fx8 pixels[16], BC7Blockx4 blocks[2]) {
 	V3Fx8 mins[totalNumPartitions];
 	V3Fx8 maxes[totalNumPartitions];

@@ -204,7 +204,9 @@ struct PanelTextureProcessing {
 					path_input("File 1"a);
 					path_input("File 2"a);
 					slider_f64();
-					slider_f64(nullptr, 0.0, 0.0F, 1.0F);
+					slider_f64(nullptr, 0.5, 0.0, 1.0);
+					slider_i64();
+					slider_i64(nullptr, 5, 0, 10);
 				}
 			}
 		}

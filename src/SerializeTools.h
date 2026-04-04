@@ -73,7 +73,8 @@ StrA escape_str(MemoryArena& arena, StrA str) {
 enum IntParseError : U32 {
 	INT_PARSE_SUCCESS,
 	INT_PARSE_BAD_INPUT,
-	INT_PARSE_OVERFLOW
+	INT_PARSE_OVERFLOW,
+	INT_PARSE_UNDERFLOW
 };
 
 U64 POWER_OF_10_TABLE[20] {
@@ -177,13 +178,45 @@ IntParseError parse_u64(U64* out, StrA str, U32 baseIn = 0) {
 }
 
 IntParseError parse_i64(I64* out, StrA* str) {
-	//TODO implement
-	__debugbreak();
+	StrA parseStr = *str;
+	bool isNegative = false;
+	if (parseStr.starts_with('-')) {
+		isNegative = true;
+		parseStr++;
+	} else if (parseStr.starts_with('+')) {
+		parseStr++;
+	}
+	U64 u64;
+	IntParseError err = parse_u64(&u64, str);
+	if (err == INT_PARSE_OVERFLOW && isNegative) {
+		return INT_PARSE_UNDERFLOW;
+	}
+	if (err != INT_PARSE_SUCCESS) {
+		return err;
+	}
+	if (u64 > U64(I64_MAX) && !isNegative) {
+		return INT_PARSE_OVERFLOW;
+	}
+	if (u64 > U64(-I64_MIN) && isNegative) {
+		return INT_PARSE_UNDERFLOW;
+	}
+	*str = parseStr;
+	*out = isNegative ? I64(-u64) : I64(u64);
 	return INT_PARSE_SUCCESS;
 }
 
+IntParseError parse_i64(I64* out, StrA str) {
+	return parse_i64(out, &str);
+}
+
 void serialize_i64(char* dstBuffer, U32* dstBufferSize, I64 startValue) {
-	__debugbreak();
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		StrA str = i2stra(arena, startValue);
+		U32 newSize = U32(min(str.length, U64(*dstBufferSize)));
+		memcpy(dstBuffer, str.str, newSize);
+		*dstBufferSize = newSize;
+	}
 }
 
 const I32 POWER_OF_5_TABLE_OFFSET = 342;

@@ -1855,6 +1855,7 @@ void slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64
 		if (minMaxEnforced) {
 			textBox->flags |= BOX_FLAG_SLIDER_MIN_MAX_ENFORCED;
 		}
+		set_box_f64_val(textBox, defaultVal);
 		button(Resources::uiArrowRight, [incrementAmount](Box* box) {
 			Box* slider = box->prev;
 			set_box_f64_val(slider, slider->value.f64.val + incrementAmount);
@@ -1862,8 +1863,97 @@ void slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64
 	}
 }
 
-void slider_i64() {
+void set_box_i64_val(Box* box, I64 newVal) {
+	if (box->flags & BOX_FLAG_SLIDER_MIN_MAX_ENFORCED) {
+		newVal = clamp(newVal, box->value.i64.minVal, box->value.i64.maxVal);
+	}
+	box->value.i64.val = newVal;
+	if (box->typedTextBuffer) {
+		U32 bufferSize = MAX_TEXT_INPUT;
+		SerializeTools::serialize_i64(box->typedTextBuffer, &bufferSize, newVal);
+		box->numTypedCharacters = bufferSize;
+	}
+	if (box->updatePtr.i64) {
+		*box->updatePtr.i64 = newVal;
+	}
+}
 
+void slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I64_MIN, I64 maxVal = I64_MAX, I64 incrementAmount = 1, bool minMaxEnforced = false) {
+	// Mostly the same code as the F64 slider, slightly different drag mechanic
+	if (maxVal < minVal) {
+		maxVal = minVal;
+	}
+	UI_RBOX() {
+		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+		button(Resources::uiArrowLeft, [incrementAmount](Box* box){
+			Box* slider = box->next;
+			set_box_i64_val(slider, slider->value.i64.val - incrementAmount);
+		});
+		Box* textBox = text_input(""a, "0"a, false, [](Box* box){
+			I64 newVal = box->value.i64.val;
+			I64 parsed;
+			SerializeTools::IntParseError err = SerializeTools::parse_i64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters });
+			if (err == SerializeTools::INT_PARSE_OVERFLOW) {
+				newVal = I64_MAX;
+			} else if (err == SerializeTools::INT_PARSE_UNDERFLOW) {
+				newVal = I64_MIN;
+			} else if (err == SerializeTools::INT_PARSE_SUCCESS) {
+				newVal = parsed;
+			}
+			if (box->numTypedCharacters == 0) {
+				newVal = 0;
+			}
+			set_box_i64_val(box, newVal);
+		}).unsafeBox;
+		textBox->actionCallback = [](Box* box, UserCommunication& com) {
+			if (com.leftClicked || com.rightClicked) {
+				set_active_text_box(box);
+				return ACTION_HANDLED;
+			}
+			if (com.textBoxDeselected) {
+				box->boxConsumerCallback(box);
+				return ACTION_HANDLED;
+			}
+			if (com.drag.x) {
+				F64 dragPerUnit = box->computedSize.x / F64(box->value.i64.maxVal - box->value.i64.minVal);
+				I64 incrementBy = 0;
+				if (box->value.i64.minVal == I64_MIN || box->value.i64.maxVal == I64_MAX) {
+					incrementBy = I64(com.drag.x);
+				} else {
+					incrementBy = I64(com.totalDrag.x / dragPerUnit);
+					totalActiveDrag.x -= F64(incrementBy) * dragPerUnit;
+				}
+				set_box_i64_val(box, clamp(box->value.i64.val + incrementBy, box->value.i64.minVal, box->value.i64.maxVal));
+				return ACTION_HANDLED;
+			}
+			if (com.tessellator) {
+				F32 percentUsed = F32(clamp01(F64(box->value.i64.val - box->value.i64.minVal) / F64(box->value.i64.maxVal - box->value.i64.minVal)));
+				F32 maxX = com.renderArea.minX + com.renderArea.width() * percentUsed;
+				V4F color = themeColor.button.to_v4f32();
+				color.w = 0.3F;
+				com.tessellator->ui_rect2d(com.renderArea.minX, com.renderArea.minY, maxX, com.renderArea.maxY, com.renderZ, 0.0F, 0.0F, 1.0F, 1.0F, color, Resources::simpleWhite.index, com.clipBoxIndex << 16);
+				return ACTION_HANDLED;
+			}
+			return ACTION_PASS;
+		};
+		textBox->value.i64.val = defaultVal;
+		textBox->value.i64.minVal = minVal;
+		textBox->value.i64.maxVal = maxVal;
+		textBox->updatePtr.i64 = toUpdate;
+		textBox->hoverCursor = Win32::CURSOR_TYPE_SIZE_HORIZONTAL;
+		bool usesMinMax = minVal != I64_MIN || maxVal != I64_MAX;
+		if (usesMinMax) {
+			textBox->flags |= BOX_FLAG_CUSTOM_DRAW;
+		}
+		if (minMaxEnforced) {
+			textBox->flags |= BOX_FLAG_SLIDER_MIN_MAX_ENFORCED;
+		}
+		set_box_i64_val(textBox, defaultVal);
+		button(Resources::uiArrowRight, [incrementAmount](Box* box) {
+			Box* slider = box->prev;
+			set_box_i64_val(slider, slider->value.i64.val + incrementAmount);
+		});
+	}
 }
 
 void slider_bool() {

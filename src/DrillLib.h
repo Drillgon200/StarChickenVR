@@ -785,6 +785,12 @@ struct StrA {
 	FINLINE bool ends_with(StrA other) const {
 		return other.length <= length && memcmp(str + (length - other.length), other.str, other.length) == 0;
 	}
+	FINLINE bool starts_with(char c) const {
+		return length > 0 && str[0] == c;
+	}
+	FINLINE bool ends_with(char c) const {
+		return length > 0 && str[length - 1] == c;
+	}
 	FINLINE StrA slice(I64 begin, I64 end) const {
 		if (begin < 0) {
 			begin = max(I64(length) + begin, 0LL);
