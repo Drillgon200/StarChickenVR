@@ -207,6 +207,7 @@ struct PanelTextureProcessing {
 					slider_f64(nullptr, 0.5, 0.0, 1.0);
 					slider_i64();
 					slider_i64(nullptr, 5, 0, 10);
+					slider_bool();
 				}
 			}
 		}

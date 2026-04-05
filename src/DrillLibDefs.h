@@ -208,6 +208,11 @@ DEBUG_OPTIMIZE_OFF
 #define STORE_BE64(ptr, val) (_store_be_u64((ptr), (val)))
 
 
+template<typename To, typename From>
+FINLINE constexpr To bitcast(const From& val) {
+	return __builtin_bit_cast(To, val);
+}
+
 void print(const char* str);
 void print_integer(U64 num);
 void print_float(F64 f);

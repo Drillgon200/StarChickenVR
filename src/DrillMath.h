@@ -153,6 +153,89 @@ FINLINE F32 sincosf32(F32* sinOut, F32 x) {
 	*sinOut = sinf32(x); // Could probably optimize this using the pythagorean identity and the result of cosf, I'll figure it out later
 	return cosine;
 }
+
+// Similar to cos, these coefficients were found with sollya.
+// This gets within 4 bits of the cstdlib version for the whole F32 range and is about twice as fast (much faster than that if you take the SIMD into account)
+__m256 cbrtf32x8(__m256 x) {
+	// The idea here is to take x^(1/3) == (s * 2^e)^(1/3) and turn it into s^(1/3) * 2^(e/3) and compute both separately.
+	// s is always within 1-2, so we fit a polynomial approximation to get its cube root
+	// Since the exponent has to be an integer, 2^(e/3) is split into 2^floor(e/3) * 2^(remainder(e/3)/3)
+	// remainder(e/3)/3 only has 5 values, so we just select the right one based on the remainder
+	// The only thing to do after that is check for zero, infinity, and NaN. In these cases, we can pass through the input value directly.
+	// We simply don't handle subnormals because it would be a pain to do without AVX512 vector lzcnt and we can set subnormals to flush to zero anyway.
+	__m256i bits = _mm256_castps_si256(x);
+	__m256i significandMask = _mm256_set1_epi32((1 << 23) - 1);
+	__m256i significand = _mm256_and_si256(bits, significandMask);
+	__m256i exp = _mm256_sub_epi32(_mm256_and_si256(_mm256_srli_epi32(bits, 23), _mm256_set1_epi32(0b11111111)), _mm256_set1_epi32(127));
+	// exp * floor(ceil(2^16 / 3) / 2^16)
+	__m256i newExp = _mm256_srai_epi32(_mm256_mullo_epi32(exp, _mm256_set1_epi32(21846)), 16);
+	// Rounding down is wrong for negative numbers, so add the sign bit back in to make it round up (toward 0)
+	newExp = _mm256_add_epi32(newExp, _mm256_srli_epi32(exp, 31));
+	__m256i remainder = _mm256_sub_epi32(exp, _mm256_mullo_epi32(newExp, _mm256_set1_epi32(3)));
+
+	// remainder == -2 : 0.629960524947 (2^(-2/3))
+	// remainder == -1 : 0.793700525984 (2^(-1/3))
+	// remainder ==  0 : 1.0            (2^(0/3))
+	// remainder ==  1 : 1.25992104989  (2^(1/3))
+	// remainder ==  2 : 1.58740105197  (2^(2/3))
+	remainder = _mm256_add_epi32(remainder, _mm256_set1_epi32(1));
+	__m256 remainderExp = _mm256_permutevar_ps(_mm256_setr_ps(0.793700525984F, 1.0F, 1.25992104989F, 1.58740105197F, 0.793700525984F, 1.0F, 1.25992104989F, 1.58740105197F), remainder);
+	remainderExp = _mm256_blendv_ps(remainderExp, _mm256_set1_ps(0.629960524947F), _mm256_castsi256_ps(remainder));
+
+	__m256 one = _mm256_set1_ps(1.0F);
+	__m256 significand01 = _mm256_sub_ps(_mm256_castsi256_ps(_mm256_or_si256(significand, _mm256_set1_epi32(127 << 23))), one);
+	__m256 cbrtSignificand = _mm256_fmadd_ps(_mm256_set1_ps(-3.7384308046382649717374077275715907804477015871025e-3F), significand01, _mm256_set1_ps(1.6248256682225195424697072830568203597238070722807e-2F));
+	cbrtSignificand = _mm256_fmadd_ps(cbrtSignificand, significand01, _mm256_set1_ps(-3.5474750692705396305767496395448993921171900629325e-2F));
+	cbrtSignificand = _mm256_fmadd_ps(cbrtSignificand, significand01, _mm256_set1_ps(6.0573895431292586090150197315001151475322493892905e-2F));
+	cbrtSignificand = _mm256_fmadd_ps(cbrtSignificand, significand01, _mm256_set1_ps(-0.11102099666480585336524261575827863580514367479812F));
+	cbrtSignificand = _mm256_fmadd_ps(cbrtSignificand, significand01, _mm256_set1_ps(0.33333216463777640516973707376504040202570101920406F));
+	cbrtSignificand = _mm256_fmadd_ps(cbrtSignificand, significand01, one);
+
+	__m256i loadedExponentAndSign = _mm256_slli_epi32(_mm256_add_epi32(newExp, _mm256_set1_epi32(127)), 23);
+	loadedExponentAndSign = _mm256_or_si256(loadedExponentAndSign, _mm256_and_si256(bits, _mm256_set1_epi32(1u << 31)));
+	__m256 result = _mm256_mul_ps(cbrtSignificand, _mm256_mul_ps(remainderExp, _mm256_castsi256_ps(loadedExponentAndSign)));
+
+	__m256 isZeroOrInfOrNan = _mm256_or_ps(_mm256_cmp_ps(x, _mm256_setzero_ps(), _CMP_EQ_UQ), _mm256_castsi256_ps(_mm256_cmpeq_epi32(exp, _mm256_set1_epi32(128))));
+	return _mm256_blendv_ps(result, x, isZeroOrInfOrNan);
+}
+
+F32 cbrtf32(F32 x) {
+	return _mm256_cvtss_f32(cbrtf32x8(_mm256_set1_ps(x)));
+}
+
+// This version handles subnormals correctly.
+F32 cbrtf32_robust(F32 x) {
+	U32 bits = bitcast<U32>(x);
+	I32 exp = (bits >> 23 & 0b11111111) - 127;
+	// If exp is all 1s, it's an inf if the significand is 0, a NaN otherwise
+	if (x == 0.0F || exp == 128) {
+		return x;
+	}
+	U32 significand = bits & (1 << 23) - 1;
+	if (exp == -127) {
+		// Handle subnormals
+		U32 extraExponent = _lzcnt_u32(significand) - 9;
+		exp -= extraExponent;
+		significand <<= extraExponent + 1;
+		significand &= (1 << 23) - 1;
+	}
+	I32 newExp = exp / 3;
+	I32 remainder = exp - newExp * 3;
+	F32 remainderExp = 1.0F;
+	if (remainder == 1) {
+		remainderExp = 1.25992104989F;
+	} else if (remainder == 2) {
+		remainderExp = 1.58740105197F;
+	} else if (remainder == -1) {
+		remainderExp = 0.793700525984F;
+	} else if (remainder == -2) {
+		remainderExp = 0.629960524947F;
+	}
+	F32 significand01 = bitcast<F32>(significand | 127 << 23) - 1.0F;
+	F32 cbrtSignificand = 1.0F + significand01 * (0.33333216463777640516973707376504040202570101920406F + significand01 * (-0.11102099666480585336524261575827863580514367479812F + significand01 * (6.0573895431292586090150197315001151475322493892905e-2F + significand01 * (-3.5474750692705396305767496395448993921171900629325e-2F + significand01 * (1.6248256682225195424697072830568203597238070722807e-2F + significand01 * (-3.7384308046382649717374077275715907804477015871025e-3F))))));
+	return cbrtSignificand * bitcast<F32>(newExp + 127 << 23 | bits & 1u << 31) * remainderExp;
+}
+
 FINLINE F32 fractf32(F32 f) {
 	return f - _mm_cvtss_f32(_mm_round_ps(_mm_set_ss(f), _MM_ROUND_MODE_TOWARD_ZERO));
 }
@@ -237,11 +320,6 @@ FINLINE U64 log2ceil64(U64 val) {
 }
 FINLINE U64 log2floor64(U64 val) {
 	return 63 - _lzcnt_u64(val);
-}
-
-template<typename To, typename From>
-FINLINE constexpr To bitcast(const From& val) {
-	return __builtin_bit_cast(To, val);
 }
 
 template<typename T>

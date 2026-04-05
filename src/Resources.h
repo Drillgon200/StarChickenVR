@@ -60,6 +60,10 @@ Texture uiArrowDown;
 Texture uiX;
 Texture uiFolder;
 Texture uiWindowSwitch;
+Texture uiToggleOn;
+Texture uiToggleOff;
+Texture uiAccordionOpen;
+Texture uiAccordionClosed;
 
 Material cannonMat;
 Material matMat;
@@ -86,6 +90,10 @@ void load_resources() {
 	load_png(&uiX, "resources/textures/ui/x.png"a, true, true);
 	load_png(&uiFolder, "resources/textures/ui/folder.png"a, true, true);
 	load_png(&uiWindowSwitch, "resources/textures/ui/window_switch.png"a, true, true);
+	load_png(&uiToggleOn, "resources/textures/ui/toggle_on.png"a, true, true);
+	load_png(&uiToggleOff, "resources/textures/ui/toggle_off.png"a, true, true);
+	load_png(&uiAccordionOpen, "resources/textures/ui/accordion_open.png"a, true, true);
+	load_png(&uiAccordionClosed, "resources/textures/ui/accordion_closed.png"a, true, true);
 	load_msdf(&fontAtlas, "resources/textures/font2.ddf"a);
 
 	create_material_from_pngs(&cannonMat, "resources/textures/cannon"a);

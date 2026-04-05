@@ -755,12 +755,13 @@ void compute_min_sizes_x_recurse(Box* box) {
 		compute_min_sizes_x_recurse(child);
 		if (!(child->flags & BOX_FLAG_FLOATING)) {
 			if (layoutAxis == AXIS2_X) {
-				current += child->computedSize.x + (child->next ? padding : 0.0F);
+				current += child->computedSize.x + padding;
 			} else {
-				current = max(current, padding + child->computedPos.x + child->computedSize.x);
+				current = max(current, padding + child->computedPos.x + child->computedSize.x + padding);
 			}
 		}
 	}
+	current = max(padding, current - padding);
 	size = max(size, current + padding);
 	if (box->sizeModeX == SIZE_MODE_ABSOLUTE || box->flags & BOX_FLAG_DONT_FIT_CHILDREN) {
 		size = box->size.x;
@@ -798,12 +799,13 @@ void compute_min_sizes_y_recurse(Box* box) {
 		compute_min_sizes_y_recurse(child);
 		if (!(child->flags & BOX_FLAG_FLOATING)) {
 			if (layoutAxis == AXIS2_X) {
-				current = max(current, padding + child->computedPos.y + child->computedSize.y);
+				current = max(current, padding + child->computedPos.y + child->computedSize.y + padding);
 			} else {
-				current += child->computedSize.y + (child->next ? padding : 0.0F);
+				current += child->computedSize.y + padding;
 			}
 		}
 	}
+	current = max(padding, current - padding);
 	size = max(size, current + padding);
 	if (box->sizeModeY == SIZE_MODE_ABSOLUTE || box->flags & BOX_FLAG_DONT_FIT_CHILDREN) {
 		size = box->size.y;
@@ -1879,7 +1881,7 @@ void set_box_i64_val(Box* box, I64 newVal) {
 }
 
 void slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I64_MIN, I64 maxVal = I64_MAX, I64 incrementAmount = 1, bool minMaxEnforced = false) {
-	// Mostly the same code as the F64 slider, slightly different drag mechanic
+	// Mostly the same code as the F64 slider, slightly different drag code because it's quantized larger than a pixel
 	if (maxVal < minVal) {
 		maxVal = minVal;
 	}
@@ -1956,7 +1958,50 @@ void slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I64_MI
 	}
 }
 
-void slider_bool() {
+void slider_bool(B8* toUpdate = nullptr, B8 defaultVal = false) {
+	UI_RBOX() {
+		F32 size = sizeStack.back().x;
+		Box* spacerBefore = spacer(size).unsafeBox;
+		Box* iconBox = generic_box().unsafeBox;
+		Box* spacerAfter = spacer(size).unsafeBox;
+		(defaultVal ? spacerAfter : spacerBefore)->flags |= BOX_FLAG_DISABLED;
+		iconBox->backgroundTexture = defaultVal ? &Resources::uiToggleOn : &Resources::uiToggleOff;
+		iconBox->backgroundColor = themeColor.button;
+
+		set_box_callback(workingBox, [spacerBefore, spacerAfter, iconBox](Box* box, UserCommunication& com) {
+			if (com.leftClicked) {
+				box->value.b8 = B8(!bool(box->value.b8));
+				iconBox->backgroundTexture = box->value.b8 ? &Resources::uiToggleOn : &Resources::uiToggleOff;
+				spacerBefore->flags ^= BOX_FLAG_DISABLED;
+				spacerAfter->flags ^= BOX_FLAG_DISABLED;
+				if (box->updatePtr.b8) {
+					*box->updatePtr.b8 = box->value.b8;
+				}
+				return ACTION_HANDLED;
+			}
+			return ACTION_PASS;
+		});
+		workingBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
+		if (toUpdate) {
+			*toUpdate = defaultVal;
+		}
+		workingBox->value.b8 = defaultVal;
+		workingBox->updatePtr.b8 = toUpdate;
+		workingBox->backgroundColor = themeColor.inputField;
+		workingBox->padding = 2.0F;
+		workingBox->flags &= ~BOX_FLAG_INVISIBLE;
+	}
+}
+
+void accordion() {
+
+}
+
+void dropdown_selector() {
+
+}
+
+void color_picker() {
 
 }
 
