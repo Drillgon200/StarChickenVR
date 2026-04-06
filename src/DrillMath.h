@@ -199,7 +199,7 @@ __m256 cbrtf32x8(__m256 x) {
 	return _mm256_blendv_ps(result, x, isZeroOrInfOrNan);
 }
 
-F32 cbrtf32(F32 x) {
+FINLINE F32 cbrtf32(F32 x) {
 	return _mm256_cvtss_f32(cbrtf32x8(_mm256_set1_ps(x)));
 }
 
@@ -267,9 +267,79 @@ __m256 pow2f32x8(__m256 x) {
 	result = _mm256_blendv_ps(x, result, shouldNotUseNan);
 	return result;
 }
-
-F32 pow2f32(F32 x) {
+// These two only get within ~6 bits of stdlib exp(x) and pow(10, x), but that's probably to be expected from taking the lazy approach and reusing pow2.
+FINLINE __m256 powef32x8(__m256 x) {
+	__m256 log2OfE = _mm256_set1_ps(1.44269504089F);
+	return pow2f32x8(_mm256_mul_ps(log2OfE, x));
+}
+FINLINE __m256 pow10f32x8(__m256 x) {
+	__m256 log2Of10 = _mm256_set1_ps(3.32192809489F);
+	return pow2f32x8(_mm256_mul_ps(log2Of10, x));
+}
+FINLINE F32 pow2f32(F32 x) {
 	return _mm256_cvtss_f32(pow2f32x8(_mm256_set1_ps(x)));
+}
+FINLINE F32 powef32(F32 x) {
+	return _mm256_cvtss_f32(powef32x8(_mm256_set1_ps(x)));
+}
+FINLINE F32 pow10f32(F32 x) {
+	return _mm256_cvtss_f32(pow10f32x8(_mm256_set1_ps(x)));
+}
+
+// This is within 7 bits of precision for most floats, and is about twice as fast as stdlib (much faster when using SIMD)
+// Coeffs found with sollya
+// Does not handle subnormals accurately
+// Has an annoying case when x is less than 1 but very close to 1 where catastrophic cancellation happens and precision nose dives
+// This approximation isn't all that good anyway, but at this point I've spent too much time on these math functions and I need to move on
+__m256 log2f32x8(__m256 x) {
+	// This splits log2(s * 2^e) into log2(s) + log2(2^e)
+	// log2(s) is approximated with a polynomial
+	// log2(2^e) is trivially the exponent
+	__m256i bits = _mm256_castps_si256(x);
+	__m256i significandMask = _mm256_set1_epi32((1 << 23) - 1);
+	__m256i significand = _mm256_and_si256(bits, significandMask);
+	__m256i exp = _mm256_sub_epi32(_mm256_and_si256(_mm256_srli_epi32(bits, 23), _mm256_set1_epi32(0b11111111)), _mm256_set1_epi32(127));
+	__m256 one = _mm256_set1_ps(1.0F);
+	__m256 significand01 = _mm256_sub_ps(_mm256_castsi256_ps(_mm256_or_si256(significand, _mm256_set1_epi32(127 << 23))), one);
+	__m256 log2Significand = _mm256_fmadd_ps(_mm256_set1_ps(-3.4435906787355814293376528108573966076787864732198e-2F), significand01, _mm256_set1_ps(0.14603288827539976184445549409484418078660366632608F));
+	log2Significand = _mm256_fmadd_ps(log2Significand, significand01, _mm256_set1_ps(-0.3030362032701562043252979683936870986440607253983F));
+	log2Significand = _mm256_fmadd_ps(log2Significand, significand01, _mm256_set1_ps(0.4691740648127516598160182222379789624319671339553F));
+	log2Significand = _mm256_fmadd_ps(log2Significand, significand01, _mm256_set1_ps(-0.72042616446971023784522047693322670019400535049907F));
+	log2Significand = _mm256_fmadd_ps(log2Significand, significand01, _mm256_set1_ps(1.44268291960586957816807976997675902785680556717804F));
+	__m256 result = _mm256_fmadd_ps(log2Significand, significand01, _mm256_cvtepi32_ps(exp));
+
+	// Proper inf/nan handling
+	__m256 isInfOrNan = _mm256_castsi256_ps(_mm256_cmpeq_epi32(exp, _mm256_set1_epi32(128)));
+	result = _mm256_blendv_ps(result, x, isInfOrNan);
+	result = _mm256_blendv_ps(result, _mm256_set1_ps(-F32_INF), _mm256_cmp_ps(x, _mm256_setzero_ps(), _CMP_EQ_OQ));
+	result = _mm256_blendv_ps(result, _mm256_set1_ps(F32_QNAN), _mm256_cmp_ps(x, _mm256_setzero_ps(), _CMP_LT_OQ));
+	return result;
+}
+FINLINE __m256 lnf32x8(__m256 x) {
+	__m256 invLog2E = _mm256_set1_ps(0.69314718056F);
+	return _mm256_mul_ps(invLog2E, log2f32x8(x));
+}
+FINLINE __m256 log10f32x8(__m256 x) {
+	__m256 invLog2Of10 = _mm256_set1_ps(0.301029995664F);
+	return _mm256_mul_ps(invLog2Of10, log2f32x8(x));
+}
+FINLINE F32 log2f32(F32 x) {
+	return _mm256_cvtss_f32(log2f32x8(_mm256_set1_ps(x)));
+}
+FINLINE F32 lnf32(F32 x) {
+	return _mm256_cvtss_f32(lnf32x8(_mm256_set1_ps(x)));
+}
+FINLINE F32 log10f32(F32 x) {
+	return _mm256_cvtss_f32(log10f32x8(_mm256_set1_ps(x)));
+}
+
+// This aren't great as far as precision goes
+// I don't even use pow very much (I can't even think of a case other than SRGB conversions, which don't need a ton of precision anyway), so I'm not going to bother figuring out a better version.
+FINLINE __m256 powf32x8(__m256 base, __m256 exp) {
+	return pow2f32x8(_mm256_mul_ps(log2f32x8(base), exp));
+}
+FINLINE F32 powf32(F32 base, F32 exp) {
+	return _mm256_cvtss_f32(powf32x8(_mm256_set1_ps(base), _mm256_set1_ps(exp)));
 }
 
 FINLINE F32 fractf32(F32 f) {
