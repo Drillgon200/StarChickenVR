@@ -236,6 +236,42 @@ F32 cbrtf32_robust(F32 x) {
 	return cbrtSignificand * bitcast<F32>(newExp + 127 << 23 | bits & 1u << 31) * remainderExp;
 }
 
+// This gets within one bit of the stdlib version and is slightly faster (much faster when using SIMD)
+// Coeffs found with sollya
+// Does not handle subnormals accurately
+__m256 pow2f32x8(__m256 x) {
+	// The computes 2^x as a two part 2^floor(x) * 2^fract(x)
+	// The floor part is computed by simply stuffing it into the IEEE exponent field
+	// The fract part is computed with a polynomial fit
+	__m256 absX = _mm256_and_ps(x, _mm256_set1_ps(bitcast<F32>(0x7FFFFFFF)));
+	__m256 truncated = _mm256_round_ps(absX, _MM_ROUND_MODE_TOWARD_ZERO);
+	__m256 fractionPart = _mm256_sub_ps(absX, truncated);
+	__m256i integerPart = _mm256_cvtps_epi32(truncated);
+	__m256 pow2FractionPart = _mm256_fmadd_ps(fractionPart, _mm256_set1_ps(2.0745577452173116138899392926274566657588882877461e-4F), _mm256_set1_ps(1.2710057437676320596468566627965694246010438115633e-3F));
+	pow2FractionPart = _mm256_fmadd_ps(fractionPart, pow2FractionPart, _mm256_set1_ps(9.6506509344066808753569327623568348625884121380838e-3F));
+	pow2FractionPart = _mm256_fmadd_ps(fractionPart, pow2FractionPart, _mm256_set1_ps(5.5496565081994350748928811975446998005787350103606e-2F));
+	pow2FractionPart = _mm256_fmadd_ps(fractionPart, pow2FractionPart, _mm256_set1_ps(0.24022713817663577346824737091020265808148723068444F));
+	pow2FractionPart = _mm256_fmadd_ps(fractionPart, pow2FractionPart, _mm256_set1_ps(0.69314717213715269176864837534064835958500431844984F));
+	pow2FractionPart = _mm256_fmadd_ps(fractionPart, pow2FractionPart, _mm256_set1_ps(1.0F));
+	__m256 exponentiated = _mm256_mul_ps(pow2FractionPart, _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_add_epi32(integerPart, _mm256_set1_epi32(127)), 23)));
+	__m256 invExponentiated = _mm256_div_ps(_mm256_set1_ps(1.0F), exponentiated);
+	__m256 xLessThan0 = _mm256_cmp_ps(x, _mm256_setzero_ps(), _CMP_LT_OQ);
+	exponentiated = _mm256_blendv_ps(exponentiated, invExponentiated, xLessThan0);
+	
+	// The rest of this is just to make sure we return the right infinities and nans
+	__m256 infResult = _mm256_andnot_ps(xLessThan0, _mm256_set1_ps(F32_INF));
+	__m256 shouldUseInf = _mm256_cmp_ps(truncated, _mm256_set1_ps(127.0F), _CMP_GT_OQ);
+	shouldUseInf = _mm256_or_ps(shouldUseInf, _mm256_cmp_ps(absX, _mm256_set1_ps(F32_INF), _CMP_EQ_UQ));
+	__m256 result = _mm256_blendv_ps(exponentiated, infResult, shouldUseInf);
+	__m256 shouldNotUseNan = _mm256_cmp_ps(x, x, _CMP_EQ_OQ);
+	result = _mm256_blendv_ps(x, result, shouldNotUseNan);
+	return result;
+}
+
+F32 pow2f32(F32 x) {
+	return _mm256_cvtss_f32(pow2f32x8(_mm256_set1_ps(x)));
+}
+
 FINLINE F32 fractf32(F32 f) {
 	return f - _mm_cvtss_f32(_mm_round_ps(_mm_set_ss(f), _MM_ROUND_MODE_TOWARD_ZERO));
 }
