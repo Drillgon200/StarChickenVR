@@ -208,6 +208,19 @@ struct PanelTextureProcessing {
 					slider_i64();
 					slider_i64(nullptr, 5, 0, 10);
 					slider_bool();
+					color_picker();
+					static StrA dropdownNames[]{ "One"a, "Two"a, "Three"a };
+					static U32 dropdownIndices[]{ 1, 2, 3 };
+					dropdown_selector("Test dropdown"a, 3, dropdownNames, dropdownIndices);
+					UI_ACCORDION("Accordion expander"a) {
+						workingBox->padding = 4.0F;
+						slider_i64();
+						slider_i64();
+						UI_ACCORDION("Nested expander"a) {
+							slider_f64();
+						}
+						slider_i64();
+					}
 				}
 			}
 		}

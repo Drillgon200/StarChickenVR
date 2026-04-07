@@ -1,0 +1,70 @@
+// Credit to Bjorn Ottosson for Oklab
+// https://bottosson.github.io/posts/oklab/
+@[V3F lin][V3F lab] oklab_to_linear{
+	F32 l{ lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z };
+	F32 m{ lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z };
+	F32 s{ lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z };
+	l = l * l * l;
+	m = m * m * m;
+	s = s * s * s;
+	F32 r{  4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s };
+	F32 g{ -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s };
+	F32 b{ -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s };
+	return V3F(r, g, b);
+};
+
+@[V3F srgb][V3F Lab] oklab_to_srgb{
+	V3F rgb{ oklab_to_linear(Lab) };
+	return to_srgb(rgb);
+};
+
+@[F32 lightness][F32 L] oklab_l_to_lightness{
+	F32 k1{0.206 };
+	F32 k2{0.03 };
+	F32 k3{(1.0 + k1) / (1.0 + k2) };
+	F32 t{ k3 * L - k1 };
+	return 0.5 * (t + sqrt(t * t + 4.0 * k2 * k3 * L));
+};
+
+@[F32 L][F32 lightness] lightness_to_oklab_l{
+	F32 k1{ 0.206 };
+	F32 k2{ 0.03 };
+	F32 k3{ (1.0 + k1) / (1.0 + k2) };
+	return (lightness * (lightness + k1)) / (k3 * (lightness + k2));
+};
+
+@[V3F lch][V3F lab] lab_to_lch{
+	F32 radToTurn{ 0.15915494309 };
+	return V3F(lab.x, sqrt(lab.y * lab.y + lab.z * lab.z), atan2(lab.z, lab.y) * radToTurn);
+};
+
+@[V3F lab][V3F lch] lch_to_lab{
+	F32 turnToRad{ 6.28318530718 };
+	return V3F(lch.x, lch.y * cos(lch.z * turnToRad), lch.y * sin(lch.z * turnToRad));
+};
+
+@[V3F srgb][V3F lrch] lch_to_srgb{
+	return oklab_to_srgb(lch_to_lab(lrch));
+};
+
+@[V3F srgb][V3F lrch] lch_to_linear{
+	return oklab_to_linear(lch_to_lab(lrch));
+};
+
+@[V3F lrch][V3F lab] lab_to_lrch{
+	F32 radToTurn{ 0.15915494309 };
+	return V3F(oklab_l_to_lightness(lab.x), sqrt(lab.y * lab.y + lab.z * lab.z), atan2(lab.z, lab.y) * radToTurn);
+};
+
+@[V3F lab][V3F lrch] lrch_to_lab{
+	F32 turnToRad{ 6.28318530718 };
+	return V3F(lightness_to_oklab_l(lrch.x), lrch.y * cos(lrch.z * turnToRad), lrch.y * sin(lrch.z * turnToRad));
+};
+
+@[V3F srgb][V3F lrch] lrch_to_srgb{
+	return oklab_to_srgb(lrch_to_lab(lrch));
+};
+
+@[V3F lin][V3F lrch] lrch_to_linear{
+	return oklab_to_linear(lrch_to_lab(lrch));
+};

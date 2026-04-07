@@ -45,6 +45,9 @@ struct Vertex {
 
 #shader fragment
 
+#include "tonemap.dsi"
+#include "oklab.dsi"
+
 [uniform, set 0, binding 0] &Sampler bilinearSampler;
 [uniform, set 0, binding 6] &Image2DSampled[] textures;
 
@@ -78,14 +81,37 @@ struct Vertex {
 		};
 	};
 	U32 UI_RENDER_FLAG_MSDF{ 1 };
+	U32 UI_RENDER_FLAG_OKLrCH{ 2 };
+	U32 UI_RENDER_FLAG_OKLrCH_USE_UV_CL{ 4 };
+	U32 UI_RENDER_FLAG_OKLrCH_USE_UV_CH{ 8 };
+
+	V4F finalColor{ 0.0F };
 	if ^flags & UI_RENDER_FLAG_MSDF {
 		F32 screenPxRange{ screen_px_range(dxdy) };
 		V4F val{ sample_color(screenPxRange, ^texcoord) * ^color };
 		if !val.a {
 			terminate;
 		};
-		^fragColor = val;
+		finalColor = val;
 	} else {
-		^fragColor = (^textures)[nonuniform ^texidx][^bilinearSampler, ^texcoord] * ^color;
+		finalColor = (^textures)[nonuniform ^texidx][^bilinearSampler, ^texcoord] * ^color;
 	};
+	if ^flags & UI_RENDER_FLAG_OKLrCH {
+		F32 chromaScale{ 0.37 };
+		V3F lrchInput{
+			if ^flags & UI_RENDER_FLAG_OKLrCH_USE_UV_CL {
+				V3F(texcoord.y, texcoord.x * chromaScale, finalColor.r)
+			} else if ^flags & UI_RENDER_FLAG_OKLrCH_USE_UV_CH {
+				V3F(finalColor.r, texcoord.x * chromaScale, texcoord.y)
+			} else {
+				finalColor.rgb
+			}
+		};
+		V3F converted{ lrch_to_srgb(lrchInput) };
+		if any(converted < V3F(0.0)) || any(converted > V3F(1.0)) {
+			finalColor.a = 0.0;
+		};
+		finalColor = V4F(converted, finalColor.a);
+	};
+	^fragColor = finalColor;
 };

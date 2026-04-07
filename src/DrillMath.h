@@ -429,6 +429,11 @@ FINLINE U64 log2floor64(U64 val) {
 }
 
 template<typename T>
+FINLINE T sqr(T t) {
+	return t * t;
+}
+
+template<typename T>
 FINLINE T max(T a, T b) {
 	return a > b ? a : b;
 }
@@ -563,6 +568,8 @@ template<>
 FINLINE F32x8 clamp01(F32x8 val) {
 	return _mm256_min_ps(_mm256_set1_ps(1.0F), _mm256_max_ps(_mm256_setzero_ps(), val));
 }
+
+struct RGBA8;
 
 #pragma pack(push, 1)
 struct V2F32 {
@@ -703,6 +710,14 @@ template<>
 FINLINE V2F32 max<V2F32>(V2F32 a, V2F32 b) {
 	return V2F32{ a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y };
 }
+template<>
+FINLINE V2F32 clamp(V2F32 val, V2F32 low, V2F32 high) {
+	return min(high, max(low, val));
+}
+template<>
+FINLINE V2F32 clamp01(V2F32 val) {
+	return clamp(val, V2F32{}, V2F32{ 1.0F, 1.0F });
+}
 
 void println_v2f32(V2F32 vec) {
 	print("(");
@@ -741,6 +756,8 @@ struct V3F32 {
 	FINLINE V2F32 yz() {
 		return V2F32{ y, z };
 	}
+
+	RGBA8 to_rgba8(F32 a);
 };
 #pragma pack(pop)
 typedef V3F32 V3F;
@@ -930,7 +947,6 @@ typedef V2U32 V2U;
 
 DEBUG_OPTIMIZE_OFF
 
-struct RGBA8;
 #pragma pack(push, 1)
 struct V4F32 {
 	F32 x, y, z, w;
@@ -2233,6 +2249,9 @@ struct RGBA8 {
 		return *this;
 	}
 };
+RGBA8 V3F32::to_rgba8(F32 a) {
+	return RGBA8{ U8(clamp01(x) * 255.0F), U8(clamp01(y) * 255.0F), U8(clamp01(z) * 255.0F), U8(clamp01(a) * 255.0F) };
+}
 RGBA8 V4F32::to_rgba8() {
 	return RGBA8{ U8(clamp01(x) * 255.0F), U8(clamp01(y) * 255.0F), U8(clamp01(z) * 255.0F), U8(clamp01(w) * 255.0F) };
 }
@@ -2464,6 +2483,32 @@ struct Rng2I32 {
 
 FINLINE U32 pack_unorm4x8(V4F32 v) {
 	return U32(v.x * 255.0F) | U32(v.y * 255.0F) << 8 | U32(v.z * 255.0F) << 16 | U32(v.w * 255.0F) << 24;
+}
+
+// https://registry.khronos.org/OpenGL/extensions/EXT/EXT_texture_sRGB.txt
+FINLINE F32 to_srgb(F32 x) {
+	if (x < 0.0031308F) {
+		return 12.92F * x;
+	} else {
+		return 1.055F * powf32(x, 0.41666F) - 0.055F;
+	}
+}
+FINLINE V3F to_srgb(V3F x) {
+	return V3F{ to_srgb(x.x), to_srgb(x.y), to_srgb(x.z) };
+}
+FINLINE F32 from_srgb(F32 x) {
+	if (x <= 0.04045F) {
+		return x * (1.0F / 12.92F);
+	} else {
+		// So technically my pow function isn't quite accurate enough to do the conversion perfectly for all 8 bit values. It misses exactly one.
+		// It's off by a couple digits in the thousandths place, causing the conversion of 220 round down to 182 instead of up to 183
+		// This is annoying, but I really need to spend time on implementing real things that matter instead of improving the accuracy of my math functions
+		// It'll just have to be like this for now
+		return powf32((x + 0.055F) * (1.0F / 1.055F), 2.4F);
+	}
+}
+FINLINE V3F from_srgb(V3F x) {
+	return V3F{ from_srgb(x.x), from_srgb(x.y), from_srgb(x.z) };
 }
 
 V3F uncharted2_tonemap_partial(V3F x) {

@@ -4,6 +4,7 @@
 #include "DynamicVertexBuffer.h"
 #include "TextRenderer.h"
 #include "SerializeTools.h"
+#include "compression/Oklab.h"
 
 // Placement new from <new> (I don't want to include thousands of lines of C++ headers just for this)
 // Just to avoid potential UB issues when putting capturing lambdas in boxes
@@ -195,6 +196,8 @@ struct Box {
 	RGBA8 borderColor;
 	RGBA8 backgroundColor;
 	Resources::Texture* backgroundTexture;
+	U32 backgroundRenderFlags;
+	Rng2F32 backgroundUV;
 
 	union {
 		struct {
@@ -208,6 +211,10 @@ struct Box {
 			I64 val;
 		} i64;
 		B8 b8;
+		struct {
+			V3F oklabLrCH;
+			V3F srgb;
+		} color;
 	} value;
 
 	union {
@@ -594,6 +601,7 @@ void make_default_settings(Box* box) {
 	box->sizeModeX = sizeModeXStack.back();
 	box->sizeModeY = sizeModeYStack.back();
 	box->align = alignModeStack.back();
+	box->backgroundUV = Rng2F32{ 0.0F, 0.0F, 1.0F, 1.0F };
 }
 
 char* alloc_text_input() {
@@ -1118,7 +1126,7 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 		if (box->borderWidth != 0.0F && box->borderColor.a != 0) {
 			V4F32 color = box->borderColor.to_v4f32();
 			F32 borderWidth = box->borderWidth * scale;
-			tes.ui_rect2d(renderArea.minX - borderWidth, renderArea.minY - borderWidth, renderArea.maxX + borderWidth, renderArea.maxY + borderWidth, z, 0.0F, 0.0F, 1.0F, 1.0F, color, Resources::simpleWhite.index, prevClipBox << 16);
+			tes.ui_rect2d(renderArea.minX - borderWidth, renderArea.minY - borderWidth, renderArea.maxX + borderWidth, renderArea.maxY + borderWidth, z, 0.0F, 0.0F, 0.0F, 0.0F, color, Resources::simpleWhite.index, prevClipBox << 16);
 		}
 		if (box->backgroundColor.a != 0) {
 			V4F32 color = box->backgroundColor.to_v4f32();
@@ -1131,11 +1139,12 @@ void draw_box(DynamicVertexBuffer::Tessellator& tes, Box* box, V2F mousePos, V2F
 				}
 			}
 			Resources::Texture& tex = box->backgroundTexture ? *box->backgroundTexture : Resources::simpleWhite;
-			U32 flags = clipBoxIndexStack.back() << 16;
+			U32 flags = clipBoxIndexStack.back() << 16 | box->backgroundRenderFlags;
 			if (tex.flags & Resources::TEXTURE_FLAG_MSDF) {
 				flags |= VK::UI_RENDER_FLAG_MSDF;
 			}
-			tes.ui_rect2d(renderArea.minX, renderArea.minY, renderArea.maxX, renderArea.maxY, z, 0.0F, 0.0F, 1.0F, 1.0F, color, tex.index, flags);
+			Rng2F32 uv = box->backgroundUV;
+			tes.ui_rect2d(renderArea.minX, renderArea.minY, renderArea.maxX, renderArea.maxY, z, uv.minX, uv.minY, uv.maxX, uv.maxY, color, tex.index, flags);
 		}
 		MEMORY_ARENA_FRAME(scratchArena0) {
 			if (!box->text.is_empty() && box->numTypedCharacters == 0) {
@@ -1414,6 +1423,7 @@ void handle_mouse_update(V2F32 pos, V2F32 delta) {
 		UserCommunication comm{};
 		comm.mousePos = pos;
 		comm.drag = delta / activeBoxTotalScale;
+		comm.renderArea = Rng2F32{ active->renderPos.x, active->renderPos.y, active->renderPos.x + active->computedSize.x, active->renderPos.y + active->computedSize.y };
 		totalActiveDrag += comm.drag;
 		comm.totalDrag = totalActiveDrag;
 		active->actionCallback(active, comm);
@@ -1533,10 +1543,11 @@ void lbox(BoxActionCallback callback = nullptr) {
 void rbox(BoxActionCallback callback = nullptr) {
 	layout_box(LAYOUT_DIRECTION_RIGHT, callback);
 }
-void background_box() {
+BoxHandle background_box() {
 	BoxHandle box = generic_box();
 	box.unsafeBox->sizeModeX = box.unsafeBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
 	workingBox = box.unsafeBox;
+	return box;
 }
 #define UI_UBOX() DEFER_LOOP(UI::ubox(), UI::pop_box())
 #define UI_DBOX() DEFER_LOOP(UI::dbox(), UI::pop_box())
@@ -1561,6 +1572,12 @@ BoxHandle spacer() {
 	} else {
 		box.unsafeBox->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
 	}
+	return box;
+}
+BoxHandle icon(Resources::Texture& tex) {
+	BoxHandle box = generic_box();
+	box.unsafeBox->sizeModeX = box.unsafeBox->sizeModeY = SIZE_MODE_FIT_CHILDREN;
+	box.unsafeBox->backgroundTexture = &tex;
 	return box;
 }
 BoxHandle text(StrA str, BoxActionCallback actionCallback = nullptr) {
@@ -1667,120 +1684,28 @@ void path_input(StrA fieldName) {
 	}
 }
 
-/*
-// onClick of type BoxConsumer
-// Min and max are only hints, they do not guarantee the text value
-template<typename Callback>
-BoxHandle slider_number(F32 min, F32 max, F32 step, Callback&& onTextUpdated) {
-	BoxHandle result;
-	UI_RBOX() {
-		UI_SIZE((V2F32{ 8.0F, 8.0F })) {
-			BoxHandle incrementButton = generic_box();
-			incrementButton.unsafeBox->flags |= BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
-			incrementButton.unsafeBox->backgroundTexture = &Resources::uiIncrementLeft;
-			incrementButton.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
-			incrementButton.unsafeBox->flags |= BOX_FLAG_CENTER_ON_ORTHOGONAL_AXIS;
-			set_box_consumer_box_callback(incrementButton.unsafeBox, reinterpret_cast<Callback&&>(onTextUpdated));
-			incrementButton.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
-				if (com.leftClicked) {
-					Box* textInput = box->next;
-					F32 step = bitcast<F32>(U32(textInput->callbackAltData[1]));
-					F32 min = bitcast<F32>(U32(textInput->callbackAltData[2]));
-					F32 max = bitcast<F32>(U32(textInput->callbackAltData[2] >> 32));
-					F64 num;
-					StrA textStr = StrA{ textInput->typedTextBuffer, textInput->numTypedCharacters };
-					if (SerializeTools::parse_f64(&num, &textStr) && SerializeTools::skip_whitespace(&textStr).is_empty()) {
-						num = clamp<F32>(num - step, min, max);
-						textInput->numTypedCharacters = MAX_TEXT_INPUT;
-						SerializeTools::serialize_f64(textInput->typedTextBuffer, &textInput->numTypedCharacters, roundf64(num * 10000.0) / 10000.0);
-						BoxConsumer(textInput->callbackAltData[0])(textInput);
-					}
-					return ACTION_HANDLED;
-				}
-				return ACTION_PASS;
-			};
-		}
-
-
-		BoxHandle box = generic_box();
-		result = box;
-		box.unsafeBox->flags = BOX_FLAG_CLIP_CHILDREN | BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
-		box.unsafeBox->sizeParentPercent.x = 1.0F;
-		box.unsafeBox->text = ""a;
-		box.unsafeBox->typedTextBuffer = alloc_text_input();
-		StrA defaultStr = "0.0"a;
-		memcpy(box.unsafeBox->typedTextBuffer, defaultStr.str, defaultStr.length);
-		box.unsafeBox->numTypedCharacters = U32(defaultStr.length);
-		set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onTextUpdated));
-		box.unsafeBox->callbackAltData[1] = bitcast<U32>(step);
-		box.unsafeBox->callbackAltData[2] = U64(bitcast<U32>(max)) << 32 | bitcast<U32>(min);
-		box.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_SIZE_HORIZONTAL;
-		box.unsafeBox->actionCallback = [](Box* box, UserCommunication& comm) {
-			if (comm.leftClicked) {
-				activeTextBox = BoxHandle{ box, box->generation };
-				return ACTION_HANDLED;
-			}
-			F32 step = bitcast<F32>(U32(box->callbackAltData[1]));
-			F32 min = bitcast<F32>(U32(box->callbackAltData[2]));
-			F32 max = bitcast<F32>(U32(box->callbackAltData[2] >> 32));
-			if (comm.keyPressed && activeTextBox.get() == box) {
-				if (comm.charTyped && box->numTypedCharacters < MAX_TEXT_INPUT) {
-					box->typedTextBuffer[box->numTypedCharacters++] = comm.charTyped;
-				} else if (comm.keyPressed == Win32::KEY_BACKSPACE && box->numTypedCharacters > 0) {
-					box->numTypedCharacters--;
-				}
-				BoxConsumer(box->callbackAltData[0])(box);
-				return ACTION_HANDLED;
-			}
-			if (comm.drag.x) {
-				F64 num;
-				StrA textStr = StrA{ box->typedTextBuffer, box->numTypedCharacters };
-				if (SerializeTools::parse_f64(&num, &textStr) && SerializeTools::skip_whitespace(&textStr).is_empty()) {
-					num += step * comm.drag.x;
-					box->numTypedCharacters = MAX_TEXT_INPUT;
-					SerializeTools::serialize_f64(box->typedTextBuffer, &box->numTypedCharacters, roundf64(num * 10000.0) / 10000.0);
-					BoxConsumer(box->callbackAltData[0])(box);
-				}
-				return ACTION_HANDLED;
-			}
-			return ACTION_PASS;
-		};
-
-		UI_SIZE((V2F32{ 8.0F, 8.0F })) {
-			BoxHandle incrementButton = generic_box();
-			incrementButton.unsafeBox->flags |= BOX_FLAG_HIGHLIGHT_ON_USER_INTERACTION;
-			incrementButton.unsafeBox->backgroundTexture = &Resources::uiIncrementRight;
-			incrementButton.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
-			incrementButton.unsafeBox->flags |= BOX_FLAG_CENTER_ON_ORTHOGONAL_AXIS;
-			set_box_consumer_box_callback(incrementButton.unsafeBox, reinterpret_cast<Callback&&>(onTextUpdated));
-			incrementButton.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
-				if (com.leftClicked) {
-					Box* textInput = box->prev;
-					F32 step = bitcast<F32>(U32(textInput->callbackAltData[1]));
-					F32 min = bitcast<F32>(U32(textInput->callbackAltData[2]));
-					F32 max = bitcast<F32>(U32(textInput->callbackAltData[2] >> 32));
-					F64 num;
-					StrA textStr = StrA{ textInput->typedTextBuffer, textInput->numTypedCharacters };
-					if (SerializeTools::parse_f64(&num, &textStr) && SerializeTools::skip_whitespace(&textStr).is_empty()) {
-						num = clamp<F32>(num + step, min, max);
-						textInput->numTypedCharacters = MAX_TEXT_INPUT;
-						SerializeTools::serialize_f64(textInput->typedTextBuffer, &textInput->numTypedCharacters, roundf64(num * 10000.0) / 10000.0);
-						BoxConsumer(textInput->callbackAltData[0])(textInput);
-					}
-					return ACTION_HANDLED;
-				}
-				return ACTION_PASS;
-			};
-		}
-
-	}
-	return result;
+Box* context_menu_begin_helper() {
+	BoxHandle dummyParent = alloc_box();
+	dummyParent.unsafeBox->flags |= BOX_FLAG_INVISIBLE;
+	workingBox = dummyParent.unsafeBox;
+	BoxHandle box = generic_box();
+	workingBox = box.unsafeBox;
+	box.unsafeBox->layoutDirection = LAYOUT_DIRECTION_RIGHT;
+	spacer(2.0F);
+	dbox();
+	workingBox->padding = 2.0F;
+	return dummyParent.unsafeBox;
 }
-template<typename Callback>
-BoxHandle slider_number(F32 step, Callback&& onTextUpdated) {
-	return slider_number(-F32_INF, F32_INF, step, reinterpret_cast<Callback&&>(onTextUpdated));
+void context_menu_end_helper(BoxHandle parent, V2F32 offset) {
+	pop_box();
+	spacer(2.0F);
+	pop_box();
+	context_menu(parent, BoxHandle{ workingBox, workingBox->generation }, offset);
 }
-*/
+
+// Suppress "hides previous local declaration" and "local variable is initialized but not referenced", intended behavior for this construct
+#define UI_ADD_CONTEXT_MENU(parent, offset) __pragma(warning(suppress : 4456 4189))\
+	for (UI::Box* oldWorkingBox = UI::workingBox, * contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
 
 void set_box_f64_val(Box* box, F64 newVal) {
 	if (box->flags & BOX_FLAG_SLIDER_MIN_MAX_ENFORCED) {
@@ -1797,17 +1722,18 @@ void set_box_f64_val(Box* box, F64 newVal) {
 	}
 }
 
-void slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64_INF, F64 maxVal = F64_INF, F64 incrementAmount = 1.0, bool minMaxEnforced = false) {
+BoxHandle slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64_INF, F64 maxVal = F64_INF, F64 incrementAmount = 1.0, bool minMaxEnforced = false) {
 	if (maxVal < minVal) {
 		maxVal = minVal;
 	}
+	Box* textBox = nullptr;
 	UI_RBOX() {
 		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 		button(Resources::uiArrowLeft, [incrementAmount](Box* box){
 			Box* slider = box->next;
 			set_box_f64_val(slider, slider->value.f64.val - incrementAmount);
 		});
-		Box* textBox = text_input(""a, "0.0"a, false, [](Box* box){
+		textBox = text_input(""a, "0.0"a, false, [](Box* box){
 			F64 newVal = box->value.f64.val;
 			F64 parsed;
 			if (SerializeTools::parse_f64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters })) {
@@ -1863,6 +1789,7 @@ void slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal = -F64
 			set_box_f64_val(slider, slider->value.f64.val + incrementAmount);
 		});
 	}
+	return BoxHandle{ textBox, textBox->generation };
 }
 
 void set_box_i64_val(Box* box, I64 newVal) {
@@ -1880,18 +1807,19 @@ void set_box_i64_val(Box* box, I64 newVal) {
 	}
 }
 
-void slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I64_MIN, I64 maxVal = I64_MAX, I64 incrementAmount = 1, bool minMaxEnforced = false) {
+BoxHandle slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I64_MIN, I64 maxVal = I64_MAX, I64 incrementAmount = 1, bool minMaxEnforced = false) {
 	// Mostly the same code as the F64 slider, slightly different drag code because it's quantized larger than a pixel
 	if (maxVal < minVal) {
 		maxVal = minVal;
 	}
+	Box* textBox = nullptr;
 	UI_RBOX() {
 		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 		button(Resources::uiArrowLeft, [incrementAmount](Box* box){
 			Box* slider = box->next;
 			set_box_i64_val(slider, slider->value.i64.val - incrementAmount);
 		});
-		Box* textBox = text_input(""a, "0"a, false, [](Box* box){
+		textBox = text_input(""a, "0"a, false, [](Box* box){
 			I64 newVal = box->value.i64.val;
 			I64 parsed;
 			SerializeTools::IntParseError err = SerializeTools::parse_i64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters });
@@ -1956,6 +1884,7 @@ void slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I64_MI
 			set_box_i64_val(slider, slider->value.i64.val + incrementAmount);
 		});
 	}
+	return BoxHandle{ textBox, textBox->generation };
 }
 
 void slider_bool(B8* toUpdate = nullptr, B8 defaultVal = false) {
@@ -1993,16 +1922,153 @@ void slider_bool(B8* toUpdate = nullptr, B8 defaultVal = false) {
 	}
 }
 
-void accordion() {
-
+void accordion_begin(StrA name) {
+	dbox();
+	workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+	Box* collapseButton = button(Resources::simpleWhite, [](Box* box) {}).unsafeBox;
+	collapseButton->layoutDirection = LAYOUT_DIRECTION_RIGHT;
+	collapseButton->sizeModeY = SIZE_MODE_FIT_CHILDREN;
+	collapseButton->align = ALIGN_MODE_CENTER_LEFT;
+	collapseButton->padding = 2.0F;
+	collapseButton->backgroundColor = RGBA8{ 0, 0, 0, 0 };
+	Box* collapseIcon = nullptr;
+	UI_WORKING_BOX(collapseButton) {
+		collapseIcon = icon(Resources::uiAccordionClosed).unsafeBox;
+		collapseIcon->backgroundColor = themeColor.button;
+		collapseIcon->size *= 0.5F;
+		text(name);
+	}
+	rbox();
+	workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+	Box* userContainer = workingBox;
+	set_box_consumer_box_callback(collapseButton, [userContainer, collapseIcon](Box* box) {
+		bool previouslyDisabled = (userContainer->flags & BOX_FLAG_DISABLED) != 0;
+		userContainer->flags ^= BOX_FLAG_DISABLED;
+		collapseIcon->backgroundTexture = previouslyDisabled ? &Resources::uiAccordionOpen : &Resources::uiAccordionClosed;
+	});
+	userContainer->flags |= BOX_FLAG_DISABLED;
+	spacer(10.0F);
+	dbox();
+	workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 }
 
-void dropdown_selector() {
+void accordion_end() {
+	pop_box(); // User container
+	pop_box(); // Indentation
+	pop_box(); // Accordion layout
+}
 
+#define UI_ACCORDION(name) DEFER_LOOP(UI::accordion_begin(name), UI::accordion_end())
+
+void dropdown_selector(StrA name, U32 count, StrA* modes, U32* indices) {
+	Box* layoutButton = button(Resources::simpleWhite, [count, modes, indices](Box* box) {
+		UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
+			for (U32 i = 0; i < count; i++) {
+				text_button(modes[i], [](Box* box){}).unsafeBox->value.i64.val = i;
+			}
+		}
+	}).unsafeBox;
+	layoutButton->layoutDirection = LAYOUT_DIRECTION_RIGHT;
+	layoutButton->align = ALIGN_MODE_CENTER_CENTER;
+	layoutButton->padding = 2.0F;
+	layoutButton->backgroundColor = themeColor.inputField;
+	UI_WORKING_BOX(layoutButton) {
+		Box* dropdownIcon = icon(Resources::uiArrowDown).unsafeBox;
+		dropdownIcon->backgroundColor = themeColor.button;
+		dropdownIcon->size *= 0.5F;
+		text(name);
+	}
 }
 
 void color_picker() {
+	UI_DBOX() {
+		Box* collapseButton = nullptr;
+		Box* colorBox = nullptr;
+		UI_RBOX() {
+			workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+			collapseButton = button(Resources::uiAccordionClosed, [](Box* box) {}).unsafeBox;
+			collapseButton->sizeModeX = collapseButton->sizeModeY = SIZE_MODE_FIT_CHILDREN;
+			collapseButton->size = V2F{ 16.0F, 16.0F };
+			colorBox = generic_box().unsafeBox;
+			colorBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+			colorBox->sizeModeY = SIZE_MODE_FIT_CHILDREN;
+			colorBox->size = V2F{ 16.0F, 16.0F };
+		}
+		Box* boxToCollapse = nullptr;
+		UI_DBOX() {
+			boxToCollapse = workingBox;
+			spacer(10.0F);
+			UI_RBOX() {
+				Box* clPicker = generic_box().unsafeBox;
+				clPicker->flags |= BOX_FLAG_CUSTOM_DRAW;
+				clPicker->sizeModeX = clPicker->sizeModeY = SIZE_MODE_FIT_CHILDREN;
+				clPicker->size = V2F{ 200.0F, 200.0F };
+				clPicker->backgroundColor = themeColor.inputField;
 
+				spacer(10.0F);
+
+				Box* huePicker = generic_box().unsafeBox;
+				huePicker->flags |= BOX_FLAG_CUSTOM_DRAW;
+				huePicker->sizeModeX = SIZE_MODE_FIT_CHILDREN;
+				huePicker->sizeModeY = SIZE_MODE_GROW_TO_PARENT;
+				huePicker->backgroundColor = RGBA8{ 127, 0, 0, 255 };
+				huePicker->backgroundRenderFlags = VK::UI_RENDER_FLAG_OKLrCH | VK::UI_RENDER_FLAG_OKLrCH_USE_UV_CH;
+				huePicker->backgroundUV = Rng2F32{ 0.25F, 0.0F, 0.25F, 1.0F };
+				huePicker->value.f64.val = 0.0F;
+				set_box_callback(huePicker, [clPicker, colorBox](Box* box, UserCommunication& com) {
+					if (com.leftClickStart || com.drag.y != 0.0F) {
+						F32 newHue = clamp01((com.mousePos.y - com.renderArea.minY) / com.renderArea.height());
+						clPicker->value.color.oklabLrCH.z = newHue;
+						clPicker->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut_lame(clPicker->value.color.oklabLrCH);
+						V3F srgb = Oklab::lrch_to_srgb(clPicker->value.color.oklabLrCH);
+						clPicker->value.color.srgb = srgb;
+						colorBox->backgroundColor = srgb.to_rgba8(1.0F);
+						return ACTION_HANDLED;
+					}
+					if (com.tessellator) {
+						V2F pos = box->renderPos;
+						F32 size = 8.0F;
+						F32 hue = clPicker->value.color.oklabLrCH.z;
+						F32 startY = com.renderArea.minY + hue * com.renderArea.height() - size * 0.5F;
+						com.tessellator->ui_rect2d(com.renderArea.minX - size, startY, com.renderArea.minX, startY + size, com.renderZ, 0.0F, 0.0F, 1.0F, 1.0F, V4F{ 1.0F, 1.0F, 1.0F, 1.0F }, Resources::uiAccordionClosed.index, com.clipBoxIndex << 16);
+						return ACTION_HANDLED;
+					}
+					return ACTION_PASS;
+				});
+
+				set_box_callback(clPicker, [huePicker, colorBox](Box* box, UserCommunication& com){
+					if (com.leftClickStart || com.drag != V2F{ 0.0F, 0.0F }) {
+						V2F newLrC = clamp01((com.mousePos - V2F{ com.renderArea.minX, com.renderArea.minY }) / V2F{ com.renderArea.width(), com.renderArea.height() });
+						newLrC = V2F{ 1.0F - newLrC.y, newLrC.x * Oklab::SRGB_PICKER_CHROMA_END };
+						box->value.color.oklabLrCH.x = newLrC.x;
+						box->value.color.oklabLrCH.y = newLrC.y;
+						box->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut_lame(box->value.color.oklabLrCH);
+						V3F srgb = Oklab::lrch_to_srgb(box->value.color.oklabLrCH);
+						box->value.color.srgb = srgb;
+						colorBox->backgroundColor = srgb.to_rgba8(1.0F);
+						return ACTION_HANDLED;
+					}
+					if (com.tessellator) {
+						Rng2F32 area = com.renderArea;
+						V3F LrCH = box->value.color.oklabLrCH;
+						com.tessellator->ui_rect2d(area.minX, area.minY, area.maxX, area.maxY, com.renderZ, 0.0F, 1.0F, 1.0f, 0.0F, V4F{ LrCH.z, 1.0F, 1.0F, 1.0F }, Resources::simpleWhite.index, com.clipBoxIndex << 16 | VK::UI_RENDER_FLAG_OKLrCH | VK::UI_RENDER_FLAG_OKLrCH_USE_UV_CL);
+						F32 size = 8.0F;
+
+						V2F start = box->renderPos - V2F{ size, size } * 0.5F + V2F{ LrCH.y / Oklab::SRGB_PICKER_CHROMA_END, 1.0F - LrCH.x } * box->computedSize;
+						com.tessellator->ui_rect2d(start.x, start.y, start.x + size, start.y + size, com.renderZ, 0.0F, 0.0F, 1.0F, 1.0F, V4F{ 1.0F, 1.0F, 1.0F, 1.0F }, Resources::uiToggleOff.index, com.clipBoxIndex << 16);
+						return ACTION_HANDLED;
+					}
+					return ACTION_PASS;
+				});
+			}
+		}
+		boxToCollapse->flags |= BOX_FLAG_DISABLED;
+		set_box_consumer_box_callback(collapseButton, [boxToCollapse](Box* box) {
+			bool previouslyDisabled = (boxToCollapse->flags & BOX_FLAG_DISABLED) != 0;
+			boxToCollapse->flags ^= BOX_FLAG_DISABLED;
+			box->backgroundTexture = previouslyDisabled ? &Resources::uiAccordionOpen : &Resources::uiAccordionClosed;
+		});
+	}
 }
 
 void do_scroll(Box* scrollHandler, Box* scrolled, F32 amount) {
@@ -2103,29 +2169,6 @@ void scroll_window_end() {
 }
 
 #define UI_SCROLL_WINDOW() DEFER_LOOP(UI::scroll_window_begin(), UI::scroll_window_end())
-
-Box* context_menu_begin_helper() {
-	BoxHandle dummyParent = alloc_box();
-	dummyParent.unsafeBox->flags |= BOX_FLAG_INVISIBLE;
-	workingBox = dummyParent.unsafeBox;
-	BoxHandle box = generic_box();
-	workingBox = box.unsafeBox;
-	box.unsafeBox->layoutDirection = LAYOUT_DIRECTION_RIGHT;
-	spacer(2.0F);
-	dbox();
-	workingBox->padding = 2.0F;
-	return dummyParent.unsafeBox;
-}
-void context_menu_end_helper(BoxHandle parent, V2F32 offset) {
-	pop_box();
-	spacer(2.0F);
-	pop_box();
-	context_menu(parent, BoxHandle{ workingBox, workingBox->generation }, offset);
-}
-
-// Suppress "hides previous local declaration" and "local variable is initialized but not referenced", intended behavior for this construct
-#define UI_ADD_CONTEXT_MENU(parent, offset) __pragma(warning(suppress : 4456 4189))\
-	for (UI::Box* oldWorkingBox = UI::workingBox, * contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
 
 
 }
