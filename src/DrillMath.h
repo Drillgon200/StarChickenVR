@@ -12,6 +12,15 @@ __m256 sincosf32_precisex8(__m256* sinOut, __m256 x) {
 	// Range reduce to 0-1
 	x = _mm256_sub_ps(x, _mm256_round_ps(x, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC));
 
+	// The input is is one of 5 buckets: 0-0.125, 0.125-0.375, 0.375-0.625, 0.625-0.875, 0.875-1.0
+	// Based on the bucket, we offset the by a number so the bucket is centered on 0, conditionally flip the result sign, and conditionally swap the sin and cos curve approximation
+	// bucket offset flipCos flipSin swapSinCos
+	// 0      0      false   false   false
+	// 1      -0.25  false   true    true
+	// 2      -0.5   true    true    false
+	// 3      -0.75  true    false   true
+	// 4      -1.0   false   false   false
+	// _mm256_permutevar_ps is used as a lookup table to get these values for each input number
 	__m256i bucketIdx = _mm256_cvtps_epi32(_mm256_mul_ps(x, _mm256_set1_ps(4.0F)));
 	__m256 flipCos = _mm256_permutevar_ps(_mm256_setr_ps(0.0F, 0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000), 0.0F, 0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000)), bucketIdx);
 	__m256 flipSin = _mm256_permutevar_ps(_mm256_setr_ps(0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000), 0.0F, 0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000), 0.0F), bucketIdx);
@@ -107,27 +116,32 @@ FINLINE __m128 asinf32x4(__m128 xmmX) {
 // This function uses the identity that atan(x) + atan(1/x) is a quarter turn in order to only have to approximate atan between 0 and 1
 // Optimized using Sollya, approx = 0.15886362603x - 0.04743765592x^3 + 0.01357402989x^5
 // If abs(x) <= 1, use approx(x). Otherwise, use 0.25 - approx(1/x)
-FINLINE __m128 atanf32x4(__m128 xmmX) {
-	const __m128 signBit = _mm_castsi128_ps(_mm_set1_epi32(0x80000000));
-	const __m128 signBitMaskOff = _mm_castsi128_ps(_mm_set1_epi32(0x7FFFFFFF));
-	__m128 xSign = _mm_and_ps(xmmX, signBit);
-	__m128 absX = _mm_and_ps(xmmX, signBitMaskOff);
-	__m128 isGreaterThan1 = _mm_cmpgt_ps(absX, _mm_set_ps1(1.0F));
-	absX = _mm_blendv_ps(absX, _mm_rcp_ps(absX), isGreaterThan1);
-	__m128 xSq = _mm_mul_ps(absX, absX);
-	__m128 atanApprox = _mm_fmadd_ps(xSq, _mm_set_ps1(0.01357402989F), _mm_set_ps1(-0.04743765592F));
-	atanApprox = _mm_fmadd_ps(xSq, atanApprox, _mm_set_ps1(0.15886362603F));
-	atanApprox = _mm_mul_ps(absX, atanApprox);
-	atanApprox = _mm_sub_ps(_mm_and_ps(_mm_set_ps1(0.25F), isGreaterThan1), _mm_xor_ps(atanApprox, _mm_andnot_ps(isGreaterThan1, signBit)));
-	return _mm_or_ps(atanApprox, xSign);
+// 4 ulp, good enough. Much better than my previous 3 term approximation at 30710 ulp. Around 1.6x slower, but I think the extra accuracy matters more for this function
+// To make this more accurate, I'd probably have to use a heuristic optimizer, see this paper "Computing Accurate Horner Form Approximations To Special Functions in Finite Precision Arithmetic" https://arxiv.org/pdf/1508.03211
+// About the same speed as stdlib, though stdlib is a bit faster with inputs < 1, probably because they can avoid the div with an if statement
+__m256 atanx8(__m256 x) {
+	__m256 greaterThan1 = _mm256_cmp_ps(_mm256_and_ps(x, _mm256_set1_ps(bitcast<F32>(0x7FFFFFFF))), _mm256_set1_ps(1.0F), _CMP_GT_OQ);
+	__m256 rcpX = _mm256_div_ps(_mm256_set1_ps(1.0F), x);
+	x = _mm256_blendv_ps(x, rcpX, greaterThan1);
+	__m256 x2 = _mm256_mul_ps(x, x);
+	__m256 p = _mm256_fmadd_ps(x2, _mm256_set1_ps(-7.413336425088346004486083984375e-4F), _mm256_set1_ps(3.838681615889072418212890625e-3F));
+	p = _mm256_fmadd_ps(x2, p, _mm256_set1_ps(-9.435531683266162872314453125e-3F));
+	p = _mm256_fmadd_ps(x2, p, _mm256_set1_ps(1.57544314861297607421875e-2F));
+	p = _mm256_fmadd_ps(x2, p, _mm256_set1_ps(-2.23025120794773101806640625e-2F));
+	p = _mm256_fmadd_ps(x2, p, _mm256_set1_ps(3.1780637800693511962890625e-2F));
+	p = _mm256_fmadd_ps(x2, p, _mm256_set1_ps(-5.30493073165416717529296875e-2F));
+	p = _mm256_fmadd_ps(x2, p, _mm256_set1_ps(0.1591549217700958251953125F));
+	__m256 reducedP = _mm256_fnmadd_ps(p, x, _mm256_blendv_ps(_mm256_set1_ps(0.25F), _mm256_set1_ps(-0.25F), x));
+	return _mm256_blendv_ps(_mm256_mul_ps(p, x), reducedP, greaterThan1);
 }
-FINLINE __m128 atan2f32x4(__m128 xmmY, __m128 xmmX) {
+// Slightly different from regular atan2 in that it returns 0 to 1 instead of -0.5 to 0.5, that made more sense to me
+__m256 atan2x8(__m256 y, __m256 x) {
 	const __m128 signBit = _mm_castsi128_ps(_mm_set1_epi32(0x80000000));
 	// Rotate the input by a quarter turn so that way we go from -0.25 to 0.25 over the top half and -0.25 to 0.25 over the bottom half
-	__m128 atanResult = atanf32x4(_mm_div_ps(xmmX, _mm_xor_ps(xmmY, signBit)));
-	__m128 isInLowerHalf = _mm_cmplt_ps(xmmY, _mm_setzero_ps());
+	__m256 atanResult = atanx8(_mm256_div_ps(x, _mm256_xor_ps(y, _mm256_set1_ps(bitcast<F32>(0x80000000)))));
 	// Add either 0.25 or 0.75 depending on the half to get the turn back out
-	return _mm_add_ps(_mm_blendv_ps(_mm_set_ps1(0.25F), _mm_set_ps1(0.75F), isInLowerHalf), atanResult);
+	// Use y's sign bit to blend between them. It's actually important to not do a comparison, -0 ends up at -infinity in atan and we get -0.25 instead of the 0.25 for 0, so we need to add 0.75 on -0
+	return _mm256_add_ps(_mm256_blendv_ps(_mm256_set1_ps(0.25F), _mm256_set1_ps(0.75F), y), atanResult);
 }
 
 FINLINE __m256 cosf32x8(__m256 ymmX) {
@@ -152,7 +166,9 @@ FINLINE __m256 sinf32x8(__m256 ymmX) {
 }
 
 FINLINE __m256 tanf32x8(__m256 ymmX) {
-	return _mm256_div_ps(sinf32x8(ymmX), cosf32x8(ymmX));
+	__m256 sinResult;
+	__m256 cosResult = sincosf32_precisex8(&sinResult, ymmX);
+	return _mm256_div_ps(sinResult, cosResult);
 }
 
 FINLINE F32 cosf32(F32 x) {
@@ -189,10 +205,10 @@ FINLINE F32 asinf32(F32 x) {
 	return _mm_cvtss_f32(asinf32x4(_mm_set_ps1(x)));
 }
 FINLINE F32 atanf32(F32 x) {
-	return _mm_cvtss_f32(atanf32x4(_mm_set_ps1(x)));
+	return _mm256_cvtss_f32(atanx8(_mm256_set1_ps(x)));
 }
 FINLINE F32 atan2f32(F32 y, F32 x) {
-	return _mm_cvtss_f32(atan2f32x4(_mm_set_ps1(y), _mm_set_ps1(x)));
+	return _mm256_cvtss_f32(atan2x8(_mm256_set1_ps(y), _mm256_set1_ps(x)));
 }
 FINLINE F32 sqrtf32(F32 x) {
 	return _mm_cvtss_f32(_mm_sqrt_ps(_mm_set_ss(x)));
@@ -254,6 +270,7 @@ FINLINE F32 cbrtf32(F32 x) {
 }
 
 // This version handles subnormals correctly.
+// 2 ULP error
 F32 cbrtf32_robust(F32 x) {
 	U32 bits = bitcast<U32>(x);
 	I32 exp = (bits >> 23 & 0b11111111) - 127;
@@ -283,7 +300,10 @@ F32 cbrtf32_robust(F32 x) {
 	}
 	F32 significand01 = bitcast<F32>(significand | 127 << 23) - 1.0F;
 	F32 cbrtSignificand = 1.0F + significand01 * (0.33333216463777640516973707376504040202570101920406F + significand01 * (-0.11102099666480585336524261575827863580514367479812F + significand01 * (6.0573895431292586090150197315001151475322493892905e-2F + significand01 * (-3.5474750692705396305767496395448993921171900629325e-2F + significand01 * (1.6248256682225195424697072830568203597238070722807e-2F + significand01 * (-3.7384308046382649717374077275715907804477015871025e-3F))))));
-	return cbrtSignificand * bitcast<F32>(newExp + 127 << 23 | bits & 1u << 31) * remainderExp;
+	F32 cbrtResult = cbrtSignificand * bitcast<F32>(newExp + 127 << 23 | bits & 1u << 31) * remainderExp;
+	// One newton iteration
+	cbrtResult = cbrtResult - (cbrtResult * cbrtResult * cbrtResult - x) / (3.0F * cbrtResult * cbrtResult);
+	return cbrtResult;
 }
 
 // This gets within one bit of the stdlib version and is slightly faster (much faster when using SIMD)
