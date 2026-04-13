@@ -5,6 +5,55 @@
 
 DEBUG_OPTIMIZE_ON
 
+// This is much more precise than the below sin/cos functions, and around twice as slow. It also computes both sin and cos, because that's free with this approximation.
+// 2 ULP error
+// 5.96e-8 abs error
+__m256 sincosf32_precisex8(__m256* sinOut, __m256 x) {
+	// Range reduce to 0-1
+	x = _mm256_sub_ps(x, _mm256_round_ps(x, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC));
+
+	__m256i bucketIdx = _mm256_cvtps_epi32(_mm256_mul_ps(x, _mm256_set1_ps(4.0F)));
+	__m256 flipCos = _mm256_permutevar_ps(_mm256_setr_ps(0.0F, 0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000), 0.0F, 0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000)), bucketIdx);
+	__m256 flipSin = _mm256_permutevar_ps(_mm256_setr_ps(0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000), 0.0F, 0.0F, bitcast<F32>(0x80000000), bitcast<F32>(0x80000000), 0.0F), bucketIdx);
+	__m256 swapSinCos = _mm256_castsi256_ps(_mm256_slli_epi32(bucketIdx, 31));
+	__m256 offset = _mm256_permutevar_ps(_mm256_setr_ps(0.25F, 0.5F, 0.75F, 1.0F, 0.25F, 0.5F, 0.75F, 1.0F), _mm256_sub_epi32(bucketIdx, _mm256_set1_epi32(1)));
+	offset = _mm256_andnot_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(bucketIdx, _mm256_setzero_si256())), offset);
+	x = _mm256_sub_ps(x, offset);
+
+	// The sin curve between -0.125 and 0.125
+	__m256 x2 = _mm256_mul_ps(x, x);
+	__m256 sinX = _mm256_fmadd_ps(x2, _mm256_set1_ps(-75.83747100830078125F), _mm256_set1_ps(81.6046142578125F));
+	sinX = _mm256_fmadd_ps(x2, sinX, _mm256_set1_ps(-41.34175872802734375F));
+	sinX = _mm256_fmadd_ps(x2, sinX, _mm256_set1_ps(6.283185482025146484375F));
+	sinX = _mm256_mul_ps(x, sinX);
+
+	// The cos curve between -0.125 and 0.125
+	__m256 cosX = _mm256_fmadd_ps(x2, _mm256_set1_ps(58.07624053955078125F), _mm256_set1_ps(-85.411865234375F));
+	cosX = _mm256_fmadd_ps(x2, cosX, _mm256_set1_ps(64.93907928466796875F));
+	cosX = _mm256_fmadd_ps(x2, cosX, _mm256_set1_ps(-19.739208221435546875F));
+	cosX = _mm256_fmadd_ps(x2, cosX, _mm256_set1_ps(1.0F));
+
+	sinX = _mm256_xor_ps(sinX, flipSin);
+	cosX = _mm256_xor_ps(cosX, flipCos);
+	__m256 sinResult = _mm256_blendv_ps(sinX, cosX, swapSinCos);
+	__m256 cosResult = _mm256_blendv_ps(cosX, sinX, swapSinCos);
+
+	*sinOut = sinResult;
+	return cosResult;
+}
+
+F32 sinf32_precise(F32 x) {
+	__m256 sinResult;
+	__m256 cosResult = sincosf32_precisex8(&sinResult, _mm256_set1_ps(x));
+	return _mm256_cvtss_f32(sinResult);
+}
+
+F32 cosf32_precise(F32 x) {
+	__m256 sinResult;
+	__m256 cosResult = sincosf32_precisex8(&sinResult, _mm256_set1_ps(x));
+	return _mm256_cvtss_f32(cosResult);
+}
+
 // The cos approximation is more accurate than the sin one I generated (gentler curve over [0, 0.5) I guess), so we can just use it for sin as well
 // Cos approximation: 1.00010812282562255859375 + x * (-1.79444365203380584716796875e-2 + x * (-19.2416629791259765625 + x * (-5.366222381591796875 + x * (93.06533050537109375 + x * (-74.45227813720703125)))))
 // Found using Sollya (https://www.sollya.org/)
@@ -149,9 +198,10 @@ FINLINE F32 sqrtf32(F32 x) {
 	return _mm_cvtss_f32(_mm_sqrt_ps(_mm_set_ss(x)));
 }
 FINLINE F32 sincosf32(F32* sinOut, F32 x) {
-	F32 cosine = cosf32(x);
-	*sinOut = sinf32(x); // Could probably optimize this using the pythagorean identity and the result of cosf, I'll figure it out later
-	return cosine;
+	__m256 sinResult;
+	__m256 cosResult = sincosf32_precisex8(&sinResult, _mm256_set1_ps(x));
+	*sinOut = _mm256_cvtss_f32(sinResult);
+	return _mm256_cvtss_f32(cosResult);
 }
 
 // Similar to cos, these coefficients were found with sollya.

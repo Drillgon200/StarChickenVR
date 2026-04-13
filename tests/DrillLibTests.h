@@ -115,4 +115,13 @@ void strafmt_basic() {
 	TEST_EXPECT(fmtArray == "List of integers: [1, 2, 3, 4, 5]."a);
 }
 
+U32 cubic_formula(F32* results, F32 a, F32 b, F32 c, F32 d) {
+	return 1;
+}
+
+void cubic_forumla_tests() {
+	F32 cubicResults[3];
+	U32 count = cubic_formula(cubicResults, 1.0F, 1.0F, -1.0F, -0.5F);
+}
+
 }

@@ -19,6 +19,9 @@ void run_all() {
 			TEST_GROUP("strafmt"a) {
 				DrillLibTests::strafmt_basic();
 			}
+			TEST_GROUP("Math"a) {
+				DrillLibTests::cubic_forumla_tests();
+			}
 		}
 		TEST_GROUP("Shader Compiler"a) {
 			ShaderCompilerTests::solo_test();
