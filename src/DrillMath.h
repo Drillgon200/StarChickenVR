@@ -539,10 +539,10 @@ FINLINE F32 length_sq(F32 v) {
 }
 
 FINLINE bool epsilon_eq(F32 a, F32 b, F32 eps) {
-	return absf32(a - b) <= max(a, b) * eps;
+	return absf32(a - b) <= absf32(max(a, b)) * eps;
 }
 FINLINE bool epsilon_eq(F64 a, F64 b, F64 eps) {
-	return absf64(a - b) <= max(a, b) * eps;
+	return absf64(a - b) <= absf64(max(a, b)) * eps;
 }
 
 FINLINE U16 next_power_of_two(U16 x) {
@@ -587,6 +587,54 @@ bool quadratic_formula_stable(F32* results, F32 a, F32 b, F32 c) {
 	F32 r2 = c / (a * r1);
 	results[0] = r1, results[1] = r2;
 	return true;
+}
+
+U32 cubic_formula(F32* results, F32 a, F32 b, F32 c, F32 d) {
+	// https://en.wikipedia.org/wiki/Cubic_equation
+	F32 d0 = b * b - 3.0F * a * c;
+	F32 d1 = 2.0F * (b * b) * b - 9.0F * a * b * c + 27.0F * a * a * d;
+	F32 t = d1 * d1 - 4.0F * d0 * d0 * d0;
+	if (t <= 0.0F) {
+		// Three roots
+		F32 Ci = sqrtf32(-t) * 0.5F;
+		F32 Cr = d1 * 0.5F;
+		F32 lenSq = Ci * Ci + Cr * Cr;
+		F32 x0, x1, x2;
+		if (lenSq != 0.0F) {
+			F32 Ctheta = atan2f32(Ci, Cr) / 3.0F;
+			F32 Clen = cbrtf32_robust(sqrtf32(lenSq));
+			F32 lenRatio = d0 / Clen;
+			F32 rcp3a = (-1.0F / 3.0F) / a;
+			F32 sinCTheta;
+			F32 cosCtheta = sincosf32(&sinCTheta, Ctheta);
+			F32 thirdTurnX = -0.5F;
+			F32 thirdTurnY = 0.86602540378F; // sqrt(3) / 2
+
+			x0 = (b + (Clen + lenRatio) * cosCtheta) * rcp3a;
+			F32 cosCthetaThirdTurn = thirdTurnX * cosCtheta - thirdTurnY * sinCTheta;
+			x1 = (b + (Clen + lenRatio) * cosCthetaThirdTurn) * rcp3a;
+			F32 cosCthetaTwoThirdTurn = thirdTurnX * cosCtheta + thirdTurnY * sinCTheta;
+			x2 = (b + (Clen + lenRatio) * cosCthetaTwoThirdTurn) * rcp3a;
+		} else {
+			x0 = x1 = x2 = -b / (3.0F * a);
+		}
+		// Return values sorted for convenience
+		results[0] = min(x0, x1, x2);
+		results[1] = max(min(x0, x1), min(max(x0, x1), x2));
+		results[2] = max(x0, x1, x2);
+		return 3;
+	} else {
+		// One root
+		F32 s = sqrtf32(t);
+		F32 C = d1 + s;
+		C = C != 0.0F ? C : d1 - s;
+		C = cbrtf32(C * 0.5F);
+		F32 x0 = -(b + (C == 0.0F ? 0.0f : C + d0 / C)) / (3.0F * a);
+		results[0] = x0;
+		results[1] = x0;
+		results[2] = x0;
+		return 1;
+	}
 }
 
 template<typename Vec, typename T>

@@ -115,13 +115,23 @@ void strafmt_basic() {
 	TEST_EXPECT(fmtArray == "List of integers: [1, 2, 3, 4, 5]."a);
 }
 
-U32 cubic_formula(F32* results, F32 a, F32 b, F32 c, F32 d) {
-	return 1;
-}
-
 void cubic_forumla_tests() {
-	F32 cubicResults[3];
-	U32 count = cubic_formula(cubicResults, 1.0F, 1.0F, -1.0F, -0.5F);
+	F32 r[3];
+	U32 c;
+	c = cubic_formula(r, 1.0F, 3.0F, 3.0F, 1.0F);
+	TEST_EXPECT(c == 3 && r[0] == -1.0F && r[1] == -1.0F && r[2] == -1.0F);
+	c = cubic_formula(r, 1.0F, 4.0F, 5.0F, 1.9F);
+	TEST_EXPECT(c == 3 && epsilon_eq(r[0], -1.86695F, 0.0001F) && epsilon_eq(r[1], -1.41261F, 0.0001F) && epsilon_eq(r[2], -0.72044F, 0.0001F));
+	c = cubic_formula(r, 1.0F, 4.0F, 5.0F, 2.0F);
+	TEST_EXPECT(c == 3 && epsilon_eq(r[0], -2.0F, 0.0001F) && epsilon_eq(r[1], -1.0F, 0.0001F) && epsilon_eq(r[2], -1.0F, 0.0001F));
+	c = cubic_formula(r, 1.0F, 0.0F, 0.0F, 0.0F);
+	TEST_EXPECT(c == 3 && epsilon_eq(r[0], 0.0F, 0.0001F) && epsilon_eq(r[1], 0.0F, 0.0001F) && epsilon_eq(r[2], 0.0F, 0.0001F));
+	c = cubic_formula(r, 1.7F, 3.0F, -1.5F, 1.4F);
+	TEST_EXPECT(c == 1 && epsilon_eq(r[0], -2.30308F, 0.0001F));
+	c = cubic_formula(r, 3.0F, 0.0F, 3.0F, -4.0F);
+	TEST_EXPECT(c == 1 && epsilon_eq(r[0], 0.80726F, 0.0001F));
+	c = cubic_formula(r, 1.0F, 0.0F, 0.0F, -8.0F);
+	TEST_EXPECT(c == 1 && epsilon_eq(r[0], 2.0F, 0.0001F));
 }
 
 }
