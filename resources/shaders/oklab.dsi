@@ -19,9 +19,9 @@
 };
 
 @[F32 lightness][F32 L] oklab_l_to_lightness{
-	F32 k1{0.206 };
-	F32 k2{0.03 };
-	F32 k3{(1.0 + k1) / (1.0 + k2) };
+	F32 k1{ 0.206 };
+	F32 k2{ 0.03 };
+	F32 k3{ (1.0 + k1) / (1.0 + k2) };
 	F32 t{ k3 * L - k1 };
 	return 0.5 * (t + sqrt(t * t + 4.0 * k2 * k3 * L));
 };

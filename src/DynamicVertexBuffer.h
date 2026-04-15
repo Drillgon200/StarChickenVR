@@ -210,12 +210,10 @@ struct Tessellator {
 		cmd.indexCount += numIndices;
 		return *this;
 	}
-	Tessellator& ui_rect2d(F32 xStart, F32 yStart, F32 xEnd, F32 yEnd, F32 z, F32 uStart, F32 vStart, F32 uEnd, F32 vEnd, V4F32 color, U32 textureIndex, U32 flags) {
-
+	Tessellator& ui_rect2d(F32 xStart, F32 yStart, F32 xEnd, F32 yEnd, F32 z, F32 uStart, F32 vStart, F32 uEnd, F32 vEnd, U32 packedColor, U32 textureIndex, U32 flags) {
 		DrawCommand& cmd = drawCommands.back();
 		ensure_space_for(4 * sizeof(VK::UIVertex), 6 * sizeof(U32));
 
-		U32 packedColor = pack_unorm4x8(color);
 		VK::UIVertex vertices[4]{
 			{ V3F32{ xStart, yStart, z }, V2F32{ uStart, vStart }, packedColor, textureIndex, flags },
 			{ V3F32{ xStart, yEnd, z }, V2F32{ uStart, vEnd }, packedColor, textureIndex, flags },
@@ -237,6 +235,9 @@ struct Tessellator {
 		cmd.vertexCount += 4;
 		cmd.indexCount += 6;
 		return *this;
+	}
+	Tessellator& ui_rect2d(F32 xStart, F32 yStart, F32 xEnd, F32 yEnd, F32 z, F32 uStart, F32 vStart, F32 uEnd, F32 vEnd, V4F32 color, U32 textureIndex, U32 flags) {
+		return ui_rect2d(xStart, yStart, xEnd, yEnd, z, uStart, vStart, uEnd, vEnd, pack_unorm4x8(color), textureIndex, flags);
 	}
 	Tessellator& ui_line_strip(V2F32* points, U32 pointCount, F32 z, F32 thickness, V4F32 color, U32 textureIndex, U32 flags) {
 		if (pointCount < 2) {

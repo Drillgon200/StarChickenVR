@@ -2002,7 +2002,7 @@ void color_picker() {
 				Box* clPicker = generic_box().unsafeBox;
 				clPicker->flags |= BOX_FLAG_CUSTOM_DRAW;
 				clPicker->sizeModeX = clPicker->sizeModeY = SIZE_MODE_FIT_CHILDREN;
-				clPicker->size = V2F{ 200.0F, 200.0F };
+				clPicker->size = V2F{ 256.0F, 256.0F };
 				clPicker->backgroundColor = themeColor.inputField;
 
 				spacer(10.0F);
@@ -2019,8 +2019,8 @@ void color_picker() {
 					if (com.leftClickStart || com.drag.y != 0.0F) {
 						F32 newHue = clamp01((com.mousePos.y - com.renderArea.minY) / com.renderArea.height());
 						clPicker->value.color.oklabLrCH.z = newHue;
-						clPicker->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut_lame(clPicker->value.color.oklabLrCH);
-						V3F srgb = Oklab::lrch_to_srgb(clPicker->value.color.oklabLrCH);
+						clPicker->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut(clPicker->value.color.oklabLrCH);
+						V3F srgb = clamp01(Oklab::lrch_to_srgb(clPicker->value.color.oklabLrCH));
 						clPicker->value.color.srgb = srgb;
 						colorBox->backgroundColor = srgb.to_rgba8(1.0F);
 						return ACTION_HANDLED;
@@ -2042,8 +2042,8 @@ void color_picker() {
 						newLrC = V2F{ 1.0F - newLrC.y, newLrC.x * Oklab::SRGB_PICKER_CHROMA_END };
 						box->value.color.oklabLrCH.x = newLrC.x;
 						box->value.color.oklabLrCH.y = newLrC.y;
-						box->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut_lame(box->value.color.oklabLrCH);
-						V3F srgb = Oklab::lrch_to_srgb(box->value.color.oklabLrCH);
+						box->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut(box->value.color.oklabLrCH);
+						V3F srgb = clamp01(Oklab::lrch_to_srgb(box->value.color.oklabLrCH));
 						box->value.color.srgb = srgb;
 						colorBox->backgroundColor = srgb.to_rgba8(1.0F);
 						return ACTION_HANDLED;
@@ -2051,9 +2051,8 @@ void color_picker() {
 					if (com.tessellator) {
 						Rng2F32 area = com.renderArea;
 						V3F LrCH = box->value.color.oklabLrCH;
-						com.tessellator->ui_rect2d(area.minX, area.minY, area.maxX, area.maxY, com.renderZ, 0.0F, 1.0F, 1.0f, 0.0F, V4F{ LrCH.z, 1.0F, 1.0F, 1.0F }, Resources::simpleWhite.index, com.clipBoxIndex << 16 | VK::UI_RENDER_FLAG_OKLrCH | VK::UI_RENDER_FLAG_OKLrCH_USE_UV_CL);
+						com.tessellator->ui_rect2d(area.minX, area.minY, area.maxX, area.maxY, com.renderZ, 0.0F, 1.0F, 1.0f, 0.0F, U32(LrCH.z * 65535.0F + 0.49F), Resources::simpleWhite.index, com.clipBoxIndex << 16 | VK::UI_RENDER_FLAG_OKLrCH | VK::UI_RENDER_FLAG_OKLrCH_USE_UV_CL);
 						F32 size = 8.0F;
-
 						V2F start = box->renderPos - V2F{ size, size } * 0.5F + V2F{ LrCH.y / Oklab::SRGB_PICKER_CHROMA_END, 1.0F - LrCH.x } * box->computedSize;
 						com.tessellator->ui_rect2d(start.x, start.y, start.x + size, start.y + size, com.renderZ, 0.0F, 0.0F, 1.0F, 1.0F, V4F{ 1.0F, 1.0F, 1.0F, 1.0F }, Resources::uiToggleOff.index, com.clipBoxIndex << 16);
 						return ACTION_HANDLED;

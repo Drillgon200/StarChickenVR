@@ -25,6 +25,7 @@ struct Vertex {
 	^pos = vert.pos.xy;
 	^texcoord = vert.tex;
 	^color = unpack_unorm4x8(vert.color);
+	^packedColor = vert.color;
 	^texidx = vert.textureIndex;
 	^flags = vert.flags;
 	if drawData.uiClipBoxes {
@@ -39,6 +40,7 @@ struct Vertex {
 &V2F pos;
 &V2F texcoord;
 &V4F color;
+[flat] &U32 packedColor;
 [flat] &U32 texidx;
 [flat] &U32 flags;
 [flat] &V4F clipBox;
@@ -100,7 +102,8 @@ struct Vertex {
 		F32 chromaScale{ 0.37 };
 		V3F lrchInput{
 			if ^flags & UI_RENDER_FLAG_OKLrCH_USE_UV_CL {
-				V3F(texcoord.y, texcoord.x * chromaScale, finalColor.r)
+				// Use both r and g for extra precision
+				V3F(texcoord.y, texcoord.x * chromaScale, F32(^packedColor) / 65535.0)
 			} else if ^flags & UI_RENDER_FLAG_OKLrCH_USE_UV_CH {
 				V3F(finalColor.r, texcoord.x * chromaScale, texcoord.y)
 			} else {
@@ -110,6 +113,8 @@ struct Vertex {
 		V3F converted{ lrch_to_srgb(lrchInput) };
 		if any(converted < V3F(0.0)) || any(converted > V3F(1.0)) {
 			finalColor.a = 0.0;
+		} else {
+			finalColor.a = 1.0;
 		};
 		finalColor = V4F(converted, finalColor.a);
 	};

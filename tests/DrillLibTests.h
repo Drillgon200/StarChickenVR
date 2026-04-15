@@ -132,6 +132,8 @@ void cubic_forumla_tests() {
 	TEST_EXPECT(c == 1 && epsilon_eq(r[0], 0.80726F, 0.0001F));
 	c = cubic_formula(r, 1.0F, 0.0F, 0.0F, -8.0F);
 	TEST_EXPECT(c == 1 && epsilon_eq(r[0], 2.0F, 0.0001F));
+	c = cubic_formula(r, 0.0007844933425076306F, 0.020377792418003082F, 0.1755964457988739F, -0.49717265367507935F);
+	TEST_EXPECT(c == 1 && epsilon_eq(r[0], 2.214F, 0.0001F));
 }
 
 }

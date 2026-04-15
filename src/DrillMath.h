@@ -626,9 +626,9 @@ U32 cubic_formula(F32* results, F32 a, F32 b, F32 c, F32 d) {
 	} else {
 		// One root
 		F32 s = sqrtf32(t);
-		F32 C = d1 + s;
+		F32 C = d1 + (d1 < 0.0F ? -s : s); // Try to choose the value of s to cancel with d1
 		C = C != 0.0F ? C : d1 - s;
-		C = cbrtf32(C * 0.5F);
+		C = cbrtf32_robust(C * 0.5F);
 		F32 x0 = -(b + (C == 0.0F ? 0.0f : C + d0 / C)) / (3.0F * a);
 		results[0] = x0;
 		results[1] = x0;
@@ -791,6 +791,7 @@ FINLINE bool operator!=(V2F32 a, V2F32 b) {
 FINLINE F32 dot(V2F32 a, V2F32 b) {
 	return a.x * b.x + a.y * b.y;
 }
+// Positive if b is to the left of a
 FINLINE F32 cross(V2F32 a, V2F32 b) {
 	return a.x * b.y - a.y * b.x;
 }
