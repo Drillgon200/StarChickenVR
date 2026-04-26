@@ -4645,30 +4645,36 @@ SpvDword* compile_dsl(U32* numCompiledDwords, StrA src, StrA srcName, StrA inclu
 	return compile_dsl(numCompiledDwords, src.str, U32(src.length), srcName, includePath);
 }
 
-bool compile_dsl_from_file_to_file(StrA dst, StrA src, StrA includePath) {
+enum FileCompilationResult {
+	FILE_COMPILATION_SUCCESS,
+	FILE_COMPILATION_FAILED_FILE_IO,
+	FILE_COMPILATION_FAILED_COMPILE
+};
+
+FileCompilationResult compile_dsl_from_file_to_file(StrA dst, StrA src, StrA includePath) {
 	MemoryArena& arena = get_scratch_arena();
-	bool success = true;
+	FileCompilationResult result = FILE_COMPILATION_SUCCESS;
 	MEMORY_ARENA_FRAME(arena) {
 		U32 srcSize;
 		char* srcFile = read_full_file_to_arena<char>(&srcSize, arena, src);
 		U32 compiledDwords;
 		U32* compiled;
 		if (!srcFile) {
+			result = FILE_COMPILATION_FAILED_FILE_IO;
 			goto fail;
 		}
 		compiled = compile_dsl(&compiledDwords, srcFile, srcSize, src, includePath);
 		if (!compiled) {
+			result = FILE_COMPILATION_FAILED_COMPILE;
 			goto fail;
 		}
 		if (!write_data_to_file(dst, compiled, compiledDwords * sizeof(SpvDword))) {
+			result = FILE_COMPILATION_FAILED_FILE_IO;
 			goto fail;
 		}
-		goto success;
 	fail:;
-		success = false;
-	success:;
 	}
-	return success;
+	return result;
 }
 
 }

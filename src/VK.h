@@ -16,7 +16,7 @@ const StrA SHADER_SPV_DIR = "./resources/shaders/spv/"a;
 const StrA SHADER_SRC_DIR = "./resources/shaders/"a;
 
 #define VK_ENABLE_VIL 0
-#define VK_ENABLE_VALIDATION_LAYERS 0
+#define VK_ENABLE_VALIDATION_LAYERS 1
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED 0
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED_SAFE_MODE 0
 
@@ -411,8 +411,8 @@ void recompile_modified_shaders(StrA shaderDir, StrA outputDir) {
 		for (RecompileEntry& entry : toRecompile) {
 			if (entry.timestamp > previousRecompTime || shouldRecompileAll) {
 				printf("Recompiling: %\n"a, entry.in);
-				bool success = ShaderCompiler::compile_dsl_from_file_to_file(entry.out, entry.in, shaderDir);
-				programCompileFailure |= !success;
+				ShaderCompiler::FileCompilationResult compilationResult = ShaderCompiler::compile_dsl_from_file_to_file(entry.out, entry.in, shaderDir);
+				programCompileFailure |= compilationResult != ShaderCompiler::FILE_COMPILATION_SUCCESS;
 			}
 		}
 
@@ -1152,7 +1152,7 @@ struct PipelineLayoutBuilder {
 		return *this;
 	}
 
-	VkPipelineLayout build() {
+	void build(VkPipelineLayout* layoutOut) {
 		VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 		layoutInfo.flags = 0;
 		layoutInfo.setLayoutCount = setLayoutCount;
@@ -1162,7 +1162,7 @@ struct PipelineLayoutBuilder {
 		VkPipelineLayout layout;
 		CHK_VK(vkCreatePipelineLayout(logicalDevice, &layoutInfo, VK_NULL_HANDLE, &layout));
 		destroyLists.pipelineLayouts.push_back(layout);
-		return layout;
+		*layoutOut = layout;
 	}
 };
 
@@ -1318,7 +1318,7 @@ U32 DescriptorSet::current_dynamic_array_length() {
 }
 
 struct GraphicsPipelineBuilder;
-void add_reloadable_shader(GraphicsPipelineBuilder* graphicsBuilder, VkPipelineLayout layout, VkPipeline* pipelinePtr);
+void add_reloadable_shader(StrA name, GraphicsPipelineBuilder* graphicsBuilder, VkPipelineLayout layout, VkPipeline* pipelinePtr);
 
 struct GraphicsPipelineBuilder {
 	static const U32 MAX_ATTRIBUTE_DESCRIPTIONS = 8;
@@ -1586,13 +1586,15 @@ struct GraphicsPipelineBuilder {
 
 		vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
 
-		destroyLists.pipelines.push_back(pipelineOut);
+		if (!isHotReload) {
+			destroyLists.pipelines.push_back(pipelineOut);
+			add_reloadable_shader(shaderFileName, this, pipelineLayout, pipelineOut);
+		}
 		*pipelineOut = pipeline;
-		add_reloadable_shader(this, pipelineLayout, pipelineOut);
 	}
 };
 
-void build_compute_pipeline(VkPipeline* pipelineOut, StrA shaderFileName, VkPipelineLayout pipelineLayout) {
+void build_compute_pipeline(VkPipeline* pipelineOut, StrA shaderFileName, VkPipelineLayout pipelineLayout, bool isHotReload = false) {
 	if (pipelineLayout == VK_NULL_HANDLE) {
 		abort("Must set pipeline layout to build VkPipeline");
 	}
@@ -1633,14 +1635,20 @@ void build_compute_pipeline(VkPipeline* pipelineOut, StrA shaderFileName, VkPipe
 
 	vkDestroyShaderModule(logicalDevice, shaderModule, nullptr);
 
-	destroyLists.pipelines.push_back(pipelineOut);
+	if (!isHotReload) {
+		destroyLists.pipelines.push_back(pipelineOut);
+		add_reloadable_shader(shaderFileName, nullptr, pipelineLayout, pipelineOut);
+	}
 	*pipelineOut = pipeline;
-	add_reloadable_shader(nullptr, pipelineLayout, pipelineOut);
 }
 
+// This system will listen for shader directory changes, then recompile only the shaders that have been modified since the last recompile
+// We can't always recompile immediately, because text editors will sometimes keep an extra lock on their files that prevents opening them.
+// The shadersToHotReload list retries shader compilation repeatedly if the file fails to open.
 struct ShaderRecompilationInfo {
 	GraphicsPipelineBuilder graphicsBuilder;
 	VkPipelineLayout layout;
+	StrA shaderName;
 	VkPipeline* pipeline;
 	B8 isCompute;
 	B8 onRecompilationList;
@@ -1651,7 +1659,7 @@ ArenaArrayList<ShaderRecompilationInfo> shadersToCheckHotReload;
 ArenaArrayList<ShaderRecompilationInfo*> shadersToHotReload;
 HANDLE shaderDirectoryChangeNotifications;
 
-void add_reloadable_shader(GraphicsPipelineBuilder* graphicsBuilder, VkPipelineLayout layout, VkPipeline* pipelinePtr) {
+void add_reloadable_shader(StrA name, GraphicsPipelineBuilder* graphicsBuilder, VkPipelineLayout layout, VkPipeline* pipelinePtr) {
 	ShaderRecompilationInfo& info = shadersToCheckHotReload.push_back_zeroed();
 	if (graphicsBuilder) {
 		info.graphicsBuilder = *graphicsBuilder;
@@ -1661,6 +1669,8 @@ void add_reloadable_shader(GraphicsPipelineBuilder* graphicsBuilder, VkPipelineL
 		info.isCompute = true;
 	}
 	info.layout = layout;
+	info.shaderName = name;
+	info.pipeline = pipelinePtr;
 }
 
 void check_modified_hot_reload_shaders(StrA shaderDir) {
@@ -1677,47 +1687,79 @@ void check_modified_hot_reload_shaders(StrA shaderDir) {
 	print("Recompiling shaders\n"a);
 	MemoryArena& arena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(arena) {
-		bool shouldRecompileAll = false;
 		WIN32_FIND_DATAA findData;
 		const char* shaderDirFilesCStr = stracat(arena, shaderDir, "*\0"a).str;
 		HANDLE findEntry = FindFirstFileA(shaderDirFilesCStr, &findData);
 		if (findEntry != INVALID_HANDLE_VALUE) {
+			U64 maxAccessedTime = lastHotReloadFileTime;
 			do {
 				if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 					continue;
 				}
 				U64 findTime = U64(findData.ftLastWriteTime.dwHighDateTime) << 32ull | U64(findData.ftLastWriteTime.dwLowDateTime);
+				maxAccessedTime = max(maxAccessedTime, findTime);
 				StrA fileName = StrA{ findData.cFileName, strlen(findData.cFileName) };
 				if (fileName.ends_with(".dsi"a) && findTime > lastHotReloadFileTime) {
-					shouldRecompileAll = true;
+					for (ShaderRecompilationInfo& shaderRecompileInfo : shadersToCheckHotReload) {
+						shaderRecompileInfo.nextRecompilationTime = 0.0;
+						if (!shaderRecompileInfo.onRecompilationList) {
+							shaderRecompileInfo.onRecompilationList = true;
+							shadersToHotReload.push_back(&shaderRecompileInfo);
+						}
+					}
+					break;
 				}
 				if (fileName.ends_with(".dsl"a)) {
 					StrA nameNoExt = fileName.prefix(-I64(".dsl"a.length));
-					StrA outputPath = stracat(stackArena, outputDir, nameNoExt, ".spv"a);
-					StrA inputPath = stracat(stackArena, shaderDir, fileName);
-					toRecompile.push_back(RecompileEntry{ inputPath, outputPath, findTime });
+					for (ShaderRecompilationInfo& shaderRecompileInfo : shadersToCheckHotReload) {
+						if (shaderRecompileInfo.shaderName == nameNoExt) {
+							shaderRecompileInfo.nextRecompilationTime = 0.0;
+							if (!shaderRecompileInfo.onRecompilationList) {
+								shaderRecompileInfo.onRecompilationList = true;
+								shadersToHotReload.push_back(&shaderRecompileInfo);
+							}
+							break;
+						}
+					}
 				}
 			} while (FindNextFileA(findEntry, &findData));
 			FindClose(findEntry);
+			lastHotReloadFileTime = maxAccessedTime;
 		} else {
 			print("Failed to iterate directory for shader hot reload\n");
 		}
 	}
 }
 
-void try_shader_reloads() {
+void try_shader_reloads(StrA srcDir, StrA spvDir) {
 	if (shadersToHotReload.empty()) {
 		return;
 	}
 	CHK_VK(vkDeviceWaitIdle(logicalDevice));
 	MemoryArena& arena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(arena) {
+		F64 time = current_time_seconds();
 		for (I32 i = 0; i < shadersToHotReload.size; i++) {
 			ShaderRecompilationInfo* info = shadersToHotReload[i];
-			if (info->nextRecompilationTime < current_time_seconds()) {
+			if (info->nextRecompilationTime > time) {
 				continue;
 			}
-			ShaderCompiler::compile_dsl_from_file_to_file();
+			ShaderCompiler::FileCompilationResult compilationResult = ShaderCompiler::compile_dsl_from_file_to_file(stracat(arena, spvDir, info->shaderName, ".spv"a), stracat(arena, srcDir, info->shaderName, ".dsl"a), srcDir);
+			if (compilationResult == ShaderCompiler::FILE_COMPILATION_SUCCESS || compilationResult == ShaderCompiler::FILE_COMPILATION_FAILED_COMPILE) {
+				if (compilationResult == ShaderCompiler::FILE_COMPILATION_SUCCESS) {
+					vkDestroyPipeline(logicalDevice, *info->pipeline, nullptr);
+					if (info->isCompute) {
+						build_compute_pipeline(info->pipeline, info->shaderName, info->layout, true);
+					} else {
+						info->graphicsBuilder.build(info->pipeline);
+					}
+				}
+				info->onRecompilationList = false;
+				shadersToHotReload.remove_unordered(i);
+				i--;
+			} else {
+				info->nextRecompilationTime = time + 0.1;
+			}
 		}
 	}
 }
@@ -1833,42 +1875,42 @@ void load_pipelines_and_descriptors() {
 	
 
 	// Pipelines
-	drawPipelineLayout = PipelineLayoutBuilder{}.set_default()
+	PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WorldDrawPushConstants))
 		.set_layout(drawDataDescriptorSet.setLayout)
-		.build();
-	drawPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "pbr_surface"a).build();
-	uiPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_UI, "ui"a)
+		.build(&drawPipelineLayout);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "pbr_surface"a).build(&drawPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_UI, "ui"a)
 		.blending(VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
-		.build();
+		.build(&uiPipeline);
 
-	debugPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).build();
-	debugNoDepthPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).depth_test(false).depth_write(false).build();
-	debugLinesPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).build();
-	debugPointsPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).build();
-	tmpBackgroundPipeline = GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "background"a).depth_test(false).depth_write(false).build();
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).build(&debugPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).depth_test(false).depth_write(false).build(&debugNoDepthPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).build(&debugLinesPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).build(&debugPointsPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "background"a).depth_test(false).depth_write(false).build(&tmpBackgroundPipeline);
 
-	skinningPipelineLayout = PipelineLayoutBuilder{}.set_default()
+	PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel))
 		.set_layout(drawDataDescriptorSet.setLayout)
-		.build();
-	skinningPipeline = build_compute_pipeline("skinning"a, skinningPipelineLayout);
+		.build(&skinningPipelineLayout);
+	build_compute_pipeline(&skinningPipeline, "skinning"a, skinningPipelineLayout);
 
-	finalCompositePipelineLayout = PipelineLayoutBuilder{}.set_default()
+	PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FinalCompositePushConstants))
 		.set_layout(finalCompositeDescriptorSet.setLayout)
-		.build();
-	finalCompositePipeline = build_compute_pipeline(StarChicken::isInEditorMode ? "final_composite_editor"a : "final_composite_xr"a, finalCompositePipelineLayout);
+		.build(&finalCompositePipelineLayout);
+	build_compute_pipeline(&finalCompositePipeline, StarChicken::isInEditorMode ? "final_composite_editor"a : "final_composite_xr"a, finalCompositePipelineLayout);
 
-	cubemapComputePipelineLayout = PipelineLayoutBuilder{}.set_default()
+	PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CubemapPipelineInfo))
 		.set_layout(cubemapConvolveDescriptorSet.setLayout)
-		.build();
-	cubemapTRConvolvePipeline = build_compute_pipeline("cubemap_tr_convolve"a, cubemapComputePipelineLayout);
-	cubemapCosConvolvePipeline = build_compute_pipeline("cubemap_cos_convolve"a, cubemapComputePipelineLayout);
-	cubemapFromEquirectPipeline = build_compute_pipeline("cubemap_from_equirect"a, cubemapComputePipelineLayout);
-	cubemapMipgenPipeline = build_compute_pipeline("cubemap_mipgen"a, cubemapComputePipelineLayout);
-	brdfTRLutPipeline = build_compute_pipeline("brdf_tr_lut"a, cubemapComputePipelineLayout);
+		.build(&cubemapComputePipelineLayout);
+	build_compute_pipeline(&cubemapTRConvolvePipeline, "cubemap_tr_convolve"a, cubemapComputePipelineLayout);
+	build_compute_pipeline(&cubemapCosConvolvePipeline, "cubemap_cos_convolve"a, cubemapComputePipelineLayout);
+	build_compute_pipeline(&cubemapFromEquirectPipeline, "cubemap_from_equirect"a, cubemapComputePipelineLayout);
+	build_compute_pipeline(&cubemapMipgenPipeline, "cubemap_mipgen"a, cubemapComputePipelineLayout);
+	build_compute_pipeline(&brdfTRLutPipeline, "brdf_tr_lut"a, cubemapComputePipelineLayout);
 
 	shaderDirectoryChangeNotifications = FindFirstChangeNotificationA(SHADER_SRC_DIR.c_str(globalArena), FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
 }
@@ -1931,6 +1973,9 @@ FrameBeginResult begin_frame() {
 	if (Win32::shouldRecreateSwapchain) {
 		recreate_desktop_swapchain();
 	}
+
+	check_modified_hot_reload_shaders(SHADER_SRC_DIR);
+	try_shader_reloads(SHADER_SRC_DIR, SHADER_SPV_DIR);
 
 	if (!StarChicken::isInEditorMode) {
 		if (!desktopSwapchainData.shouldTryPresentToDesktopThisFrame && desktopSwapchainData.swapchain != VK_NULL_HANDLE) {
