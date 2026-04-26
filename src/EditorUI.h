@@ -6,7 +6,10 @@
 #include "physics/SAT.h"
 #include "Level.h"
 #include "CubemapGen.h"
+#include "PNG.h"
 #include "compression/BC7.h"
+#include "compression/LZ.h"
+#include "compression/MipGen.h"
 
 namespace EditorUI {
 
@@ -139,17 +142,17 @@ struct TranslateWidget {
 		V3F zAxis = transform.get_row(2);
 		F32 bestTime = F32_INF;
 		F32 xAxisTime{};
-		if (ray_cyliner_intersect(&xAxisTime, eye, look, center + xAxis * scale * 0.5F, center, arrowRadius * 2.0F) && xAxisTime < bestTime) {
+		if (ray_cylinder_intersect(&xAxisTime, eye, look, center + xAxis * scale * 0.5F, center, arrowRadius * 2.0F) && xAxisTime < bestTime) {
 			bestTime = xAxisTime;
 			activeComponent = TRANSLATE_WIDGET_COMPONENT_X_AXIS;
 		}
 		F32 yAxisTime{};
-		if (ray_cyliner_intersect(&yAxisTime, eye, look, center + yAxis * scale * 0.5F, center, arrowRadius * 2.0F) && yAxisTime < bestTime) {
+		if (ray_cylinder_intersect(&yAxisTime, eye, look, center + yAxis * scale * 0.5F, center, arrowRadius * 2.0F) && yAxisTime < bestTime) {
 			bestTime = yAxisTime;
 			activeComponent = TRANSLATE_WIDGET_COMPONENT_Y_AXIS;
 		}
 		F32 zAxisTime{};
-		if (ray_cyliner_intersect(&zAxisTime, eye, look, center + zAxis * scale * 0.5F, center, arrowRadius * 2.0F) && zAxisTime < bestTime) {
+		if (ray_cylinder_intersect(&zAxisTime, eye, look, center + zAxis * scale * 0.5F, center, arrowRadius * 2.0F) && zAxisTime < bestTime) {
 			bestTime = zAxisTime;
 			activeComponent = TRANSLATE_WIDGET_COMPONENT_Z_AXIS;
 		}
@@ -174,7 +177,8 @@ struct TranslateWidget {
 enum PanelType {
 	PANEL_TYPE_NONE,
 	PANEL_TYPE_EDITOR_3D,
-	PANEL_TYPE_TEXTURE_PROCESSING
+	PANEL_TYPE_TEXTURE_PROCESSING,
+	PANEL_TYPE_UI_TEST
 };
 
 struct PanelEditor3D;
@@ -182,9 +186,9 @@ ArenaArrayList<PanelEditor3D*> renderPanels;
 
 PanelEditor3D* focusedEditor3D;
 
-struct PanelTextureProcessing {
+struct PanelUITest {
 	void init() {
-		
+
 	}
 	void destroy() {
 
@@ -192,8 +196,6 @@ struct PanelTextureProcessing {
 
 	void build_ui() {
 		using namespace UI;
-		UI_TEXT_COLOR(themeColor.text)
-		UI_BACKGROUND_COLOR(themeColor.background)
 		UI_BACKGROUND() {
 			UI_SCROLL_WINDOW() {
 				workingBox->padding = 4.0F;
@@ -222,6 +224,139 @@ struct PanelTextureProcessing {
 						slider_i64();
 					}
 				}
+			}
+		}
+	}
+};
+
+void png_to_dtf_file(StrA outputDtf, StrA inputPng, bool bc7Compress, bool drlzCompress, bool genMips, bool srgb) {
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		void* compressedData = nullptr;
+		U32 compressedSize = 0;
+		U32 width, height;
+		U32 mipCount = 1;
+		RGBA8* imgData;
+		PNG::read_image(arena, &imgData, &width, &height, inputPng);
+		if (!imgData) {
+			printf("Failed to load png for dtf conversion: %\n"a, inputPng);
+			goto failed;
+		}
+		compressedData = imgData;
+		compressedSize = width * height * sizeof(RGBA8);
+		if (genMips) {
+			imgData = MipGen::build_lame_mipmaps(arena, &compressedSize, &mipCount, imgData, width, height, srgb);
+			compressedSize *= sizeof(RGBA8);
+			compressedData = imgData;
+		}
+		if (bc7Compress) {
+			U32 threadCount = Win32::logicalProcessorCount;
+			BC7::BC7Block* blocks = BC7::compress_bc7(arena, imgData, width, height, threadCount, nullptr);
+			compressedSize = BC7::block_count(width, height) * sizeof(BC7::BC7Block);
+			U32 mipWidth = width, mipHeight = height;
+			RGBA8* mipPtr = imgData + mipWidth * mipHeight;
+			for (U32 i = 1; i < mipCount; i++) {
+				mipWidth = max(mipWidth >> 1, 1u);
+				mipHeight = max(mipHeight >> 1, 1u);
+				BC7::compress_bc7(arena, mipPtr, mipWidth, mipHeight, threadCount, nullptr);
+				compressedSize += BC7::block_count(mipWidth, mipHeight) * sizeof(BC7::BC7Block);
+				mipPtr += mipWidth * mipHeight;
+			}
+			compressedData = blocks;
+		}
+		if (drlzCompress) {
+			compressedData = LZ::encode2(arena, &compressedSize, (Byte*)compressedData, compressedSize);
+		}
+		if (File file = open_file_for_writing(outputDtf)) {
+			ResourceLoading::DTFHeader header{};
+			memcpy(header.magic, "DUCK", 4);
+			header.version = DRILL_LIB_MAKE_VERSION(2, 1, 0);
+			header.flags = Flags16((srgb ? ResourceLoading::TEXTURE_FLAG_SRGB : 0) | (drlzCompress ? ResourceLoading::TEXTURE_FLAG_DRLZ_COMPRESSED : 0));
+			header.format = bc7Compress ? ResourceLoading::TEXTURE_FORMAT_RGBA_BC7 : ResourceLoading::TEXTURE_FORMAT_RGBA_U8;
+			header.mipCount = U8(mipCount);
+			header.width = U16(width);
+			header.height = U16(height);
+			header.dataSize = compressedSize;
+			write_file(file, &header, sizeof(header));
+			write_file(file, compressedData, compressedSize);
+			close_file(file);
+		} else {
+			printf("Failed to open DTF file for writing: %\n"a, outputDtf);
+		}
+	failed:;
+	}
+}
+
+struct PanelTextureProcessing {
+	B8 drlzCompressionEnabled;
+	B8 bc7CompressionEnabled;
+	UI::BoxHandle baseColorInput;
+	UI::BoxHandle normalInput;
+	UI::BoxHandle armInput;
+	UI::BoxHandle outputFolderInput;
+
+	void init() {
+		
+	}
+	void destroy() {
+
+	}
+
+	void build_ui() {
+		using namespace UI;
+		UI_BACKGROUND() {
+			UI_SCROLL_WINDOW() {
+				workingBox->padding = 4.0F;
+				spacer(24.0F);
+				baseColorInput = path_input("BaseColor"a);
+				normalInput = path_input("Normal"a);
+				armInput = path_input("ARM"a);
+				outputFolderInput = path_input("Output"a);
+				set_box_consumer_box_callback(baseColorInput.unsafeBox, [this](Box* box) {
+					StrA text{ box->typedTextBuffer, box->numTypedCharacters };
+					if (text.ends_with("_BaseColor.png"a)) {
+						U64 prefixSize = text.length - "_BaseColor.png"a.length;
+						if (normalInput.get() && normalInput.unsafeBox->numTypedCharacters == 0) {
+							StrA suffix = "_Normal.png"a;
+							memcpy(normalInput.unsafeBox->typedTextBuffer, text.str, prefixSize);
+							memcpy(normalInput.unsafeBox->typedTextBuffer + prefixSize, suffix.str, suffix.length);
+							normalInput.unsafeBox->numTypedCharacters = U32(prefixSize + suffix.length);
+						}
+						if (armInput.get() && armInput.unsafeBox->numTypedCharacters == 0) {
+							StrA suffix = "_ARM.png"a;
+							memcpy(armInput.unsafeBox->typedTextBuffer, text.str, prefixSize);
+							memcpy(armInput.unsafeBox->typedTextBuffer + prefixSize, suffix.str, suffix.length);
+							armInput.unsafeBox->numTypedCharacters = U32(prefixSize + suffix.length);
+						}
+						if (outputFolderInput.get() && outputFolderInput.unsafeBox->numTypedCharacters == 0) {
+							StrA baseFolder = path_directory(text);
+							memcpy(outputFolderInput.unsafeBox->typedTextBuffer, baseFolder.str, baseFolder.length);
+							outputFolderInput.unsafeBox->numTypedCharacters = U32(baseFolder.length);
+						}
+					}
+				});
+				labeled_slider_bool("BC7 Compress"a, &bc7CompressionEnabled, true);
+				labeled_slider_bool("DRLZ Compress"a, &drlzCompressionEnabled, true);
+				text_button("Compress"a, [this](Box* box) {
+					MemoryArena& arena = get_scratch_arena();
+					MEMORY_ARENA_FRAME(arena) {
+						if (baseColorInput.get() && baseColorInput.unsafeBox->numTypedCharacters > 0) {
+							StrA inputPath{ baseColorInput.unsafeBox->typedTextBuffer, baseColorInput.unsafeBox->numTypedCharacters };
+							StrA outputPath = stracat(arena, path_directory(inputPath), path_basename_root(inputPath), ".dtf"a);
+							png_to_dtf_file(outputPath, inputPath, bc7CompressionEnabled, drlzCompressionEnabled, true, true);
+						}
+						if (normalInput.get() && normalInput.unsafeBox->numTypedCharacters > 0) {
+							StrA inputPath{ normalInput.unsafeBox->typedTextBuffer, normalInput.unsafeBox->numTypedCharacters };
+							StrA outputPath = stracat(arena, path_directory(inputPath), path_basename_root(inputPath), ".dtf"a);
+							png_to_dtf_file(outputPath, inputPath, bc7CompressionEnabled, drlzCompressionEnabled, true, false);
+						}
+						if (armInput.get() && armInput.unsafeBox->numTypedCharacters > 0) {
+							StrA inputPath{ armInput.unsafeBox->typedTextBuffer, armInput.unsafeBox->numTypedCharacters };
+							StrA outputPath = stracat(arena, path_directory(inputPath), path_basename_root(inputPath), ".dtf"a);
+							png_to_dtf_file(outputPath, inputPath, bc7CompressionEnabled, drlzCompressionEnabled, true, false);
+						}
+					}
+				});
 			}
 		}
 	}
@@ -384,6 +519,7 @@ struct Panel {
 	union {
 		PanelEditor3D editor3D;
 		PanelTextureProcessing textureProcessing;
+		PanelUITest uiTest;
 	};
 
 	void build_ui() {
@@ -417,6 +553,7 @@ struct Panel {
 					UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
 						text_button("3D Editor"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_EDITOR_3D); });
 						text_button("Texture Processing"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_TEXTURE_PROCESSING); });
+						text_button("UI Test"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_UI_TEST); });
 					}
 				}).unsafeBox;
 				panelSwitcher->flags |= BOX_FLAG_FLOATING;
@@ -427,6 +564,7 @@ struct Panel {
 				case PANEL_TYPE_NONE: break;
 				case PANEL_TYPE_EDITOR_3D: editor3D.build_ui(); break;
 				case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.build_ui(); break;
+				case PANEL_TYPE_UI_TEST: uiTest.build_ui(); break;
 				}
 			}
 		}
@@ -437,11 +575,13 @@ struct Panel {
 		case PANEL_TYPE_NONE: break;
 		case PANEL_TYPE_EDITOR_3D: editor3D.destroy(); break;
 		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.destroy(); break;
+		case PANEL_TYPE_UI_TEST: uiTest.destroy(); break;
 		}
 		switch (type) {
 		case PANEL_TYPE_NONE: break;
 		case PANEL_TYPE_EDITOR_3D: editor3D = PanelEditor3D{}; editor3D.init(); break;
 		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing = PanelTextureProcessing{}; textureProcessing.init(); break;
+		case PANEL_TYPE_UI_TEST: uiTest = PanelUITest{}; uiTest.init(); break;
 
 		}
 		panelType = type;
@@ -680,7 +820,7 @@ void debug_render() {
 		F32 t{};
 		V3F o = focusedEditor3D->editor.get_render_eye_pos();
 		V3F d = focusedEditor3D->editor.forward;
-		bool hit = ray_cyliner_intersect(&t, o, d, V3F{ 0.0F, 2.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.2F);
+		bool hit = ray_cylinder_intersect(&t, o, d, V3F{ 0.0F, 2.0F, 0.0F }, V3F{ 0.0F, 3.0F, 0.0F }, 0.2F);
 		if (hit) {
 			V3F hitPos = o + t * d;
 			tes.begin_draw(VK::debugPointsPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);

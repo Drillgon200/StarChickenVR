@@ -16,7 +16,7 @@ const StrA SHADER_SPV_DIR = "./resources/shaders/spv/"a;
 const StrA SHADER_SRC_DIR = "./resources/shaders/"a;
 
 #define VK_ENABLE_VIL 0
-#define VK_ENABLE_VALIDATION_LAYERS 1
+#define VK_ENABLE_VALIDATION_LAYERS 0
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED 0
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED_SAFE_MODE 0
 
@@ -1739,7 +1739,7 @@ void try_shader_reloads(StrA srcDir, StrA spvDir) {
 	MemoryArena& arena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(arena) {
 		F64 time = current_time_seconds();
-		for (I32 i = 0; i < shadersToHotReload.size; i++) {
+		for (I32 i = 0; i < I32(shadersToHotReload.size); i++) {
 			ShaderRecompilationInfo* info = shadersToHotReload[i];
 			if (info->nextRecompilationTime > time) {
 				continue;
@@ -1755,7 +1755,7 @@ void try_shader_reloads(StrA srcDir, StrA spvDir) {
 					}
 				}
 				info->onRecompilationList = false;
-				shadersToHotReload.remove_unordered(i);
+				shadersToHotReload.remove_unordered(U32(i));
 				i--;
 			} else {
 				info->nextRecompilationTime = time + 0.1;

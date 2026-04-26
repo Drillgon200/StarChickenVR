@@ -216,7 +216,7 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577;4800</DisableSpecificWarnings>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
       <PreprocessToFile>false</PreprocessToFile>
@@ -255,7 +255,7 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577;4800</DisableSpecificWarnings>
       <CallingConvention>VectorCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
@@ -294,7 +294,7 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577;4800</DisableSpecificWarnings>
       <CallingConvention>VectorCall</CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <SupportJustMyCode>false</SupportJustMyCode>
@@ -332,7 +332,7 @@
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <OmitDefaultLibName>true</OmitDefaultLibName>
       <AdditionalOptions>/Gs999999999 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577</DisableSpecificWarnings>
+      <DisableSpecificWarnings>26812;4200;4061;5045;4820;4100;4514;4455;4711;4710;4201;5246;4554;4464;4324;4577;4800</DisableSpecificWarnings>
       <CreateHotpatchableImage>false</CreateHotpatchableImage>
       <CallingConvention>VectorCall</CallingConvention>
       <PreprocessToFile>false</PreprocessToFile>

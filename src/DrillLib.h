@@ -923,6 +923,38 @@ FINLINE constexpr StrA operator""a(const char* lit, U64 len) {
 	return StrA{ lit, len };
 }
 
+StrA path_directory(StrA path) {
+	while (path.length && path.str[path.length - 1] != '\\' && path.str[path.length - 1] != '/') {
+		path.length--;
+	}
+	return path;
+}
+StrA path_basename(StrA path) {
+	U64 basenameLength = 0;
+	while (basenameLength < path.length && path.str[path.length - basenameLength - 1] != '\\' && path.str[path.length - basenameLength - 1] != '/') {
+		basenameLength++;
+	}
+	return StrA{ path.str + (path.length - basenameLength), basenameLength };
+}
+StrA path_basename_root(StrA path) {
+	path = path_basename(path);
+	I64 dotIdx = path.rfind('.');
+	if (dotIdx == -1) {
+		return path;
+	} else {
+		return StrA{ path.str, U64(dotIdx) };
+	}
+}
+StrA path_basename_ext(StrA path) {
+	path = path_basename(path);
+	I64 dotIdx = path.rfind('.');
+	if (dotIdx == -1) {
+		return path;
+	} else {
+		return StrA{ path.str + dotIdx + 1, path.length - dotIdx - 1 };
+	}
+}
+
 FINLINE U64 total_stralen(StrA str) {
 	return str.length;
 }

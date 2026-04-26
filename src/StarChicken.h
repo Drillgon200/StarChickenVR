@@ -432,10 +432,12 @@ void keyboard_callback(Win32::Key key, Win32::ButtonState state) {
 		return;
 	}
 	V2F32 mousePos = Win32::get_mouse();
-	UI::handle_keyboard_action(mousePos, key, state);
 	if (key == Win32::KEY_ESC && state == Win32::BUTTON_STATE_DOWN) {
 		Win32::set_mouse_captured(false);
 		EditorUI::focusedEditor3D = nullptr;
+	}
+	if (!EditorUI::focusedEditor3D) {
+		UI::handle_keyboard_action(mousePos, key, state);
 	}
 	EditorUI::key_input(key, state);
 }

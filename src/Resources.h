@@ -96,8 +96,8 @@ void load_resources() {
 	load_png(&uiAccordionClosed, "resources/textures/ui/accordion_closed.png"a, true, true);
 	load_msdf(&fontAtlas, "resources/textures/font2.ddf"a);
 
-	create_material_from_pngs(&cannonMat, "resources/textures/cannon"a);
-	create_material_from_pngs(&matMat, "resources/textures/mat"a);
+	create_material_from_dtfs(&cannonMat, "resources/textures/cannon"a);
+	create_material_from_dtfs(&matMat, "resources/textures/mat"a);
 }
 
 

@@ -252,6 +252,8 @@ void (*mouseCallback)(MouseButton, MouseValue);
 
 CursorType currentCursorType;
 
+U32 logicalProcessorCount;
+
 V2F32 get_mouse() {
 	POINT point{};
 	pGetCursorPos(&point);
@@ -665,6 +667,9 @@ bool init(U32 width, U32 height, void (*resizeDrawCallbackIn)(void), void (*keyb
 	if (comdlg32DLL) {
 		pGetOpenFileNameA = (decltype(pGetOpenFileNameA))(void*)GetProcAddress(comdlg32DLL, "GetOpenFileNameA");
 	}
+	SYSTEM_INFO systemInfo;
+	GetSystemInfo(&systemInfo);
+	logicalProcessorCount = systemInfo.dwNumberOfProcessors;
 	return success;
 }
 

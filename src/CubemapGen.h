@@ -525,12 +525,13 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 				U32 cubeMipLevels = log2floor32(CUBEMAP_SPECULAR_RES) + 1;
 				ResourceLoading::DTFHeader header{};
 				memcpy(header.magic, "DUCK", 4);
-				header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+				header.version = DRILL_LIB_MAKE_VERSION(2, 1, 0);
 				header.flags = ResourceLoading::TEXTURE_FLAG_CUBE;
 				header.format = ResourceLoading::TEXTURE_FORMAT_R9G9B9E5;
 				header.mipCount = U8(cubeMipLevels);
 				header.width = CUBEMAP_SPECULAR_RES;
 				header.height = CUBEMAP_SPECULAR_RES;
+				header.dataSize = cubemapSpecularTotalSize;
 				write_file(file, &header, sizeof(header));
 				void* specularData = imageCPUBuffer.mapping;
 				write_file(file, specularData, cubemapSpecularTotalSize);
@@ -539,12 +540,13 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 			if (File file = open_file_for_writing(stracat(arena, dstPath, "_diffuse.dtf"a))) {
 				ResourceLoading::DTFHeader header{};
 				memcpy(header.magic, "DUCK", 4);
-				header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+				header.version = DRILL_LIB_MAKE_VERSION(2, 1, 0);
 				header.flags = ResourceLoading::TEXTURE_FLAG_CUBE;
 				header.format = ResourceLoading::TEXTURE_FORMAT_R9G9B9E5;
 				header.mipCount = 1;
 				header.width = CUBEMAP_DIFFUSE_RES;
 				header.height = CUBEMAP_DIFFUSE_RES;
+				header.dataSize = CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32);
 				write_file(file, &header, sizeof(header));
 				void* specularData = (char*)imageCPUBuffer.mapping + cubemapSpecularTotalSize;
 				write_file(file, specularData, CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32));
@@ -555,12 +557,13 @@ void equirectangular2convolved_cubemap(StrA dstPath, StrA srcEquirect, bool writ
 				if (File file = open_file_for_writing(stracat(arena, dstPath, "_trowbridge_reitz_lut.dtf"a))) {
 					ResourceLoading::DTFHeader header{};
 					memcpy(header.magic, "DUCK", 4);
-					header.version = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+					header.version = DRILL_LIB_MAKE_VERSION(2, 1, 0);
 					header.flags = 0;
 					header.format = ResourceLoading::TEXTURE_FORMAT_RG_U8;
 					header.mipCount = 1;
 					header.width = BRDF_LUT_RES;
 					header.height = BRDF_LUT_RES;
+					header.dataSize = BRDF_LUT_RES * BRDF_LUT_RES * sizeof(U32);
 					write_file(file, &header, sizeof(header));
 					void* specularData = (char*)imageCPUBuffer.mapping + cubemapSpecularTotalSize + CUBEMAP_DIFFUSE_RES * CUBEMAP_DIFFUSE_RES * 6 * sizeof(U32);
 					write_file(file, specularData, BRDF_LUT_RES * BRDF_LUT_RES * sizeof(U32));

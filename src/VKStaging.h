@@ -133,23 +133,22 @@ struct GPUUploadStager {
 		return stagingBuffer.cmdBuffer;
 	}
 
-	VkCommandBuffer upload_to_image(VkImage dst, void* src, U32 width, U32 height, U32 arrayLayers, U32 bytesPerTexel, U32 mipLevel) {
-		U32 size = width * height * arrayLayers * bytesPerTexel;
-		if (size > uploadStagingBufferSize) {
+	VkCommandBuffer upload_to_image(VkImage dst, void* src, U32 bytesToUpload, U32 width, U32 height, U32 arrayLayers, U32 mipLevel) {
+		if (bytesToUpload > uploadStagingBufferSize) {
 			print("Image upload was too large for staging buffer, resizing\n");
 			flush();
 			wait_for_staging_buffer(stagingBuffers[0]);
 			wait_for_staging_buffer(stagingBuffers[1]);
 			destroy();
-			uploadStagingBufferSize = next_power_of_two(size);
+			uploadStagingBufferSize = next_power_of_two(bytesToUpload);
 			init(queue, queueFamily);
 		}
-		if (uploadStagingBufferSize - stagingBuffers[currentBufferIdx].offset < size) {
+		if (uploadStagingBufferSize - stagingBuffers[currentBufferIdx].offset < bytesToUpload) {
 			flush();
 		}
 		StagingBuffer& stagingBuffer = stagingBuffers[currentBufferIdx];
 		wait_for_staging_buffer(stagingBuffer);
-		memcpy(reinterpret_cast<Byte*>(stagingBuffer.memoryMapping) + stagingBuffer.offset, src, size);
+		memcpy(reinterpret_cast<Byte*>(stagingBuffer.memoryMapping) + stagingBuffer.offset, src, bytesToUpload);
 		VkBufferImageCopy cpy{};
 		cpy.bufferOffset = stagingBuffer.offset;
 		// 0 means tightly packed
@@ -162,7 +161,7 @@ struct GPUUploadStager {
 		cpy.imageOffset = VkOffset3D{ 0, 0, 0 };
 		cpy.imageExtent = VkExtent3D{ width, height, 1 };
 		VK::vkCmdCopyBufferToImage(stagingBuffer.cmdBuffer, stagingBuffer.uploadBuffer, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cpy);
-		stagingBuffer.offset += size;
+		stagingBuffer.offset += bytesToUpload;
 		return stagingBuffer.cmdBuffer;
 	}
 

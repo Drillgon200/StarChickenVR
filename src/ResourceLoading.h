@@ -3,6 +3,8 @@
 #include "VK_decl.h"
 #include "PNG.h"
 #include "compression/MipGen.h"
+#include "compression/BC7.h"
+#include "compression/LZ.h"
 
 namespace ResourceLoading {
 
@@ -19,7 +21,7 @@ struct Entity {
 
 static constexpr U32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
 static constexpr U32 LAST_KNOWN_DAF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
-static constexpr U32 LAST_KNOWN_DTF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
+static constexpr U32 LAST_KNOWN_DTF_VERSION = DRILL_LIB_MAKE_VERSION(2, 1, 0);
 
 void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, U32* skinningDataOffsetOut) {
 	U32 numVertices = modelFile.read_u32();
@@ -214,13 +216,14 @@ enum TextureFormat : U8 {
 	TEXTURE_FORMAT_RG_U8,
 	TEXTURE_FORMAT_RGBA_BC7,
 	TEXTURE_FORMAT_R9G9B9E5,
-	TEXTURE_FORMAT_COUNT
+	TEXTURE_FORMAT_Count
 };
-const U32 TEXTURE_FORMAT_TEXEL_SIZE[TEXTURE_FORMAT_COUNT]{ 0, 4, 2, 16, 4 };
+const U32 TEXTURE_FORMAT_TEXEL_SIZE[TEXTURE_FORMAT_Count]{ 0, 4, 2, 16, 4 };
 enum TextureFlags : Flags16 {
-	TEXTURE_FLAG_CUBE = 0b001,
-	TEXTURE_FLAG_SRGB = 0b010,
-	TEXTURE_FLAG_MSDF = 0b100
+	TEXTURE_FLAG_CUBE = 1 << 0,
+	TEXTURE_FLAG_SRGB = 1 << 1,
+	TEXTURE_FLAG_MSDF = 1 << 2,
+	TEXTURE_FLAG_DRLZ_COMPRESSED = 1 << 3
 };
 struct Texture {
 	VkImage image;
@@ -237,6 +240,8 @@ struct alignas(16) DTFHeader {
 	U8 mipCount;
 	U16 width;
 	U16 height;
+	U32 dataSize;
+	char padding[12];
 };
 #pragma pack(pop)
 
@@ -282,7 +287,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	case TEXTURE_FORMAT_NULL: abort("Texture format cannot be null"); break;
 	case TEXTURE_FORMAT_RGBA_U8: createFormat = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM; break;
 	case TEXTURE_FORMAT_RG_U8: createFormat = isSRGB ? VK_FORMAT_R8G8_SRGB : VK_FORMAT_R8G8_UNORM; break;
-	case TEXTURE_FORMAT_RGBA_BC7: abort("BC7 not yet supported"); break;
+	case TEXTURE_FORMAT_RGBA_BC7: createFormat = isSRGB ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK; break;
 	case TEXTURE_FORMAT_R9G9B9E5: createFormat = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32; break;
 	default: abort("Unknown texture format"); break;
 	}
@@ -306,7 +311,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	alloc_texture_memory(&linearBlock, &memoryOffset, memoryRequirements);
 	CHK_VK(VK::vkBindImageMemory(VK::logicalDevice, tex.image, linearBlock, memoryOffset));
 
-	U32 imgDataSize = width * height * TEXTURE_FORMAT_TEXEL_SIZE[format];
+	U32 imgDataSize = (format == TEXTURE_FORMAT_RGBA_BC7 ? BC7::block_count(width, height) : width * height) * TEXTURE_FORMAT_TEXEL_SIZE[format];
 	if (isCube) {
 		imgDataSize *= 6;
 	}
@@ -318,8 +323,9 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 		U32 mipWidth = width;
 		U32 mipHeight = width;
 		for (U32 mipLevel = 0; mipLevel < mipLevels; mipLevel++) {
-			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, mipWidth, mipHeight, isCube ? 6u : 1u, TEXTURE_FORMAT_TEXEL_SIZE[format], mipLevel);
-			data = (Byte*)data + mipWidth * mipHeight * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6u : 1u);
+			U32 mipDataSize = (format == TEXTURE_FORMAT_RGBA_BC7 ? BC7::block_count(mipWidth, mipHeight) : mipWidth * mipHeight) * TEXTURE_FORMAT_TEXEL_SIZE[format] * (isCube ? 6u : 1u);
+			stagingCmdBuf = VK::graphicsStager.upload_to_image(tex.image, data, mipDataSize, mipWidth, mipHeight, isCube ? 6u : 1u, mipLevel);
+			data = (Byte*)data + mipDataSize;
 			mipWidth = max(mipWidth / 2u, 1u);
 			mipHeight = max(mipHeight / 2u, 1u);
 		}
@@ -361,7 +367,7 @@ void load_png(Texture* result, StrA path, bool isSRGB = true, bool genMipmaps = 
 		PNG::read_image(stackArena, &image, &width, &height, path);
 		U32 mipCount = 1;
 		if (genMipmaps) {
-			image = MipGen::build_lame_mipmaps(stackArena, &mipCount, image, width, height);
+			image = MipGen::build_lame_mipmaps(stackArena, nullptr, &mipCount, image, width, height, isSRGB);
 		}
 		if (image) {
 			create_texture(result, image, width, height, mipCount, TEXTURE_FORMAT_RGBA_U8, isSRGB, false);
@@ -386,7 +392,7 @@ void load_dtf(Texture* result, StrA path) {
 		if (textureFile.read_u32() != bswap32('DUCK')) {
 			abort("Texture file header did not match DUCK");
 		}
-		if (textureFile.read_u32() < LAST_KNOWN_DAF_VERSION) {
+		if (textureFile.read_u32() < LAST_KNOWN_DTF_VERSION) {
 			abort("Texture file out of date");
 		}
 		Flags16 flags = textureFile.read_u16();
@@ -394,7 +400,16 @@ void load_dtf(Texture* result, StrA path) {
 		U32 mipCount = textureFile.read_u8();
 		U16 width = textureFile.read_u16();
 		U16 height = textureFile.read_u16();
-		create_texture(result, textureFile.bytes + textureFile.offset, width, height, mipCount, textureFormat, flags & TEXTURE_FLAG_SRGB, flags & TEXTURE_FLAG_CUBE);
+		U32 dataSize = textureFile.read_u32();
+		textureFile.skip(12);
+		if (!textureFile.has_data_left(dataSize)) {
+			abort("Texture file did not have required data"a);
+		}
+		Byte* pixelData = textureFile.bytes + textureFile.offset;
+		if (flags & TEXTURE_FLAG_DRLZ_COMPRESSED) {
+			pixelData = LZ::decode2(stackArena, &dataSize, pixelData, dataSize);
+		}
+		create_texture(result, pixelData, width, height, mipCount, textureFormat, flags & TEXTURE_FLAG_SRGB, flags & TEXTURE_FLAG_CUBE);
 		result->flags = flags;
 	}
 }
@@ -526,6 +541,16 @@ void create_material_from_pngs(Material* mat, StrA pathBase) {
 		load_png(&textures[0], stracat(arena, pathBase, "_BaseColor.png"a), true);
 		load_png(&textures[1], stracat(arena, pathBase, "_Normal.png"a), false);
 		load_png(&textures[2], stracat(arena, pathBase, "_ARM.png"a), false);
+	}
+	create_material(mat, &textures[0], &textures[1], &textures[2]);
+}
+void create_material_from_dtfs(Material* mat, StrA pathBase) {
+	Texture* textures = globalArena.alloc<Texture>(3);
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		load_dtf(&textures[0], stracat(arena, pathBase, "_BaseColor.dtf"a));
+		load_dtf(&textures[1], stracat(arena, pathBase, "_Normal.dtf"a));
+		load_dtf(&textures[2], stracat(arena, pathBase, "_ARM.dtf"a));
 	}
 	create_material(mat, &textures[0], &textures[1], &textures[2]);
 }

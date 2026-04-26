@@ -201,7 +201,7 @@ IntParseError parse_i64(I64* out, StrA* str) {
 		return INT_PARSE_UNDERFLOW;
 	}
 	*str = parseStr;
-	*out = isNegative ? I64(-u64) : I64(u64);
+	*out = isNegative ? -I64(u64) : I64(u64);
 	return INT_PARSE_SUCCESS;
 }
 

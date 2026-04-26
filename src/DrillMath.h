@@ -273,7 +273,7 @@ FINLINE F32 cbrtf32(F32 x) {
 // 2 ULP error
 F32 cbrtf32_robust(F32 x) {
 	U32 bits = bitcast<U32>(x);
-	I32 exp = (bits >> 23 & 0b11111111) - 127;
+	I32 exp = I32((bits >> 23 & 0b11111111)) - 127;
 	// If exp is all 1s, it's an inf if the significand is 0, a NaN otherwise
 	if (x == 0.0F || exp == 128) {
 		return x;
@@ -1641,7 +1641,7 @@ F32 ray_intersection_2d(V2F32 posA, V2F32 dirA, V2F32 posB, V2F32 dirB) {
 }
 
 //TODO test this more
-bool ray_cyliner_intersect(F32* tOut, V3F pos, V3F dir, V3F cylinderCenter, V3F cylinderTop, F32 radius) {
+bool ray_cylinder_intersect(F32* tOut, V3F pos, V3F dir, V3F cylinderCenter, V3F cylinderTop, F32 radius) {
 	// Not exactly optimized, but it'll do
 	pos -= cylinderCenter;
 	V3F axis = cylinderTop - cylinderCenter;
@@ -2615,6 +2615,9 @@ FINLINE F32 to_srgb(F32 x) {
 FINLINE V3F to_srgb(V3F x) {
 	return V3F{ to_srgb(x.x), to_srgb(x.y), to_srgb(x.z) };
 }
+FINLINE V4F to_srgb(V4F x) {
+	return V4F{ to_srgb(x.x), to_srgb(x.y), to_srgb(x.z), x.w };
+}
 FINLINE F32 from_srgb(F32 x) {
 	if (x <= 0.04045F) {
 		return x * (1.0F / 12.92F);
@@ -2628,6 +2631,9 @@ FINLINE F32 from_srgb(F32 x) {
 }
 FINLINE V3F from_srgb(V3F x) {
 	return V3F{ from_srgb(x.x), from_srgb(x.y), from_srgb(x.z) };
+}
+FINLINE V4F from_srgb(V4F x) {
+	return V4F{ from_srgb(x.x), from_srgb(x.y), from_srgb(x.z), x.w };
 }
 
 V3F uncharted2_tonemap_partial(V3F x) {

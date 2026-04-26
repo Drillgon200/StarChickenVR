@@ -186,7 +186,7 @@ V3F clip_lrch_to_srgb_gamut(V3F lrch) {
 	F32 Ld = lch.x - 0.5F;
 	F32 e1 = 0.5F + absf32(Ld) + alpha * lch.y;
 	F32 L0 = 0.5F + 0.5F * F32(signumf32(Ld)) * (e1 - sqrtf32(e1 * e1 - 2.0F * absf32(Ld)));
-	F32 C0 = 0.0F;
+	//F32 C0 = 0.0F;
 
 	V2F lchDir = V2F{ lch.y, lch.x - L0 };
 	F32 resultL{};

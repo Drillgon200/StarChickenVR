@@ -20,6 +20,8 @@ struct alignas(32) BC7Blockx4 {
 
 #pragma pack(pop)
 
+DEBUG_OPTIMIZE_ON
+
 // Useful resources
 // https://registry.khronos.org/DataFormat/specs/1.3/dataformat.1.3.html#bptc_bc7
 // https://docs.microsoft.com/en-us/windows/win32/direct3d11/bc7-format
@@ -2691,6 +2693,8 @@ F32 compress_bc7_block(RGBA8 pixels[16], BC7Block& block) {
 	return bestError;
 }
 
+DEBUG_OPTIMIZE_OFF
+
 #define BC7_ENABLE_AVX2 1
 
 struct BC7AVXBlockRange {
@@ -2729,6 +2733,13 @@ DWORD __stdcall bc7_avx_compress_block_range(LPVOID param) {
 	return 0;
 }
 
+U32 block_count(U32 width, U32 height) {
+	U32 blockWidth = (width + 3) / 4;
+	U32 blockHeight = (height + 3) / 4;
+	U32 numBlocks = blockWidth * blockHeight;
+	return numBlocks;
+}
+
 // Compresion //
 BC7Block* compress_bc7(MemoryArena& resultArena, RGBA8* image, U32 width, U32 height, U32 workerThreadCount, F32* error) {
 	if (!image) {
@@ -2737,6 +2748,7 @@ BC7Block* compress_bc7(MemoryArena& resultArena, RGBA8* image, U32 width, U32 he
 	U32 blockWidth = (width + 3) / 4;
 	U32 blockHeight = (height + 3) / 4;
 	U32 numBlocks = blockWidth * blockHeight;
+	workerThreadCount = max(min(workerThreadCount, numBlocks / 8), 1u);
 	BC7Block* blocks = resultArena.alloc<BC7Block>(numBlocks);
 
 	F32 finalError = 0;
@@ -2755,9 +2767,7 @@ BC7Block* compress_bc7(MemoryArena& resultArena, RGBA8* image, U32 width, U32 he
 	MemoryArena& scratchArena = get_scratch_arena_excluding(resultArena);
 	MEMORY_ARENA_FRAME(scratchArena) {
 		U32 simdBlockCount = (numBlocks + 7) / 8 + 1;
-		// YMM align to 32
-		U32 alignment = 32;
-		V4Fx8* pixelBlocks = scratchArena.alloc_aligned<V4Fx8>(16 * simdBlockCount, alignment);
+		V4Fx8* pixelBlocks = scratchArena.alloc<V4Fx8>(16 * simdBlockCount);
 		// Add 7 extra blocks so we can read over the edge safely
 		U32* blockIndices = scratchArena.alloc<U32>(numBlocks + 7);
 

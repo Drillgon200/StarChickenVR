@@ -698,11 +698,11 @@ void init_ui() {
 	sizeStack.reserve(16);
 	sizeStack.push_back(V2F32{ 16.0F, 16.0F });
 	textColorStack.reserve(16);
-	textColorStack.push_back(RGBA8{ 255, 255, 255, 255 });
+	textColorStack.push_back(themeColor.text);
 	borderColorStack.reserve(16);
-	borderColorStack.push_back(RGBA8{ 245, 155, 59, 255 });
+	borderColorStack.push_back(themeColor.selectionOutline);
 	backgroundColorStack.reserve(16);
-	backgroundColorStack.push_back(RGBA8{ 61, 61, 61, 255 });
+	backgroundColorStack.push_back(themeColor.background);
 	textSizeStack.reserve(16);
 	textSizeStack.push_back(12.0F);
 	borderWidthStack.reserve(16);
@@ -1596,6 +1596,7 @@ BoxHandle text_button(StrA text, Callback&& onClick) {
 	box.unsafeBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
 	box.unsafeBox->padding = 2.0F;
 	set_box_consumer_box_callback(box.unsafeBox, reinterpret_cast<Callback&&>(onClick));
+	box.unsafeBox->backgroundColor = themeColor.inputField;
 	box.unsafeBox->actionCallback = [](Box* box, UserCommunication& com) {
 		if (com.leftClicked) {
 			box->boxConsumerCallback(box);
@@ -1662,7 +1663,8 @@ BoxHandle button(Resources::Texture& tex, Callback&& onClick) {
 	return box;
 }
 
-void path_input(StrA fieldName) {
+BoxHandle path_input(StrA fieldName) {
+	BoxHandle result{};
 	UI_RBOX() {
 		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 		workingBox->align = ALIGN_MODE_CENTER_LEFT;
@@ -1677,11 +1679,14 @@ void path_input(StrA fieldName) {
 					if (path.length <= MAX_TEXT_INPUT) {
 						memcpy(box->typedTextBuffer, path.str, path.length);
 						box->numTypedCharacters = U32(path.length);
+						box->boxConsumerCallback(box);
 					}
 				}
 			}
 		});
+		result = textInput;
 	}
+	return result;
 }
 
 Box* context_menu_begin_helper() {
@@ -1711,14 +1716,11 @@ void set_box_f64_val(Box* box, F64 newVal) {
 	if (box->flags & BOX_FLAG_SLIDER_MIN_MAX_ENFORCED) {
 		newVal = clamp(newVal, box->value.f64.minVal, box->value.f64.maxVal);
 	}
-	box->value.f64.val = newVal;
+	*box->updatePtr.f64 = newVal;
 	if (box->typedTextBuffer) {
 		U32 bufferSize = MAX_TEXT_INPUT;
 		SerializeTools::serialize_f64(box->typedTextBuffer, &bufferSize, newVal);
 		box->numTypedCharacters = bufferSize;
-	}
-	if (box->updatePtr.f64) {
-		*box->updatePtr.f64 = newVal;
 	}
 }
 
@@ -1731,10 +1733,10 @@ BoxHandle slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal =
 		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 		button(Resources::uiArrowLeft, [incrementAmount](Box* box){
 			Box* slider = box->next;
-			set_box_f64_val(slider, slider->value.f64.val - incrementAmount);
+			set_box_f64_val(slider, *slider->updatePtr.f64 - incrementAmount);
 		});
 		textBox = text_input(""a, "0.0"a, false, [](Box* box){
-			F64 newVal = box->value.f64.val;
+			F64 newVal = *box->updatePtr.f64;
 			F64 parsed;
 			if (SerializeTools::parse_f64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters })) {
 				newVal = parsed;
@@ -1758,11 +1760,11 @@ BoxHandle slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal =
 				if (box->value.f64.minVal == -F64_INF || box->value.f64.maxVal == F64_INF) {
 					dragAmount = com.drag.x * 0.125;
 				}
-				set_box_f64_val(box, clamp(box->value.f64.val + dragAmount, box->value.f64.minVal, box->value.f64.maxVal));
+				set_box_f64_val(box, clamp(*box->updatePtr.f64 + dragAmount, box->value.f64.minVal, box->value.f64.maxVal));
 				return ACTION_HANDLED;
 			}
 			if (com.tessellator) {
-				F32 percentUsed = F32(clamp01((box->value.f64.val - box->value.f64.minVal) / (box->value.f64.maxVal - box->value.f64.minVal)));
+				F32 percentUsed = F32(clamp01((*box->updatePtr.f64 - box->value.f64.minVal) / (box->value.f64.maxVal - box->value.f64.minVal)));
 				F32 maxX = com.renderArea.minX + com.renderArea.width() * percentUsed;
 				V4F color = themeColor.button.to_v4f32();
 				color.w = 0.3F;
@@ -1771,7 +1773,10 @@ BoxHandle slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal =
 			}
 			return ACTION_PASS;
 		};
-		textBox->value.f64.val = defaultVal;
+		if (!toUpdate) {
+			toUpdate = &textBox->value.f64.val;
+		}
+		*toUpdate = defaultVal;
 		textBox->value.f64.minVal = minVal;
 		textBox->value.f64.maxVal = maxVal;
 		textBox->updatePtr.f64 = toUpdate;
@@ -1786,7 +1791,7 @@ BoxHandle slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal =
 		set_box_f64_val(textBox, defaultVal);
 		button(Resources::uiArrowRight, [incrementAmount](Box* box) {
 			Box* slider = box->prev;
-			set_box_f64_val(slider, slider->value.f64.val + incrementAmount);
+			set_box_f64_val(slider, *slider->updatePtr.f64 + incrementAmount);
 		});
 	}
 	return BoxHandle{ textBox, textBox->generation };
@@ -1796,14 +1801,11 @@ void set_box_i64_val(Box* box, I64 newVal) {
 	if (box->flags & BOX_FLAG_SLIDER_MIN_MAX_ENFORCED) {
 		newVal = clamp(newVal, box->value.i64.minVal, box->value.i64.maxVal);
 	}
-	box->value.i64.val = newVal;
+	*box->updatePtr.i64 = newVal;
 	if (box->typedTextBuffer) {
 		U32 bufferSize = MAX_TEXT_INPUT;
 		SerializeTools::serialize_i64(box->typedTextBuffer, &bufferSize, newVal);
 		box->numTypedCharacters = bufferSize;
-	}
-	if (box->updatePtr.i64) {
-		*box->updatePtr.i64 = newVal;
 	}
 }
 
@@ -1817,10 +1819,10 @@ BoxHandle slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I
 		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 		button(Resources::uiArrowLeft, [incrementAmount](Box* box){
 			Box* slider = box->next;
-			set_box_i64_val(slider, slider->value.i64.val - incrementAmount);
+			set_box_i64_val(slider, *slider->updatePtr.i64 - incrementAmount);
 		});
 		textBox = text_input(""a, "0"a, false, [](Box* box){
-			I64 newVal = box->value.i64.val;
+			I64 newVal = *box->updatePtr.i64;
 			I64 parsed;
 			SerializeTools::IntParseError err = SerializeTools::parse_i64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters });
 			if (err == SerializeTools::INT_PARSE_OVERFLOW) {
@@ -1851,13 +1853,13 @@ BoxHandle slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I
 					incrementBy = I64(com.drag.x);
 				} else {
 					incrementBy = I64(com.totalDrag.x / dragPerUnit);
-					totalActiveDrag.x -= F64(incrementBy) * dragPerUnit;
+					totalActiveDrag.x -= F32(F64(incrementBy) * dragPerUnit);
 				}
-				set_box_i64_val(box, clamp(box->value.i64.val + incrementBy, box->value.i64.minVal, box->value.i64.maxVal));
+				set_box_i64_val(box, clamp(*box->updatePtr.i64 + incrementBy, box->value.i64.minVal, box->value.i64.maxVal));
 				return ACTION_HANDLED;
 			}
 			if (com.tessellator) {
-				F32 percentUsed = F32(clamp01(F64(box->value.i64.val - box->value.i64.minVal) / F64(box->value.i64.maxVal - box->value.i64.minVal)));
+				F32 percentUsed = F32(clamp01(F64(*box->updatePtr.i64 - box->value.i64.minVal) / F64(box->value.i64.maxVal - box->value.i64.minVal)));
 				F32 maxX = com.renderArea.minX + com.renderArea.width() * percentUsed;
 				V4F color = themeColor.button.to_v4f32();
 				color.w = 0.3F;
@@ -1866,7 +1868,10 @@ BoxHandle slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I
 			}
 			return ACTION_PASS;
 		};
-		textBox->value.i64.val = defaultVal;
+		if (!toUpdate) {
+			toUpdate = &textBox->value.i64.val;
+		}
+		*toUpdate = defaultVal;
 		textBox->value.i64.minVal = minVal;
 		textBox->value.i64.maxVal = maxVal;
 		textBox->updatePtr.i64 = toUpdate;
@@ -1881,14 +1886,16 @@ BoxHandle slider_i64(I64* toUpdate = nullptr, I64 defaultVal = 0, I64 minVal = I
 		set_box_i64_val(textBox, defaultVal);
 		button(Resources::uiArrowRight, [incrementAmount](Box* box) {
 			Box* slider = box->prev;
-			set_box_i64_val(slider, slider->value.i64.val + incrementAmount);
+			set_box_i64_val(slider, *slider->updatePtr.i64 + incrementAmount);
 		});
 	}
 	return BoxHandle{ textBox, textBox->generation };
 }
 
-void slider_bool(B8* toUpdate = nullptr, B8 defaultVal = false) {
+BoxHandle slider_bool(B8* toUpdate = nullptr, B8 defaultVal = false) {
+	BoxHandle result{};
 	UI_RBOX() {
+		result = BoxHandle{ workingBox, workingBox->generation };
 		F32 size = sizeStack.back().x;
 		Box* spacerBefore = spacer(size).unsafeBox;
 		Box* iconBox = generic_box().unsafeBox;
@@ -1899,27 +1906,38 @@ void slider_bool(B8* toUpdate = nullptr, B8 defaultVal = false) {
 
 		set_box_callback(workingBox, [spacerBefore, spacerAfter, iconBox](Box* box, UserCommunication& com) {
 			if (com.leftClicked) {
-				box->value.b8 = B8(!bool(box->value.b8));
-				iconBox->backgroundTexture = box->value.b8 ? &Resources::uiToggleOn : &Resources::uiToggleOff;
+				*box->updatePtr.b8 = B8(!bool(*box->updatePtr.b8));
+				iconBox->backgroundTexture = *box->updatePtr.b8 ? &Resources::uiToggleOn : &Resources::uiToggleOff;
+				box->backgroundColor = *box->updatePtr.b8 ? themeColor.subheader : themeColor.inputField;
 				spacerBefore->flags ^= BOX_FLAG_DISABLED;
 				spacerAfter->flags ^= BOX_FLAG_DISABLED;
-				if (box->updatePtr.b8) {
-					*box->updatePtr.b8 = box->value.b8;
-				}
 				return ACTION_HANDLED;
 			}
 			return ACTION_PASS;
 		});
 		workingBox->hoverCursor = Win32::CURSOR_TYPE_HAND;
-		if (toUpdate) {
-			*toUpdate = defaultVal;
+		if (!toUpdate) {
+			toUpdate = &workingBox->value.b8;
 		}
-		workingBox->value.b8 = defaultVal;
+		*toUpdate = defaultVal;
 		workingBox->updatePtr.b8 = toUpdate;
-		workingBox->backgroundColor = themeColor.inputField;
+		workingBox->backgroundColor = defaultVal ? themeColor.subheader : themeColor.inputField;
 		workingBox->padding = 2.0F;
 		workingBox->flags &= ~BOX_FLAG_INVISIBLE;
 	}
+	return result;
+}
+
+BoxHandle labeled_slider_bool(StrA label, B8* toUpdate = nullptr, B8 defaultVal = false) {
+	BoxHandle result{};
+	UI_RBOX() {
+		workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+		workingBox->align = ALIGN_MODE_CENTER_LEFT;
+		text(label);
+		spacer(4.0F);
+		result = slider_bool(toUpdate, defaultVal);
+	}
+	return result;
 }
 
 void accordion_begin(StrA name) {
@@ -1961,7 +1979,7 @@ void accordion_end() {
 #define UI_ACCORDION(name) DEFER_LOOP(UI::accordion_begin(name), UI::accordion_end())
 
 void dropdown_selector(StrA name, U32 count, StrA* modes, U32* indices) {
-	Box* layoutButton = button(Resources::simpleWhite, [count, modes, indices](Box* box) {
+	Box* layoutButton = button(Resources::simpleWhite, [count, modes](Box* box) {
 		UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
 			for (U32 i = 0; i < count; i++) {
 				text_button(modes[i], [](Box* box){}).unsafeBox->value.i64.val = i;
@@ -2036,7 +2054,7 @@ void color_picker() {
 					return ACTION_PASS;
 				});
 
-				set_box_callback(clPicker, [huePicker, colorBox](Box* box, UserCommunication& com){
+				set_box_callback(clPicker, [colorBox](Box* box, UserCommunication& com){
 					if (com.leftClickStart || com.drag != V2F{ 0.0F, 0.0F }) {
 						V2F newLrC = clamp01((com.mousePos - V2F{ com.renderArea.minX, com.renderArea.minY }) / V2F{ com.renderArea.width(), com.renderArea.height() });
 						newLrC = V2F{ 1.0F - newLrC.y, newLrC.x * Oklab::SRGB_PICKER_CHROMA_END };
