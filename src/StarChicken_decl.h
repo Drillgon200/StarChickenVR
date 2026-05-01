@@ -9,6 +9,7 @@ namespace StarChicken {
 extern U64 frameNumber;
 extern F64 deltaTime;
 extern F64 totalTime;
+extern V2F frameUIMouseDelta;
 
 extern B32 shouldShutDown;
 extern B32 shouldUseDesktopWindow;

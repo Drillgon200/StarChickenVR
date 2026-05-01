@@ -12,6 +12,7 @@
 [push_constant, block] &struct {
 	U32 activeObjectId;
 	V2U outputDimensions;
+	U32 debugMode;
 } pushConstants;
 
 [entrypoint, localsize 16 16 1] @[][] compute_main{
@@ -27,8 +28,13 @@
 	U32 isSelected{ objIdTexel >>> 31u };
 	objIdTexel = objIdTexel & 0x7FFFFFFFu;
 	V4F sceneTexel{ (^sceneColor)[fragCoord] };
-	V3F sceneTonemapped{ uncharted2_filmic(sceneTexel.rgb) };
-	//sceneTonemapped = sceneTexel.rgb;
+	V3F sceneTonemapped{ sceneTexel.rgb };
+
+	U32 RENDER_DEBUG_DISPLAY_PBR{ 0u };
+	if pushConstants.debugMode == RENDER_DEBUG_DISPLAY_PBR {
+		sceneTonemapped = uncharted2_filmic(sceneTonemapped);
+	};
+
 	V2U minCoord{ 0u };
 	V2U maxCoord{ outputDim };
 	U32 id00{ (^sceneObjIds)[clamp(fragCoord + V2U(-1u, -1u), minCoord, maxCoord)].x };

@@ -54,6 +54,7 @@ U64 frameTime;
 U64 timerFrequency;
 F64 deltaTime;
 F64 totalTime;
+V2F frameUIMouseDelta;
 
 PlayerInfo player;
 
@@ -107,6 +108,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 
 	V2F32 mousePos = Win32::get_mouse();
 	V2F32 mouseDelta = Win32::get_delta_mouse();
+	frameUIMouseDelta = mouseDelta;
 	if (!Win32::mouseCaptured) {
 		UI::handle_mouse_update(mousePos, mouseDelta);
 	}
@@ -235,6 +237,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 							// Fill in background
 							VK::WorldDrawPushConstants backgroundPushConstants{};
 							backgroundPushConstants.camIdx = camIdx;
+							backgroundPushConstants.debugMode = VK::currentDebugDisplay;
 							VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
 							VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
 							VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
@@ -254,6 +257,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 					// Fill in background
 					VK::WorldDrawPushConstants backgroundPushConstants{};
 					backgroundPushConstants.camIdx = 0;
+					backgroundPushConstants.debugMode = VK::currentDebugDisplay;
 					VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
 					VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
 					VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
@@ -275,6 +279,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::FinalCompositePushConstants compositeConstants{};
 			compositeConstants.activeObjectId = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
 			compositeConstants.outputDimensions = V2U{ VK::attachments.mainWidth, VK::attachments.mainHeight };
+			compositeConstants.debugMode = VK::currentDebugDisplay;
 			VK::vkCmdPushConstants(cmdBuf, VK::finalCompositePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(compositeConstants), &compositeConstants);
 			VK::vkCmdDispatch(cmdBuf, (VK::attachments.mainWidth + 15) / 16, (VK::attachments.mainHeight + 15) / 16, 1);
 		}
@@ -348,6 +353,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::FinalCompositePushConstants compositeConstants{};
 			compositeConstants.activeObjectId = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
 			compositeConstants.outputDimensions = V2U{ VK::attachments.uiWidth, VK::attachments.uiHeight };
+			compositeConstants.debugMode = VK::currentDebugDisplay;
 			VK::vkCmdPushConstants(cmdBuf, VK::finalCompositePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(compositeConstants), &compositeConstants);
 			VK::vkCmdDispatch(cmdBuf, (VK::attachments.uiWidth + 15) / 16, (VK::attachments.uiHeight + 15) / 16, 1);
 		}
@@ -436,23 +442,21 @@ void keyboard_callback(Win32::Key key, Win32::ButtonState state) {
 		Win32::set_mouse_captured(false);
 		EditorUI::focusedEditor3D = nullptr;
 	}
-	if (!EditorUI::focusedEditor3D) {
+	if (!EditorUI::key_input(key, state)) {
 		UI::handle_keyboard_action(mousePos, key, state);
 	}
-	EditorUI::key_input(key, state);
 }
 void mouse_callback(Win32::MouseButton button, Win32::MouseValue state) {
 	if (UI::inDialog) {
 		return;
 	}
 	V2F mousePos = Win32::get_mouse();
-	if (!EditorUI::focusedEditor3D) {
+	if (!EditorUI::mouse_input(button, state, mousePos)) {
 		UI::handle_mouse_action(mousePos, button, state);
 	}
 	if (EditorUI::focusedEditor3D) {
 		UI::activeBox = UI::hotBox = UI::BoxHandle{};
 	}
-	EditorUI::mouse_input(button, state, mousePos);
 }
 
 void do_frame() {

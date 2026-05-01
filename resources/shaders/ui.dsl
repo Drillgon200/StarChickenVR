@@ -96,7 +96,8 @@ struct Vertex {
 		};
 		finalColor = val;
 	} else {
-		finalColor = (^textures)[nonuniform ^texidx][^bilinearSampler, ^texcoord] * ^color;
+		V4F texColor{ (^textures)[nonuniform ^texidx][^bilinearSampler, ^texcoord] };
+		finalColor = V4F(to_srgb(texColor.rgb), texColor.a) * ^color;
 	};
 	if ^flags & UI_RENDER_FLAG_OKLrCH {
 		F32 chromaScale{ 0.37 };

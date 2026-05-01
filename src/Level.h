@@ -88,6 +88,28 @@ struct Level {
 		}
 	}
 
+	V3F get_selection_midpoint() {
+		V3F selectedMidpoint{};
+		for (LevelObject* obj : selectedObjects) {
+			selectedMidpoint += obj->transform.translation();
+		}
+		return selectedMidpoint / F32(selectedObjects.size);
+	}
+	void add_obj_to_selected(LevelObject* obj) {
+		if (!(obj->flags & LevelObject::SELECTED)) {
+			selectedObjects.push_back(obj);
+			obj->flags |= LevelObject::SELECTED;
+		}
+	}
+	void remove_obj_from_selected(LevelObject* obj) {
+		if (obj->flags & LevelObject::SELECTED) {
+			if (activeObject == obj) {
+				activeObject = nullptr;
+			}
+			selectedObjects.remove_obj_unordered(obj);
+			obj->flags ^= LevelObject::SELECTED;
+		}
+	}
 	void deselect_all() {
 		for (LevelObject* obj : selectedObjects) {
 			obj->flags &= ~Flags32(LevelObject::SELECTED);
@@ -98,30 +120,25 @@ struct Level {
 	void select_object(U32 id) {
 		if (LevelObject* obj = idToLevelObject.find_or_default(id, nullptr)) {
 			activeObject = obj;
-			if (!(obj->flags & LevelObject::SELECTED)) {
-				selectedObjects.push_back(obj);
-				obj->flags |= LevelObject::SELECTED;
-			}
+			add_obj_to_selected(obj);
 		}
 	}
 	void deselect_object(U32 id) {
 		if (LevelObject* obj = idToLevelObject.find_or_default(id, nullptr)) {
-			if (obj->flags & LevelObject::SELECTED) {
-				if (activeObject == obj) {
-					activeObject = nullptr;
-				}
-				selectedObjects.remove_obj_unordered(obj);
-				obj->flags ^= LevelObject::SELECTED;
+			remove_obj_from_selected(obj);
+		}
+	}
+	void select_objects(U32* ids, U32 count) {
+		for (U32* id = ids; id != ids + count; id++) {
+			if (LevelObject* obj = idToLevelObject.find_or_default(*id, nullptr)) {
+				add_obj_to_selected(obj);
 			}
 		}
 	}
-	void select_all(U32* ids, U32 count) {
-		for (U32* id = ids; id != ids + count; id++) {
-			if (LevelObject* obj = idToLevelObject.find_or_default(*id, nullptr)) {
-				if (!(obj->flags & LevelObject::SELECTED)) {
-					selectedObjects.push_back(obj);
-					obj->flags |= LevelObject::SELECTED;
-				}
+	void select_all() {
+		for (U32 i = 0; i < idToLevelObject.capacity; i++) {
+			if (idToLevelObject.keys[i] != idToLevelObject.emptyKey) {
+				add_obj_to_selected(idToLevelObject.values[i]);
 			}
 		}
 	}
@@ -179,7 +196,7 @@ struct Level {
 				continue;
 			}
 			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx };
+			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx, VK::currentDebugDisplay };
 			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 0);
 		}
@@ -190,7 +207,7 @@ struct Level {
 			}
 			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
 			// Negate vertex offset so the shader knows to pull from the skinned vertex arrays
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, -I32(model->skinnedVerticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx };
+			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, -I32(model->skinnedVerticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx, VK::currentDebugDisplay };
 			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, 0, 0);
 		}

@@ -118,66 +118,12 @@ struct EditorPlayer {
 	}
 };
 
-enum TranslateWidgetComponent {
-	TRANSLATE_WIDGET_COMPONENT_NONE,
-	TRANSLATE_WIDGET_COMPONENT_X_AXIS,
-	TRANSLATE_WIDGET_COMPONENT_Y_AXIS,
-	TRANSLATE_WIDGET_COMPONENT_Z_AXIS,
-	TRANSLATE_WIDGET_COMPONENT_XY_PLANE,
-	TRANSLATE_WIDGET_COMPONENT_XZ_PLANE,
-	TRANSLATE_WIDGET_COMPONENT_YZ_PLANE,
-	TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE
-};
-struct TranslateWidget {
-	M4x3F transform;
-	TranslateWidgetComponent activeComponent;
-
-	void do_mouse_over(V3F eye, V3F look) {
-		activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
-		F32 scale = 0.125F * distance(eye, V3F{ transform.x, transform.y, transform.z });
-		F32 arrowRadius = 0.05F * scale;
-		V3F center{ transform.x, transform.y, transform.z };
-		V3F xAxis = transform.get_row(0);
-		V3F yAxis = transform.get_row(1);
-		V3F zAxis = transform.get_row(2);
-		F32 bestTime = F32_INF;
-		F32 xAxisTime{};
-		if (ray_cylinder_intersect(&xAxisTime, eye, look, center + xAxis * scale * 0.5F, center, arrowRadius * 2.0F) && xAxisTime < bestTime) {
-			bestTime = xAxisTime;
-			activeComponent = TRANSLATE_WIDGET_COMPONENT_X_AXIS;
-		}
-		F32 yAxisTime{};
-		if (ray_cylinder_intersect(&yAxisTime, eye, look, center + yAxis * scale * 0.5F, center, arrowRadius * 2.0F) && yAxisTime < bestTime) {
-			bestTime = yAxisTime;
-			activeComponent = TRANSLATE_WIDGET_COMPONENT_Y_AXIS;
-		}
-		F32 zAxisTime{};
-		if (ray_cylinder_intersect(&zAxisTime, eye, look, center + zAxis * scale * 0.5F, center, arrowRadius * 2.0F) && zAxisTime < bestTime) {
-			bestTime = zAxisTime;
-			activeComponent = TRANSLATE_WIDGET_COMPONENT_Z_AXIS;
-		}
-	}
-
-	void draw(DynamicVertexBuffer::Tessellator& tes, V3F eye) {
-		F32 scale = 0.125F * distance(eye, V3F{ transform.x, transform.y, transform.z });
-		F32 arrowRadius = 0.05F * scale;
-		V3F center{ transform.x, transform.y, transform.z };
-		V3F xAxis = transform.get_row(0);
-		V3F yAxis = transform.get_row(1);
-		V3F zAxis = transform.get_row(2);
-		tes.begin_draw(VK::debugNoDepthPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
-		tes.debug_arrow(center, center + xAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
-		tes.debug_arrow(center, center + yAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
-		tes.debug_arrow(center, center + zAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS ? V4F{ 0.5F, 0.5F, 1.0F, 1.0F } : V4F{ 0.25F, 0.25F, 1.0F, 1.0F });
-		tes.end_draw();
-	}
-};
-
-
-enum PanelType {
+enum PanelType : U32 {
 	PANEL_TYPE_NONE,
 	PANEL_TYPE_EDITOR_3D,
 	PANEL_TYPE_TEXTURE_PROCESSING,
+	PANEL_TYPE_MATERIAL_EDITOR,
+	PANEL_TYPE_MATERIAL_VIEWER,
 	PANEL_TYPE_UI_TEST
 };
 
@@ -185,6 +131,8 @@ struct PanelEditor3D;
 ArenaArrayList<PanelEditor3D*> renderPanels;
 
 PanelEditor3D* focusedEditor3D;
+
+UI::BoxHandle debugDisplayText;
 
 struct PanelUITest {
 	void init() {
@@ -362,6 +310,333 @@ struct PanelTextureProcessing {
 	}
 };
 
+struct PanelEditor3D;
+struct Widget3D;
+extern Widget3D* currentInputWidget;
+
+enum TransformOriginMode {
+	TRANSFORM_ORIGIN_MODE_OBJECT_AVERAGE,
+	TRANSFORM_ORIGIN_MODE_INDIVIDUAL_ORIGINS,
+	TRANSFORM_ORIGIN_MODE_ACTIVE_ELEMENT
+};
+
+enum TransformOrientationMode {
+	TRANSFORM_ORIENTATION_MODE_GLOBAL,
+	TRANSFORM_ORIENTATION_MODE_LOCAL
+};
+
+enum EditorCmd {
+	EDITOR_CMD_TRANSFORM,
+	EDITOR_CMD_SELECT_OBJECTS
+};
+
+struct EditorCmdTransform {
+	U32* affectedObjIds;
+	I32 affectedObjIdCount;
+	M4x3F* previousTransforms;
+	QF32 rotation;
+	V3F translation;
+	V3F origin;
+	TransformOrientationMode orientationMode;
+	TransformOriginMode originMode;
+
+	void apply() {
+		for (I32 i = 0; i < affectedObjIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(affectedObjIds[i], nullptr)) {
+				obj->transform.add_offset(translation);
+			}
+		}
+	}
+	void revert() {
+		for (I32 i = 0; i < affectedObjIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(affectedObjIds[i], nullptr)) {
+				obj->transform = previousTransforms[i];
+			}
+		}
+	}
+};
+struct EditorCmdSelectObjects {
+	U32* previousSet;
+	U32 previousCount;
+	U32* nextSet;
+	U32 nextCount;
+
+	void apply() {
+		Level::level.deselect_all();
+		Level::level.select_objects(nextSet, nextCount);
+	}
+	void revert() {
+		Level::level.deselect_all();
+		Level::level.select_objects(previousSet, previousCount);
+	}
+};
+
+struct UndoEntry {
+	union {
+		EditorCmdTransform cmdTransform;
+		EditorCmdSelectObjects cmdSelectObjects;
+	};
+	EditorCmd cmdType;
+	UndoEntry* prev;
+	UndoEntry* next;
+	U32 allocAmount;
+
+	void apply() {
+		switch (cmdType) {
+		case EDITOR_CMD_TRANSFORM: cmdTransform.apply(); break;
+		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.apply(); break;
+		}
+	}
+	void revert() {
+		switch (cmdType) {
+		case EDITOR_CMD_TRANSFORM: cmdTransform.revert(); break;
+		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.revert(); break;
+		}
+	}
+};
+struct UndoStack {
+	static const U32 UNDO_STACK_SIZE = 16 * MEGABYTE;
+	static const U32 UNDO_STACK_MASK = UNDO_STACK_SIZE - 1;
+	alignas(32) Byte stack[UNDO_STACK_SIZE];
+	UndoEntry* head;
+	UndoEntry* tail;
+	U32 freeSpace;
+	U32 firstUsedPos;
+	U32 allocPos;
+	// This entry has been applied
+	UndoEntry* currentEntry;
+
+	void init() {
+		freeSpace = UNDO_STACK_SIZE;
+	}
+
+	void undo() {
+		if (currentEntry) {
+			currentEntry->revert();
+			currentEntry = currentEntry->prev;
+		}
+	}
+	void redo() {
+		UndoEntry* redoEntry = currentEntry ? currentEntry->next : head;
+		if (redoEntry) {
+			redoEntry->apply();
+			currentEntry = redoEntry;
+		}
+	}
+
+	void delete_head() {
+		firstUsedPos = (firstUsedPos + head->allocAmount) & UNDO_STACK_MASK;
+		freeSpace += head->allocAmount;
+		UndoEntry* toRemove = head;
+		DLL_REMOVE(toRemove, head, tail, prev, next);
+	}
+	void delete_tail() {
+		allocPos = (allocPos - tail->allocAmount) & UNDO_STACK_MASK;
+		freeSpace += tail->allocAmount;
+		UndoEntry* toRemove = tail;
+		DLL_REMOVE(toRemove, head, tail, prev, next);
+	}
+
+	// Deletes old entries to make space for the new command
+	void make_space_for(U32 byteCount) {
+		if (freeSpace == 0) {
+			// Guarantee allocPos and firstUsedPos are different
+			delete_head();
+		}
+		while (head && freeSpace < byteCount) {
+			delete_head();
+		}
+	}
+
+	template<typename T>
+	T* alloc(U32* usedSpaceOut, U32 count) {
+		U32 lastAllocPos = allocPos;
+		U32 lastFreeSpace = freeSpace;
+		U32 usedSpace = ALIGN_HIGH(allocPos, alignof(T)) - allocPos;
+		allocPos += usedSpace, freeSpace -= usedSpace;
+		U32 requiredSize = U32(sizeof(T) * count);
+		make_space_for(requiredSize + alignof(T));
+		if (allocPos > firstUsedPos && UNDO_STACK_SIZE - allocPos < requiredSize) {
+			// Two potential free zones, one at the beginning, one at the end
+			// Eat the top zone if it's too small
+			usedSpace += UNDO_STACK_SIZE - allocPos;
+			freeSpace -= UNDO_STACK_SIZE - allocPos;
+			allocPos = 0;
+			make_space_for(requiredSize);
+		}
+		if (requiredSize > freeSpace) {
+			allocPos = lastAllocPos;
+			freeSpace = lastFreeSpace;
+			return nullptr;
+		}
+		T* result = (T*)(stack + allocPos);
+		usedSpace += requiredSize;
+		freeSpace -= requiredSize;
+		allocPos += requiredSize;
+		*usedSpaceOut = usedSpace;
+		return result;
+	}
+	UndoEntry* new_entry() {
+		while (tail != currentEntry) {
+			delete_tail();
+		}
+		U32 usedSpace;
+		UndoEntry* result = alloc<UndoEntry>(&usedSpace, 1);
+		*result = UndoEntry{};
+		result->allocAmount = usedSpace;
+		return result;
+	}
+	// Call if allocations fail (hopefully won't happen, but I'd like to be robust to that)
+	void abort_entry(UndoEntry* entry) {
+		allocPos = (allocPos - entry->allocAmount) & UNDO_STACK_MASK;
+		freeSpace += entry->allocAmount;
+	}
+	template<typename T>
+	T* alloc_for_entry(UndoEntry* entry, U32 count) {
+		U32 usedSpace;
+		T* result = alloc<T>(&usedSpace, count);
+		entry->allocAmount += usedSpace;
+		return result;
+	}
+	void insert_entry(UndoEntry* entry) {
+		currentEntry = entry;
+		DLL_INSERT_TAIL(entry, head, tail, prev, next);
+	}
+} undoStack;
+
+const F32 TRANSFORM_WIDGET_SCALE = 0.125F;
+const F32 TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE = 0.25F;
+
+enum TranslateWidgetComponent {
+	TRANSLATE_WIDGET_COMPONENT_NONE,
+	TRANSLATE_WIDGET_COMPONENT_X_AXIS,
+	TRANSLATE_WIDGET_COMPONENT_Y_AXIS,
+	TRANSLATE_WIDGET_COMPONENT_Z_AXIS,
+	TRANSLATE_WIDGET_COMPONENT_XY_PLANE,
+	TRANSLATE_WIDGET_COMPONENT_XZ_PLANE,
+	TRANSLATE_WIDGET_COMPONENT_YZ_PLANE,
+	TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE
+};
+struct TranslateWidget {
+	M4x3F transform;
+	M4x3F preInteractTransform;
+	V3F totalTranslationAmount;
+	V2F interactStartMousePos;
+	TranslateWidgetComponent activeComponent;
+	UndoEntry* currentUndoCmd;
+
+	void do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look);
+
+	void key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state) {
+	}
+	void mouse_input(PanelEditor3D* editor3D, Win32::MouseButton button, Win32::MouseValue state, V2F mousePos) {
+		if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_UP) {
+			currentInputWidget = nullptr;
+			return;
+		}
+	}
+
+	void update_inactive(PanelEditor3D* editor3D, bool mouseInRange, V3F eye, V3F pickRay) {
+		if (mouseInRange) {
+			do_mouse_over(editor3D, eye, pickRay);
+		} else {
+			activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
+		}
+		transform.set_offset(Level::level.get_selection_midpoint());
+	}
+
+	void update_active(PanelEditor3D* editor3D);
+
+	bool check_clicked_on(PanelEditor3D* editor3D, V3F eye, V3F pickRay) {
+		do_mouse_over(editor3D, eye, pickRay);
+		return activeComponent != TRANSLATE_WIDGET_COMPONENT_NONE;
+	}
+
+	void on_made_active(PanelEditor3D* editor3D) {
+		totalTranslationAmount = {};
+		preInteractTransform = transform;
+		interactStartMousePos = Win32::get_mouse();
+		currentUndoCmd = undoStack.new_entry();
+		currentUndoCmd->cmdTransform = EditorCmdTransform{};
+		EditorCmdTransform& cmd = currentUndoCmd->cmdTransform;
+		cmd.rotation.set_identity();
+		transform.set_offset(Level::level.get_selection_midpoint());
+		cmd.origin = transform.translation();
+		cmd.affectedObjIdCount = Level::level.selectedObjects.size;
+		cmd.affectedObjIds = undoStack.alloc_for_entry<U32>(currentUndoCmd, cmd.affectedObjIdCount);
+		if (!cmd.affectedObjIds) {
+			goto failed;
+		}
+		cmd.previousTransforms = undoStack.alloc_for_entry<M4x3F>(currentUndoCmd, cmd.affectedObjIdCount);
+		if (!cmd.previousTransforms) {
+			goto failed;
+		}
+		for (U32 i = 0; i < Level::level.selectedObjects.size; i++) {
+			cmd.affectedObjIds[i] = Level::level.selectedObjects[i]->id;
+			cmd.previousTransforms[i] = Level::level.selectedObjects[i]->transform;
+		}
+		undoStack.insert_entry(currentUndoCmd);
+		goto success;
+	failed:;
+		undoStack.abort_entry(currentUndoCmd);
+		currentUndoCmd = nullptr;
+	success:;
+	}
+
+	void draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessellator& tes, V3F eye);
+};
+
+enum Widget3DType : U32 {
+	WIDGET_3D_NONE,
+	WIDGET_3D_TRANSLATE
+};
+struct Widget3D {
+	Widget3DType type;
+	PanelEditor3D* parentPanel;
+	union {
+		TranslateWidget translate;
+	};
+
+	void key_input(Win32::Key key, Win32::ButtonState state) {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: translate.key_input(parentPanel, key, state); break;
+		}
+	}
+	void mouse_input(Win32::MouseButton button, Win32::MouseValue state, V2F mousePos) {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: translate.mouse_input(parentPanel, button, state, mousePos); break;
+		}
+	}
+	void update_inactive(bool mouseInRange, V3F eye, V3F pickRay) {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: translate.update_inactive(parentPanel, mouseInRange, eye, pickRay); break;
+		}
+	}
+	void update_active() {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: translate.update_active(parentPanel); break;
+		}
+	}
+	void draw(DynamicVertexBuffer::Tessellator& tes, V3F eyePos) {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: translate.draw(parentPanel, tes, eyePos); break;
+		}
+	}
+	void on_made_active() {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: translate.on_made_active(parentPanel); break;
+		}
+	}
+};
+
+Widget3D* currentInputWidget;
+
 struct PanelEditor3D {
 	EditorPlayer editor;
 	Rng2F32 viewport;
@@ -373,7 +648,18 @@ struct PanelEditor3D {
 	B8 isDragSelecting;
 	B8 panelContainsMouse;
 	V3F mousePickRay;
-	TranslateWidget translateWidget;
+	Widget3D widget3D;
+
+	void switch_widget(Widget3DType newWidget) {
+		if (currentInputWidget == &widget3D) {
+			currentInputWidget = nullptr;
+		}
+		switch (newWidget) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: widget3D.translate = TranslateWidget{}; break;
+		}
+		widget3D.type = newWidget;
+	}
 
 	void init() {
 		V3F playerEye{ -30.0F, 8.0F, 0.0F };
@@ -383,7 +669,9 @@ struct PanelEditor3D {
 		fov = 120.0F;
 		renderPanels.push_back_unique(this);
 
-		translateWidget.transform.set_identity();
+		widget3D.parentPanel = this;
+		switch_widget(WIDGET_3D_TRANSLATE);
+		widget3D.translate.transform.set_identity();
 	}
 	void destroy() {
 		I64 idx = renderPanels.idx_of(this);
@@ -405,8 +693,8 @@ struct PanelEditor3D {
 		V3F ndc = projection.transform(viewSpace);
 		return V2F{ viewport.minX + (ndc.x * 0.5F + 0.5F) * viewport.width(), viewport.minY + (ndc.y * 0.5F + 0.5F) * viewport.height() };
 	}
-	V2F vector_in_screen_space(V3F origin, V3F direction) {
-		return project_pos(origin + direction) - project_pos(origin);
+	V2F vector_in_screen_space(V3F from, V3F to) {
+		return project_pos(to) - project_pos(from);
 	}
 	void update() {
 		projection.project_perspective(0.05F, DEG_TO_TURN(fov), viewport.height() / viewport.width());
@@ -416,19 +704,18 @@ struct PanelEditor3D {
 			mousePickRay = unproject_vec(mousePos);
 			panelContainsMouse = viewport.contains_point(mousePos);
 			V3F eyePos = editor.get_render_eye_pos();
-			if (panelContainsMouse) {
-				translateWidget.do_mouse_over(eyePos, mousePickRay);
-				//F32 scale = 0.125F * distance(eyePos, translateWidget.transform.translation());
-				//printf("%\n"a, vector_in_screen_space(translateWidget.transform.translation(), translateWidget.transform.get_row(1) * scale));
+
+			if (currentInputWidget == &widget3D) {
+				widget3D.update_active();
 			} else {
-				translateWidget.activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
+				widget3D.update_inactive(panelContainsMouse, eyePos, mousePickRay);
 			}
 		}
 	}
 	void debug_render() {
 		DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
 		V3F eyePos = editor.get_render_eye_pos();
-		translateWidget.draw(tes, eyePos);
+		widget3D.draw(tes, eyePos);
 	}
 	void build_ui() {
 		using namespace UI;
@@ -442,6 +729,16 @@ struct PanelEditor3D {
 				Win32::set_mouse_captured(true);
 				return ACTION_HANDLED;
 			} else if (com.leftClickStart) {
+				switch (editor3d->widget3D.type) {
+				case WIDGET_3D_TRANSLATE: {
+					if (editor3d->widget3D.translate.check_clicked_on(editor3d, editor3d->editor.get_render_eye_pos(), editor3d->mousePickRay)) {
+						currentInputWidget = &editor3d->widget3D;
+						currentInputWidget->on_made_active();
+						return ACTION_HANDLED;
+					}
+				} break;
+				default: break;
+				}
 				selectDragStart = com.mousePos;
 				editor3d->isDragSelecting = true;
 			}
@@ -469,7 +766,7 @@ struct PanelEditor3D {
 								}
 							}
 						}
-						Level::level.select_all(selectedSet.data, selectedSet.size);
+						Level::level.select_objects(selectedSet.data, selectedSet.size);
 					}
 				} else {
 					U32 clickPixelIdx = U32(com.mousePos.y) * VK::attachments.mainWidth + U32(com.mousePos.x);
@@ -487,6 +784,31 @@ struct PanelEditor3D {
 				}
 				return ACTION_HANDLED;
 			}
+			if (com.keyPressed == Win32::KEY_A) {
+				Level::level.select_all();
+			}
+			if (com.keyPressed == Win32::KEY_Z) {
+				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
+					undoStack.redo();
+				} else {
+					undoStack.undo();
+				}
+			}
+			if (com.keyPressed == Win32::KEY_B) {
+				VK::currentDebugDisplay = VK::RenderDebugDisplay((U32(VK::currentDebugDisplay) + 1) % U32(VK::RENDER_DEBUG_DISPLAY_Count));
+				if (UI::Box* box = debugDisplayText.get()) {
+					StrA text{};
+					switch (VK::currentDebugDisplay) {
+					case VK::RENDER_DEBUG_DISPLAY_PBR_NO_TONEMAP: text = "No Tonemap"a; break;
+					case VK::RENDER_DEBUG_DISPLAY_NORMAL: text = "Normal"a; break;
+					case VK::RENDER_DEBUG_DISPLAY_AMBIENT_OCCLUSION: text = "Ambient Occlusion"a; break;
+					case VK::RENDER_DEBUG_DISPLAY_ROUGHNESS: text = "Roughness"a; break;
+					case VK::RENDER_DEBUG_DISPLAY_METALLIC: text = "Metallic"a; break;
+					case VK::RENDER_DEBUG_DISPLAY_BASIC_LIGHTING: text = "Basic Lighting"a; break;
+					}
+					box->text = text;
+				}
+			}
 			if (!Win32::mouseButtonState[Win32::MOUSE_BUTTON_LEFT]) {
 				editor3d->isDragSelecting = false;
 			}
@@ -499,6 +821,170 @@ struct PanelEditor3D {
 			}
 			return ACTION_PASS;
 		});
+	}
+};
+
+void TranslateWidget::update_active(PanelEditor3D* editor3D) {
+	if (activeComponent == TRANSLATE_WIDGET_COMPONENT_NONE || StarChicken::frameUIMouseDelta == V2F{}) {
+		return;
+	}
+	V3F eye = editor3D->editor.get_render_eye_pos();
+	V3F prevMouseRay = editor3D->unproject_vec(interactStartMousePos);
+	V3F mouseRay = editor3D->unproject_vec(Win32::get_mouse());
+
+	V2F drag = Win32::get_mouse() - interactStartMousePos;
+	V3F prevWidgetPos = preInteractTransform.translation();
+	F32 scale = TRANSFORM_WIDGET_SCALE * distance(editor3D->editor.get_render_eye_pos(), prevWidgetPos);
+	if (activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS || activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS || activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS) {
+		U32 rowIdx =
+			activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? 0 :
+			activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS ? 1 :
+			2;
+		V3F translateAxis = normalize(preInteractTransform.get_row(rowIdx));
+		V3F planeNormal = eye - prevWidgetPos;
+		planeNormal = planeNormal - translateAxis * dot(planeNormal, translateAxis);
+		V3F planeTranslation = ray_plane_intersect_point(eye, mouseRay, prevWidgetPos, planeNormal) - ray_plane_intersect_point(eye, prevMouseRay, prevWidgetPos, planeNormal);
+		totalTranslationAmount = translateAxis * dot(translateAxis, planeTranslation);
+	} else {
+		// Translate along plane, not constrained to one axis
+		V3F planeNormal{};
+		switch (activeComponent) {
+		case TRANSLATE_WIDGET_COMPONENT_XY_PLANE: planeNormal = preInteractTransform.get_row(2); break;
+		case TRANSLATE_WIDGET_COMPONENT_XZ_PLANE: planeNormal = preInteractTransform.get_row(1); break;
+		case TRANSLATE_WIDGET_COMPONENT_YZ_PLANE: planeNormal = preInteractTransform.get_row(0); break;
+		case TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE: planeNormal = editor3D->editor.forward; break;
+		}
+		totalTranslationAmount = ray_plane_intersect_point(eye, mouseRay, prevWidgetPos, planeNormal) - ray_plane_intersect_point(eye, prevMouseRay, prevWidgetPos, planeNormal);
+	}
+	transform = preInteractTransform;
+	transform.add_offset(totalTranslationAmount);
+	if (currentUndoCmd) {
+		currentUndoCmd->revert();
+		currentUndoCmd->cmdTransform.translation = totalTranslationAmount;
+		currentUndoCmd->apply();
+	}
+}
+
+void TranslateWidget::do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look) {
+	activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
+	F32 scale = TRANSFORM_WIDGET_SCALE * distance(eye, V3F{ transform.x, transform.y, transform.z });
+	F32 planeScale = scale * TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE;
+	F32 arrowRadius = 0.05F * scale;
+	V3F center{ transform.x, transform.y, transform.z };
+	V3F xAxis = transform.get_row(0);
+	V3F yAxis = transform.get_row(1);
+	V3F zAxis = transform.get_row(2);
+	F32 bestTime = F32_INF;
+	F32 xAxisTime{};
+	if (ray_cylinder_intersect(&xAxisTime, eye, look, center + xAxis * scale * 0.5F, center, arrowRadius * 2.0F) && xAxisTime < bestTime) {
+		bestTime = xAxisTime;
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_X_AXIS;
+	}
+	F32 yAxisTime{};
+	if (ray_cylinder_intersect(&yAxisTime, eye, look, center + yAxis * scale * 0.5F, center, arrowRadius * 2.0F) && yAxisTime < bestTime) {
+		bestTime = yAxisTime;
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_Y_AXIS;
+	}
+	F32 zAxisTime{};
+	if (ray_cylinder_intersect(&zAxisTime, eye, look, center + zAxis * scale * 0.5F, center, arrowRadius * 2.0F) && zAxisTime < bestTime) {
+		bestTime = zAxisTime;
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_Z_AXIS;
+	}
+	F32 xyAxisTime{};
+	if (ray_rect_intersect(&xyAxisTime, eye, look, center + xAxis * planeScale + yAxis * planeScale, xAxis * planeScale, yAxis * planeScale) && xyAxisTime < bestTime) {
+		bestTime = xyAxisTime;
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_XY_PLANE;
+	}
+	F32 xzAxisTime{};
+	if (ray_rect_intersect(&xzAxisTime, eye, look, center + xAxis * planeScale + zAxis * planeScale, xAxis * planeScale, zAxis * planeScale) && xzAxisTime < bestTime) {
+		bestTime = xzAxisTime;
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_XZ_PLANE;
+	}
+	F32 yzAxisTime{};
+	if (ray_rect_intersect(&yzAxisTime, eye, look, center + yAxis * planeScale + zAxis * planeScale, yAxis * planeScale, zAxis * planeScale) && yzAxisTime < bestTime) {
+		bestTime = yzAxisTime;
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_YZ_PLANE;
+	}
+	V3F camX = editor3D->editor.right * planeScale;
+	V3F camY = editor3D->editor.up * planeScale;
+	if (ray_rect_intersect(nullptr, eye, look, center - camX * 0.5F - camY * 0.5F, camX, camY)) {
+		activeComponent = TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE;
+	}
+}
+
+void TranslateWidget::draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessellator& tes, V3F eye) {
+	F32 scale = TRANSFORM_WIDGET_SCALE * distance(eye, V3F{ transform.x, transform.y, transform.z });
+	F32 planeScale = scale * TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE;
+	F32 arrowRadius = 0.05F * scale;
+	V3F center{ transform.x, transform.y, transform.z };
+	V3F xAxis = transform.get_row(0);
+	V3F yAxis = transform.get_row(1);
+	V3F zAxis = transform.get_row(2);
+	V3F camX = editor3D->editor.right * planeScale;
+	V3F camY = editor3D->editor.up * planeScale;
+	tes.begin_draw(VK::debugNoDepthPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+	tes.debug_arrow(center, center + xAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
+	tes.debug_arrow(center, center + yAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
+	tes.debug_arrow(center, center + zAxis * scale, arrowRadius, activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS ? V4F{ 0.5F, 0.5F, 1.0F, 1.0F } : V4F{ 0.25F, 0.25F, 1.0F, 1.0F });
+	tes.debug_quad(center + xAxis * planeScale + yAxis * planeScale, xAxis * planeScale, yAxis * planeScale, activeComponent == TRANSLATE_WIDGET_COMPONENT_XY_PLANE ? V4F{ 0.5F, 0.5F, 1.0F, 1.0F } : V4F{ 0.25F, 0.25F, 1.0F, 1.0F });
+	tes.debug_quad(center + xAxis * planeScale + zAxis * planeScale, xAxis * planeScale, zAxis * planeScale, activeComponent == TRANSLATE_WIDGET_COMPONENT_XZ_PLANE ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
+	tes.debug_quad(center + yAxis * planeScale + zAxis * planeScale, yAxis * planeScale, zAxis * planeScale, activeComponent == TRANSLATE_WIDGET_COMPONENT_YZ_PLANE ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
+	tes.debug_quad(center - camX * 0.5F - camY * 0.5F, camX, camY, activeComponent == TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE ? V4F{ 0.75F, 0.75F, 0.75F, 1.0F } : V4F{ 0.5F, 0.5F, 0.5F, 1.0F });
+	tes.end_draw();
+}
+
+struct PanelMaterialEditor {
+	void init() {
+	}
+	void destroy() {
+	}
+	void build_ui() {
+		using namespace UI;
+		UI_BACKGROUND() {
+			UI_SCROLL_WINDOW() {
+				workingBox->padding = 4.0F;
+				spacer(24.0F);
+				Box* picker = color_picker().unsafeBox;
+				set_color_consumer_box_callback(picker, [](V4F color) {
+					Level::LevelObject* obj = Level::level.activeObject;
+					if (obj && obj->type == Level::LEVEL_OBJECT_STATIC_MODEL) {
+						ResourceLoading::Material* mat = ((Level::StaticModel*)obj)->material;
+						mat->color = color;
+						mat->invalidate();
+					}
+				});
+			}
+		}
+	}
+};
+
+struct PanelMaterialViewer {
+	void init() {
+	}
+	void destroy() {
+	}
+	void build_ui() {
+		using namespace UI;
+		UI_BACKGROUND() {
+			UI_SCROLL_WINDOW() {
+				workingBox->padding = 4.0F;
+				spacer(24.0F);
+				UI_RBOX() {
+					workingBox->padding = 8.0F;
+					workingBox->flags |= BOX_FLAG_WRAP_CHILDREN;
+					workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+					workingBox->borderWidth = 2.0F;
+					UI_BACKGROUND_COLOR(themeColor.foreground)
+					UI_SIZE((V2F{ 128.0F, 128.0F })) {
+						for (ResourceLoading::Material* mat : ResourceLoading::allMaterials) {
+							Box* box = generic_box().unsafeBox;
+							box->backgroundColor = mat->color.to_rgba8();
+							box->backgroundTexture = mat->baseColor ? mat->baseColor : &Resources::simpleWhite;
+						}
+					}
+				}
+			}
+		}
 	}
 };
 
@@ -519,6 +1005,8 @@ struct Panel {
 	union {
 		PanelEditor3D editor3D;
 		PanelTextureProcessing textureProcessing;
+		PanelMaterialEditor materialEditor;
+		PanelMaterialViewer materialViewer;
 		PanelUITest uiTest;
 	};
 
@@ -553,6 +1041,8 @@ struct Panel {
 					UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
 						text_button("3D Editor"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_EDITOR_3D); });
 						text_button("Texture Processing"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_TEXTURE_PROCESSING); });
+						text_button("Material Editor"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_MATERIAL_EDITOR); });
+						text_button("Material Viewer"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_MATERIAL_VIEWER); });
 						text_button("UI Test"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_UI_TEST); });
 					}
 				}).unsafeBox;
@@ -564,6 +1054,8 @@ struct Panel {
 				case PANEL_TYPE_NONE: break;
 				case PANEL_TYPE_EDITOR_3D: editor3D.build_ui(); break;
 				case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.build_ui(); break;
+				case PANEL_TYPE_MATERIAL_EDITOR: materialEditor.build_ui(); break;
+				case PANEL_TYPE_MATERIAL_VIEWER: materialViewer.build_ui(); break;
 				case PANEL_TYPE_UI_TEST: uiTest.build_ui(); break;
 				}
 			}
@@ -575,12 +1067,16 @@ struct Panel {
 		case PANEL_TYPE_NONE: break;
 		case PANEL_TYPE_EDITOR_3D: editor3D.destroy(); break;
 		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.destroy(); break;
+		case PANEL_TYPE_MATERIAL_EDITOR: materialEditor.destroy(); break;
+		case PANEL_TYPE_MATERIAL_VIEWER: materialViewer.destroy(); break;
 		case PANEL_TYPE_UI_TEST: uiTest.destroy(); break;
 		}
 		switch (type) {
 		case PANEL_TYPE_NONE: break;
 		case PANEL_TYPE_EDITOR_3D: editor3D = PanelEditor3D{}; editor3D.init(); break;
 		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing = PanelTextureProcessing{}; textureProcessing.init(); break;
+		case PANEL_TYPE_MATERIAL_EDITOR: materialEditor = PanelMaterialEditor{}; materialEditor.init(); break;
+		case PANEL_TYPE_MATERIAL_VIEWER: materialViewer = PanelMaterialViewer{}; materialViewer.init(); break;
 		case PANEL_TYPE_UI_TEST: uiTest = PanelUITest{}; uiTest.init(); break;
 
 		}
@@ -729,15 +1225,27 @@ void free_panel(Panel* panel) {
 	panelFreeList = panel;
 }
 
-void key_input(Win32::Key key, Win32::ButtonState state) {
+bool key_input(Win32::Key key, Win32::ButtonState state) {
 	if (focusedEditor3D) {
 		focusedEditor3D->editor.key_input(key, state);
+		return true;
 	}
+	if (currentInputWidget) {
+		currentInputWidget->key_input(key, state);
+		return true;
+	}
+	return false;
 }
-void mouse_input(Win32::MouseButton button, Win32::MouseValue state, V2F pos) {
+bool mouse_input(Win32::MouseButton button, Win32::MouseValue state, V2F pos) {
 	if (focusedEditor3D) {
 		focusedEditor3D->editor.mouse_input(button, state, pos);
+		return true;
 	}
+	if (currentInputWidget) {
+		currentInputWidget->mouse_input(button, state, pos);
+		return true;
+	}
+	return false;
 }
 void update() {
 	if (focusedEditor3D) {
@@ -852,6 +1360,9 @@ void init() {
 					});
 				}
 			});
+
+			spacer();
+			debugDisplayText = text(""a);
 		}
 	}
 	Panel* panel = alloc_panel();
@@ -862,7 +1373,8 @@ void init() {
 	panel->set_type(PANEL_TYPE_EDITOR_3D);
 	panel->uiBox.unsafeBox->parent = UI::root;
 	DLL_INSERT_TAIL(panel->uiBox.unsafeBox, UI::root->childFirst, UI::root->childLast, prev, next);
-
+	
+	undoStack.init();
 	init_physics();
 }
 

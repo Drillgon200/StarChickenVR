@@ -1640,6 +1640,23 @@ F32 ray_intersection_2d(V2F32 posA, V2F32 dirA, V2F32 posB, V2F32 dirB) {
 	return cross(dirB, posB - posA) / cross(dirB, dirA);
 }
 
+F32 ray_plane_intersect(V3F pos, V3F dir, V3F planePoint, V3F planeNormal) {
+	return -dot(pos - planePoint, planeNormal) / dot(dir, planeNormal);
+}
+V3F ray_plane_intersect_point(V3F pos, V3F dir, V3F planePoint, V3F planeNormal) {
+	return ray_plane_intersect(pos, dir, planePoint, planeNormal) * dir + pos;
+}
+bool ray_rect_intersect(F32* tOut, V3F pos, V3F dir, V3F planePoint, V3F axisX, V3F axisY) {
+	F32 t = ray_plane_intersect(pos, dir, planePoint, cross(axisX, axisY));
+	if (tOut) {
+		*tOut = t;
+	}
+	V3F intersectRelPoint = pos + dir * t - planePoint;
+	F32 projX = dot(axisX, intersectRelPoint) / length_sq(axisX);
+	F32 projY = dot(axisY, intersectRelPoint) / length_sq(axisY);
+	return projX >= 0.0F && projX <= 1.0F && projY >= 0.0F && projY <= 1.0F;
+}
+
 //TODO test this more
 bool ray_cylinder_intersect(F32* tOut, V3F pos, V3F dir, V3F cylinderCenter, V3F cylinderTop, F32 radius) {
 	// Not exactly optimized, but it'll do

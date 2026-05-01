@@ -143,13 +143,16 @@ enum BoxFlag : U32 {
 	BOX_FLAG_WRAP_TEXT = 1 << 6,
 	BOX_FLAG_DONT_FIT_CHILDREN = 1 << 7,
 	BOX_FLAG_FLOATING = 1 << 8,
-	BOX_FLAG_SLIDER_MIN_MAX_ENFORCED = 1 << 9
+	BOX_FLAG_SLIDER_MIN_MAX_ENFORCED = 1 << 9,
+	BOX_FLAG_WRAP_CHILDREN = 1 << 10
 };
 typedef Flags32 BoxFlags;
 const F32 BOX_INF_SIZE = 100000.0F;
 
 typedef ActionResult (*BoxActionCallback)(Box* box, UserCommunication& com);
 typedef void (*BoxConsumer)(Box* box);
+typedef void (*ColorConsumer)(V4F color);
+typedef void (*ColorConsumerAdapted)(Box* box, V4F color);
 
 // Having such a large box struct might be memory inefficient, but this setup makes it very easy to combine features, and the total UI memory usage isn't even that much.
 // If there are 10000 boxes on the screen, that's only a couple megabytes total.
@@ -227,6 +230,7 @@ struct Box {
 	BoxActionCallback actionCallback;
 	union {
 		BoxConsumer boxConsumerCallback;
+		ColorConsumerAdapted colorConsumerCallback;
 	};
 	alignas(16) char callbackData[32];
 };
@@ -239,6 +243,11 @@ template<typename Callback>
 void box_consumer_adapter(Box* box) {
 	void* thisPtr = box->callbackData;
 	(*reinterpret_cast<Callback*>(thisPtr))(box);
+}
+template<typename Callback>
+void color_consumer_adapter(Box* box, V4F color) {
+	void* thisPtr = box->callbackData;
+	(*reinterpret_cast<Callback*>(thisPtr))(color);
 }
 // Callback of type BoxActionCallback (ActionResult callback(Box*, UserCommunication&))
 template<typename Callback>
@@ -255,6 +264,14 @@ void set_box_consumer_box_callback(Box* box, Callback&& cb) {
 	//*reinterpret_cast<Callback*>(callbackData) = std::move(cb);
 	new (&box->callbackData[0]) Callback(static_cast<Callback&&>(cb));
 	box->boxConsumerCallback = box_consumer_adapter<Callback>;
+}
+// Callback of type ColorConsumer (void callback(V4F))
+template<typename Callback>
+void set_color_consumer_box_callback(Box* box, Callback&& cb) {
+	static_assert(sizeof(Callback) <= sizeof(box->callbackData));
+	//*reinterpret_cast<Callback*>(callbackData) = std::move(cb);
+	new (&box->callbackData[0]) Callback(static_cast<Callback&&>(cb));
+	box->colorConsumerCallback = color_consumer_adapter<Callback>;
 }
 
 struct BoxHandle {
@@ -762,7 +779,7 @@ void compute_min_sizes_x_recurse(Box* box) {
 		}
 		compute_min_sizes_x_recurse(child);
 		if (!(child->flags & BOX_FLAG_FLOATING)) {
-			if (layoutAxis == AXIS2_X) {
+			if (layoutAxis == AXIS2_X && !(box->flags & BOX_FLAG_WRAP_CHILDREN)) {
 				current += child->computedSize.x + padding;
 			} else {
 				current = max(current, padding + child->computedPos.x + child->computedSize.x + padding);
@@ -798,20 +815,32 @@ void compute_min_sizes_y_recurse(Box* box) {
 	}
 
 	Axis2 layoutAxis = box->layoutDirection == LAYOUT_DIRECTION_UP || box->layoutDirection == LAYOUT_DIRECTION_DOWN ? AXIS2_Y : AXIS2_X;
+	bool layoutReversed = box->layoutDirection == LAYOUT_DIRECTION_UP || box->layoutDirection == LAYOUT_DIRECTION_LEFT;
 
 	F32 current = padding;
-	for (Box* child = box->childFirst; child; child = child->next) {
+	F32 wrapCounterX = padding;
+	F32 lastMaxYSize = 0.0F;
+	for (Box* child = layoutReversed ? box->childLast : box->childFirst; child; child = layoutReversed ? child->prev : child->next) {
 		if (child->flags & BOX_FLAG_DISABLED) {
 			continue;
 		}
 		compute_min_sizes_y_recurse(child);
 		if (!(child->flags & BOX_FLAG_FLOATING)) {
 			if (layoutAxis == AXIS2_X) {
-				current = max(current, padding + child->computedPos.y + child->computedSize.y + padding);
+				if (box->flags & BOX_FLAG_WRAP_CHILDREN && wrapCounterX + child->computedSize.x > box->computedSize.x && wrapCounterX != padding) {
+					wrapCounterX = padding;
+					current += lastMaxYSize + padding;
+					lastMaxYSize = 0.0F;
+				}
+				wrapCounterX += child->computedSize.x + padding;
+				lastMaxYSize = max(lastMaxYSize, child->computedPos.y + child->computedSize.y);
 			} else {
 				current += child->computedSize.y + padding;
 			}
 		}
+	}
+	if (lastMaxYSize != 0.0F) {
+		current += lastMaxYSize + padding;
 	}
 	current = max(padding, current - padding);
 	size = max(size, current + padding);
@@ -936,6 +965,9 @@ void compute_final_sizes_and_positions_x_recurse(Box* box) {
 		compute_final_sizes_and_positions_x_recurse(child);
 		if (!(child->flags & BOX_FLAG_FLOATING)) {
 			if (layoutAxis == AXIS2_X) {
+				if (box->flags & BOX_FLAG_WRAP_CHILDREN && current + child->computedSize.x > box->computedSize.x && current != padding) {
+					current = padding;
+				}
 				child->computedPos.x += current;
 				current += child->computedSize.x + padding;
 			} else {
@@ -1050,6 +1082,8 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 	}
 
 	F32 current = padding;
+	F32 wrapCounterX = padding;
+	F32 lastMaxYSize = 0.0F;
 	for (Box* child = layoutReversed ? box->childLast : box->childFirst; child; child = layoutReversed ? child->prev : child->next) {
 		if (child->flags & BOX_FLAG_DISABLED) {
 			continue;
@@ -1057,7 +1091,14 @@ void compute_final_sizes_and_positions_y_recurse(Box* box) {
 		compute_final_sizes_and_positions_y_recurse(child);
 		if (!(child->flags & BOX_FLAG_FLOATING)) {
 			if (layoutAxis == AXIS2_X) {
-				child->computedPos.y += padding;
+				if (box->flags & BOX_FLAG_WRAP_CHILDREN && wrapCounterX + child->computedSize.x > box->computedSize.x && wrapCounterX != padding) {
+					wrapCounterX = padding;
+					current += lastMaxYSize + padding;
+					lastMaxYSize = 0.0F;
+				}
+				child->computedPos.y += current;
+				wrapCounterX += child->computedSize.x + padding;
+				lastMaxYSize = max(lastMaxYSize, child->computedSize.y);
 			} else {
 				child->computedPos.y += current;
 				current += child->computedSize.y + padding;
@@ -1998,7 +2039,18 @@ void dropdown_selector(StrA name, U32 count, StrA* modes, U32* indices) {
 	}
 }
 
-void color_picker() {
+void color_picker_set_lrch(Box* clPicker, Box* colorBox, Box* callbackBox, V3F LrCH) {
+	clPicker->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut(LrCH);
+	V3F srgb = clamp01(Oklab::lrch_to_srgb(clPicker->value.color.oklabLrCH));
+	clPicker->value.color.srgb = srgb;
+	colorBox->backgroundColor = srgb.to_rgba8(1.0F);
+	if (callbackBox->colorConsumerCallback) {
+		callbackBox->colorConsumerCallback(callbackBox, V4F{ srgb.x, srgb.y, srgb.z, 1.0F });
+	}
+}
+
+BoxHandle color_picker() {
+	Box* colorCallbackBox;
 	UI_DBOX() {
 		Box* collapseButton = nullptr;
 		Box* colorBox = nullptr;
@@ -2017,6 +2069,7 @@ void color_picker() {
 			boxToCollapse = workingBox;
 			spacer(10.0F);
 			UI_RBOX() {
+				colorCallbackBox = workingBox;
 				Box* clPicker = generic_box().unsafeBox;
 				clPicker->flags |= BOX_FLAG_CUSTOM_DRAW;
 				clPicker->sizeModeX = clPicker->sizeModeY = SIZE_MODE_FIT_CHILDREN;
@@ -2033,14 +2086,12 @@ void color_picker() {
 				huePicker->backgroundRenderFlags = VK::UI_RENDER_FLAG_OKLrCH | VK::UI_RENDER_FLAG_OKLrCH_USE_UV_CH;
 				huePicker->backgroundUV = Rng2F32{ 0.25F, 0.0F, 0.25F, 1.0F };
 				huePicker->value.f64.val = 0.0F;
-				set_box_callback(huePicker, [clPicker, colorBox](Box* box, UserCommunication& com) {
+				set_box_callback(huePicker, [clPicker, colorBox, colorCallbackBox](Box* box, UserCommunication& com) {
 					if (com.leftClickStart || com.drag.y != 0.0F) {
 						F32 newHue = clamp01((com.mousePos.y - com.renderArea.minY) / com.renderArea.height());
-						clPicker->value.color.oklabLrCH.z = newHue;
-						clPicker->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut(clPicker->value.color.oklabLrCH);
-						V3F srgb = clamp01(Oklab::lrch_to_srgb(clPicker->value.color.oklabLrCH));
-						clPicker->value.color.srgb = srgb;
-						colorBox->backgroundColor = srgb.to_rgba8(1.0F);
+						V3F LrCH = clPicker->value.color.oklabLrCH;
+						LrCH.z = newHue;
+						color_picker_set_lrch(clPicker, colorBox, colorCallbackBox, LrCH);
 						return ACTION_HANDLED;
 					}
 					if (com.tessellator) {
@@ -2054,16 +2105,13 @@ void color_picker() {
 					return ACTION_PASS;
 				});
 
-				set_box_callback(clPicker, [colorBox](Box* box, UserCommunication& com){
+				set_box_callback(clPicker, [colorBox, colorCallbackBox](Box* box, UserCommunication& com){
 					if (com.leftClickStart || com.drag != V2F{ 0.0F, 0.0F }) {
 						V2F newLrC = clamp01((com.mousePos - V2F{ com.renderArea.minX, com.renderArea.minY }) / V2F{ com.renderArea.width(), com.renderArea.height() });
-						newLrC = V2F{ 1.0F - newLrC.y, newLrC.x * Oklab::SRGB_PICKER_CHROMA_END };
-						box->value.color.oklabLrCH.x = newLrC.x;
-						box->value.color.oklabLrCH.y = newLrC.y;
-						box->value.color.oklabLrCH = Oklab::clip_lrch_to_srgb_gamut(box->value.color.oklabLrCH);
-						V3F srgb = clamp01(Oklab::lrch_to_srgb(box->value.color.oklabLrCH));
-						box->value.color.srgb = srgb;
-						colorBox->backgroundColor = srgb.to_rgba8(1.0F);
+						V3F LrCH = box->value.color.oklabLrCH;
+						LrCH.x = 1.0F - newLrC.y;
+						LrCH.y = newLrC.x * Oklab::SRGB_PICKER_CHROMA_END;
+						color_picker_set_lrch(box, colorBox, colorCallbackBox, LrCH);
 						return ACTION_HANDLED;
 					}
 					if (com.tessellator) {
@@ -2086,6 +2134,7 @@ void color_picker() {
 			box->backgroundTexture = previouslyDisabled ? &Resources::uiAccordionOpen : &Resources::uiAccordionClosed;
 		});
 	}
+	return BoxHandle{ colorCallbackBox, colorCallbackBox->generation };
 }
 
 void do_scroll(Box* scrollHandler, Box* scrolled, F32 amount) {

@@ -9,22 +9,7 @@ struct Vertex {
 	U32 color;
 };
 
-[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &struct {
-	V2F screenDimensions;
-	&V4F uiClipBoxes;
-	V2U pUIVertices;
-	&M4x3F matrices;
-	&V3F positions;
-	&V2F texcoords;
-	&V3F normals;
-	&V3F tangents;
-	&U32 boneIndicesAndWeights;
-	&V3F skinnedPositions;
-	&V3F skinnedNormals;
-	&V3F skinnedTangents;
-	&Material materials;
-	&Camera cams;
-} drawData;
+[set 0, binding 2, uniform_buffer, restrict, nonwritable, block] &DrawData drawData;
 [push_constant] &WorldDrawPushConstants modelData;
 
 [input, builtin VertexIndex] &I32 inVertexIndex;
@@ -60,7 +45,6 @@ struct Vertex {
 [output, location 1] &U32 outObjId;
 
 [entrypoint] @[][] frag_main{
-	// Multiply by 11.2 (the whitepoint) over 2.0 (the exposure bias) so the debug color looks reasonably bright after tonemapping
-	^fragColor = ^color * 5.6;
+	^fragColor = ^color;
 	^outObjId = 0u;
 };

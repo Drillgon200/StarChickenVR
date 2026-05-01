@@ -91,7 +91,10 @@
 
 [entrypoint] @[][] frag_main{
 	V3F camPos{ ^passCamPos };
-	V3F normal{ normalize(^passNormal) };
+	V3F geoNormal{ normalize(^passNormal) };
+	V3F normal{ geoNormal };
+	V3F tangent{ normalize(^passTangent) };
+	V3F bitangent{ cross(tangent, normal) };
 	V3F worldPos{ ^passPosition };
 	V3F fragToCam{ normalize(camPos - worldPos) };
 	V2F texCoord{ ^passTexCoord };
@@ -104,10 +107,8 @@
 		materialColor = materialColor * (^textures)[material.baseColorIdx][^bilinearSampler, texCoord];
 	};
 	if material.normalMapIdx != -1 {
-		V3F tangent{ normalize(^passTangent) };
-		V3F bitangent{ cross(tangent, normal) };
 		V3F normalTexel{ (^textures)[material.normalMapIdx][^bilinearSampler, texCoord].xyz * 2.0 - 1.0 };
-		normal = normalize(tangent * normalTexel.x + bitangent * normalTexel.y + normal * normalTexel.z);
+		normal = normalize(tangent * normalTexel.x + bitangent * normalTexel.y + geoNormal * normalTexel.z);
 	};
 	if material.armMapIdx != -1 {
 		materialARMI = V4F((^textures)[material.armMapIdx][^bilinearSampler, texCoord].xyz, materialARMI.w);
@@ -132,6 +133,32 @@
 	V3F lightDirection{ normalize(V3F(1.0, 1.0, -1.0)) };
 	V3F directLighting{ calculate_light_pbr(baseColor, V3F(1.0), fresnelReflectionFactor, lightDirection, fragToCam, normal, roughness, metalness) };
 
-	^outFragColor = V4F(directLighting + iblLighting, 1.0);
+	V3F finalColor{ directLighting + iblLighting };
+
+	U32 RENDER_DEBUG_DISPLAY_PBR{ 0u };
+	U32 RENDER_DEBUG_DISPLAY_PBR_NO_TONEMAP{ 1u };
+	U32 RENDER_DEBUG_DISPLAY_NORMAL{ 2u };
+	U32 RENDER_DEBUG_DISPLAY_AMBIENT_OCCLUSION{ 3u };
+	U32 RENDER_DEBUG_DISPLAY_ROUGHNESS{ 4u };
+	U32 RENDER_DEBUG_DISPLAY_METALLIC{ 5u };
+	U32 RENDER_DEBUG_DISPLAY_BASIC_LIGHTING{ 6u };
+	U32 debugMode{ modelData.debugMode };
+	if debugMode == RENDER_DEBUG_DISPLAY_NORMAL {
+		finalColor = V3F(dot(normal, tangent), dot(normal, bitangent), dot(normal, geoNormal)) * 0.5 + 0.5;
+	};
+	if debugMode == RENDER_DEBUG_DISPLAY_AMBIENT_OCCLUSION {
+		finalColor = V3F(ambientOcclusion);
+	};
+	if debugMode == RENDER_DEBUG_DISPLAY_ROUGHNESS {
+		finalColor = V3F(roughness);
+	};
+	if debugMode == RENDER_DEBUG_DISPLAY_METALLIC {
+		finalColor = V3F(metalness);
+	};
+	if debugMode == RENDER_DEBUG_DISPLAY_BASIC_LIGHTING {
+		finalColor = V3F(dot(geoNormal, lightDirection) * 0.5 + 0.5);
+	};
+
+	^outFragColor = V4F(finalColor, 1.0);
 	^outObjId = ^passObjId;
 };

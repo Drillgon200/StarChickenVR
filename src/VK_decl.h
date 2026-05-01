@@ -299,6 +299,19 @@ enum RenderPass {
 	RENDER_PASS_UI
 };
 
+enum RenderDebugDisplay : U32 {
+	RENDER_DEBUG_DISPLAY_PBR = 0,
+	RENDER_DEBUG_DISPLAY_PBR_NO_TONEMAP = 1,
+	RENDER_DEBUG_DISPLAY_NORMAL = 2,
+	RENDER_DEBUG_DISPLAY_AMBIENT_OCCLUSION = 3,
+	RENDER_DEBUG_DISPLAY_ROUGHNESS = 4,
+	RENDER_DEBUG_DISPLAY_METALLIC = 5,
+	RENDER_DEBUG_DISPLAY_BASIC_LIGHTING = 6,
+	RENDER_DEBUG_DISPLAY_Count = 7
+};
+
+RenderDebugDisplay currentDebugDisplay;
+
 #pragma pack(push, 1)
 struct GPUCameraMatrices {
 	M4x3F worldToView;
@@ -315,10 +328,12 @@ struct WorldDrawPushConstants {
 	U32 camIdx;
 	U32 objId; // High bit set if object is selected
 	U32 materialId;
+	RenderDebugDisplay debugMode;
 };
 struct FinalCompositePushConstants {
 	U32 activeObjectId;
 	V2U outputDimensions;
+	RenderDebugDisplay debugMode;
 };
 struct CubemapPipelineInfo {
 	V2U inputDim;

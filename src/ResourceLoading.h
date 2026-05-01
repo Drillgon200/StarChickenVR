@@ -476,6 +476,8 @@ struct Material {
 	F32 metallic;
 	F32 ior;
 	U32 gpuIdx;
+
+	void invalidate();
 };
 
 #pragma pack(push, 1)
@@ -491,6 +493,7 @@ struct GPUMaterial {
 VK::DedicatedBuffer materialsBuffer;
 const U32 maxMaterialCount = 1024;
 U32 materialCount;
+ArenaArrayList<Material*> allMaterials;
 
 Material missingMaterial;
 Material basicWhiteMaterial;
@@ -505,12 +508,17 @@ void material_updated(const Material& mat) {
 	((GPUMaterial*)materialsBuffer.mapping)[mat.gpuIdx] = gpuMat;
 }
 
+void Material::invalidate() {
+	material_updated(*this);
+}
+
 void create_material(Material* mat) {
 	if (materialCount == maxMaterialCount) {
 		abort("Ran out of materials");
 	}
 	U32 materialIdx = materialCount++;
 	mat->gpuIdx = materialIdx;
+	allMaterials.push_back(mat);
 	material_updated(*mat);
 }
 void create_material(Material* mat, V4F color, F32 roughness, F32 metallic) {

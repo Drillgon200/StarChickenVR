@@ -45,4 +45,5 @@ struct Material {
 	U32 camIdx;
 	U32 objId; // High bit set if selected
 	U32 materialId;
+	U32 debugMode;
 };

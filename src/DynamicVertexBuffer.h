@@ -105,6 +105,7 @@ struct Tessellator {
 	void draw(Rng1I32 drawRange, U32 camIdx) {
 		VK::WorldDrawPushConstants renderData{};
 		renderData.camIdx = camIdx;
+		renderData.debugMode = VK::currentDebugDisplay;
 		VK::vkCmdBindIndexBuffer(VK::graphicsCommandBuffer, buffer.buffer, vertexCapacity, VK_INDEX_TYPE_UINT32);
 		VkPipeline prevPipeline = VK_NULL_HANDLE;
 		for (I32 drawCmdIdx = drawRange.minX; drawCmdIdx < drawRange.maxX; drawCmdIdx++) {
@@ -332,6 +333,13 @@ struct Tessellator {
 		return *this;
 	}
 	
+	Tessellator& debug_quad(V3F corner, V3F axisX, V3F axisY, V4F color) {
+		U32 packedColor = pack_unorm4x8(color);
+		VK::DebugVertex vertices[4]{ { corner, packedColor }, { corner + axisX, packedColor }, { corner + axisX + axisY, packedColor }, { corner + axisY, packedColor } };
+		U32 indices[6]{ 0, 1, 2, 0, 2, 3 };
+		return add_geometry(vertices, ARRAY_COUNT(vertices), indices, ARRAY_COUNT(indices));
+	}
+
 	// Unfinished, will not work
 	Tessellator& debug_line(V3F start, V3F end, V4F color = V4F{ 1.0F, 0.0F, 0.0F, 1.0F }) {
 		V3F v = end - start;
