@@ -13,6 +13,8 @@
 
 namespace EditorUI {
 
+const U32 PREFAB_ICON_SIZE = 256;
+
 UI::BoxHandle growableBox;
 
 ArenaArrayList<U32> constraintsToMove;
@@ -947,8 +949,8 @@ struct PanelMaterialEditor {
 				Box* picker = color_picker().unsafeBox;
 				set_color_consumer_box_callback(picker, [](V4F color) {
 					Level::LevelObject* obj = Level::level.activeObject;
-					if (obj && obj->type == Level::LEVEL_OBJECT_STATIC_MODEL) {
-						ResourceLoading::Material* mat = ((Level::StaticModel*)obj)->material;
+					if (obj && (obj->type == Level::LEVEL_OBJECT_STATIC_MODEL || obj->type == Level::LEVEL_OBJECT_SKELETAL_MODEL)) {
+						ResourceLoading::Material* mat = obj->type == Level::LEVEL_OBJECT_STATIC_MODEL ? ((Level::StaticModel*)obj)->material : ((Level::SkeletalModel*)obj)->material;
 						mat->color = color;
 						mat->invalidate();
 					}
@@ -1341,6 +1343,44 @@ void debug_render() {
 	tes.end_draw();
 }
 
+void render_prefab_icons(VkCommandBuffer cmdBuf, Level::Prefab* prefabs, U32 prefabCount) {
+	VK::DedicatedImage iconDepthBuffer = VK::create_dedicated_image(VK_FORMAT_D32_SFLOAT, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
+	ResourceLoading::Texture tex;
+	ResourceLoading::create_texture(&tex, nullptr, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, ResourceLoading::TEXTURE_FORMAT_RGBA_U8, true, false);
+	
+	VK::img_barrier(cmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VK::img_barrier(cmdBuf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+	for (U32 i = 0; i < prefabCount; i++) {
+		VkRenderingInfo iconRenderInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+		iconRenderInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ PREFAB_ICON_SIZE, PREFAB_ICON_SIZE } };
+		iconRenderInfo.layerCount = 1;
+		iconRenderInfo.colorAttachmentCount = 1;
+		VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+		colorAttachment.imageView = tex.imageView;
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.clearValue.color = VkClearColorValue{};
+		iconRenderInfo.pColorAttachments = &colorAttachment;
+		VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+		depthAttachment.imageView = iconDepthBuffer.imgView;
+		depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		depthAttachment.clearValue.depthStencil.depth = 0.0F;
+		iconRenderInfo.pDepthAttachment = &depthAttachment;
+		VK::vkCmdBeginRenderingKHR(cmdBuf, &iconRenderInfo);
+
+		VK::vkCmdEndRenderingKHR(cmdBuf);
+	}
+
+	VK::img_barrier(cmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	VK::img_barrier(cmdBuf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+	VK::destroy_dedicated_image(iconDepthBuffer);
+}
+
 void init() {
 	using namespace UI;
 	UI_WORKING_BOX(root) {
@@ -1375,6 +1415,7 @@ void init() {
 	DLL_INSERT_TAIL(panel->uiBox.unsafeBox, UI::root->childFirst, UI::root->childLast, prev, next);
 	
 	undoStack.init();
+	//render_prefab_icons();
 	init_physics();
 }
 

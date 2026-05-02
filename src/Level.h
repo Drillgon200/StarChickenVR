@@ -47,6 +47,12 @@ struct SkeletalModel {
 	U32 skeletonMatrixOffset;
 };
 
+struct Prefab {
+	LevelObject* objects;
+	U32 objectCount;
+	ResourceLoading::Texture* icon;
+};
+
 PoolAllocator<StaticModel> staticModelAllocator;
 PoolAllocator<SkeletalModel> skeletalModelAllocator;
 
