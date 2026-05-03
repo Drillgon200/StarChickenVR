@@ -2287,7 +2287,7 @@ struct PerspectiveProjection {
 	// yScale = 1 / ((u - d) * 0.5)
 	// yZBias = (u + d) / (u - d)
 	// nearPlane = nearPlane
-	FINLINE void project_perspective(F32 nearZ, F32 fovRight, F32 fovLeft, F32 fovUp, F32 fovDown) {
+	FINLINE PerspectiveProjection& project_perspective(F32 nearZ, F32 fovRight, F32 fovLeft, F32 fovUp, F32 fovDown) {
 		F32 sinRight;
 		F32 cosRight = sincosf32(&sinRight, fovRight);
 		F32 rightX = sinRight / cosRight;
@@ -2305,9 +2305,10 @@ struct PerspectiveProjection {
 		yScale = 1.0F / ((upY - downY) * 0.5F);
 		yZBias = (upY + downY) / (upY - downY);
 		nearPlane = nearZ;
+		return *this;
 	}
 
-	FINLINE void project_perspective(F32 nearZ, F32 fovX, F32 yToXRatio) {
+	FINLINE PerspectiveProjection& project_perspective(F32 nearZ, F32 fovX, F32 yToXRatio) {
 		F32 sinRight;
 		F32 cosRight = sincosf32(&sinRight, fovX * 0.5F);
 		F32 rightX = sinRight / cosRight;
@@ -2319,6 +2320,7 @@ struct PerspectiveProjection {
 		yScale = 1.0F / ((upY - downY) * 0.5F);
 		yZBias = (upY + downY) / (upY - downY);
 		nearPlane = nearZ;
+		return *this;
 	}
 
 	FINLINE V3F32 transform(V3F32 vec) {
@@ -2558,11 +2560,47 @@ struct Rng3F32 {
 		Rng3F32 rng{ max(minX, b.minX), max(minY, b.minY), max(minZ, b.minZ), min(maxX, b.maxX), min(maxY, b.maxY), min(maxZ, b.maxZ) };
 		return rng.maxX < rng.minX || rng.maxY < rng.minY || rng.maxZ < rng.minZ ? Rng3F32{} : rng;
 	}
+	FINLINE Rng3F32 offset(V3F pos) {
+		return Rng3F32{ minX + pos.x, minY + pos.y, minZ + pos.z, maxX + pos.x, maxY + pos.y, maxZ + pos.z };
+	}
+	FINLINE Rng3F32 transformed_bounds(M4x3F& t) {
+		V3F p = t.transform_pos(V3F{ minX, minY, minZ });
+		F32 minX2 = p.x, minY2 = p.y, minZ2 = p.z, maxX2 = p.x, maxY2 = p.y, maxZ2 = p.z;
+#define CONTAIN_POINT(xIn, yIn, zIn)\
+		p = t.transform_pos(V3F{ xIn, yIn, zIn });\
+		minX2 = min(minX2, p.x);\
+		minY2 = min(minY2, p.y);\
+		minZ2 = min(minZ2, p.z);\
+		maxX2 = max(minX2, p.x);\
+		maxY2 = max(minY2, p.y);\
+		maxZ2 = max(minZ2, p.z);
+		CONTAIN_POINT(minX, minY, maxZ)
+		CONTAIN_POINT(minX, maxY, minZ)
+		CONTAIN_POINT(minX, maxY, maxZ)
+		CONTAIN_POINT(maxX, minY, minZ)
+		CONTAIN_POINT(maxX, minY, maxZ)
+		CONTAIN_POINT(maxX, maxY, minZ)
+		CONTAIN_POINT(maxX, maxY, maxZ)
+#undef CONTAIN_POINT
+		return Rng3F32{ minX2, minY2, minZ2, maxX2, maxY2, maxZ2 };
+	}
 	FINLINE F32 area() {
 		return (maxX - minX) * (maxY - minY) * (maxZ - minZ);
 	}
 	FINLINE bool contains_point(V3F32 v) {
 		return v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY && v.z >= minZ && v.z <= maxZ;
+	}
+	FINLINE V3F min_point() {
+		return V3F{ minX, minY, minZ };
+	}
+	FINLINE V3F max_point() {
+		return V3F{ maxX, maxY, maxZ };
+	}
+	FINLINE F32 diag_length() {
+		return distance(V3F{ minX, minY, minZ }, V3F{ maxX, maxY, maxZ });
+	}
+	FINLINE V3F support_point(V3F direction) {
+		return V3F{ direction.x > 0.0F ? maxX : minX, direction.y > 0.0F ? maxY : minY, direction.z > 0.0F ? minZ : maxZ };
 	}
 };
 #pragma pack(pop)

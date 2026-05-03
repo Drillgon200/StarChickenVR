@@ -15,7 +15,8 @@ const U32 INVALID_LEVEL_OBJECT_ID = 0;
 enum LevelObjectType {
 	LEVEL_OBJECT_EMPTY,
 	LEVEL_OBJECT_STATIC_MODEL,
-	LEVEL_OBJECT_SKELETAL_MODEL
+	LEVEL_OBJECT_SKELETAL_MODEL,
+	LEVEL_OBJECT_LIGHT
 };
 
 struct LevelObject {
@@ -47,14 +48,95 @@ struct SkeletalModel {
 	U32 skeletonMatrixOffset;
 };
 
+enum LightType {
+	LIGHT_TYPE_POINT,
+	LIGHT_TYPE_SPOT,
+	LIGHT_TYPE_DIRECTIONAL
+};
+struct Light {
+	LevelObject obj;
+	LightType type;
+	V3F direction;
+	F32 brightness;
+	V3F color;
+	F32 range;
+};
+
 struct Prefab {
-	LevelObject* objects;
+	LevelObject** objects;
 	U32 objectCount;
+	Rng3F32 boundingBox;
 	ResourceLoading::Texture* icon;
 };
 
+ArenaArrayList<Prefab*> allPrefabs;
+
+void calc_prefab_bounding_box(Prefab* prefab) {
+	Rng3F32 boundingBox{ F32_LARGE, F32_LARGE, F32_LARGE, -F32_LARGE, -F32_LARGE, -F32_LARGE };
+	for (U32 i = 0; i < prefab->objectCount; i++) {
+		LevelObject* obj = prefab->objects[i];
+		switch (obj->type) {
+		case LEVEL_OBJECT_STATIC_MODEL:
+		case LEVEL_OBJECT_SKELETAL_MODEL: {
+			Rng3F32 objBox = obj->type == LEVEL_OBJECT_STATIC_MODEL ? ((StaticModel*)obj)->mesh->boundingBox : ((SkeletalModel*)obj)->mesh->geometry.boundingBox;
+			boundingBox = boundingBox.unioned(objBox.transformed_bounds(obj->transform));
+		} break;
+		case LEVEL_OBJECT_LIGHT: {
+			V3F pos = obj->transform.translation();
+			boundingBox = boundingBox.unioned(Rng3F32{ pos.x, pos.y, pos.z, pos.x, pos.y, pos.z });
+		} break;
+		}
+	}
+	prefab->boundingBox = boundingBox;
+}
+
 PoolAllocator<StaticModel> staticModelAllocator;
 PoolAllocator<SkeletalModel> skeletalModelAllocator;
+PoolAllocator<Light> lightAllocator;
+
+void init_level_object(LevelObject& obj, LevelObjectType type, M4x3F transform) {
+	obj.type = type;
+	obj.transform = transform;
+	obj.id = INVALID_LEVEL_OBJECT_ID;
+}
+void free_level_object(LevelObject* obj) {
+	switch (obj->type) {
+	case LEVEL_OBJECT_EMPTY: break;
+	case LEVEL_OBJECT_STATIC_MODEL: staticModelAllocator.free((StaticModel*)obj); break;
+	case LEVEL_OBJECT_SKELETAL_MODEL: skeletalModelAllocator.free((SkeletalModel*)obj); break;
+	case LEVEL_OBJECT_LIGHT: lightAllocator.free((Light*)obj); break;
+	}
+}
+StaticModel* get_static_model(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& material, M4x3F transform) {
+	StaticModel* model = staticModelAllocator.alloc();
+	init_level_object(model->obj, LEVEL_OBJECT_STATIC_MODEL, transform);
+	model->mesh = &mesh;
+	model->material = &material;
+	return model;
+}
+SkeletalModel* get_skeletal_model(VKGeometry::SkeletalMesh& mesh, ResourceLoading::Material& material, M4x3F transform, M4x3F* poseMatrices) {
+	SkeletalModel* model = skeletalModelAllocator.alloc();
+	init_level_object(model->obj, LEVEL_OBJECT_SKELETAL_MODEL, transform);
+	model->mesh = &mesh;
+	model->material = &material;
+	model->poseMatrices = poseMatrices;
+	return model;
+}
+
+void make_static_model_prefab(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& mat) {
+	LevelObject* meshObject = &get_static_model(mesh, mat, M4x3F{}.set_identity())->obj;
+	Prefab* prefab = globalArena.zalloc<Prefab>(1);
+	prefab->objectCount = 1;
+	prefab->objects = globalArena.alloc<LevelObject*>(prefab->objectCount);
+	prefab->objects[0] = meshObject;
+	calc_prefab_bounding_box(prefab);
+	allPrefabs.push_back(prefab);
+}
+void make_default_prefabs() {
+	make_static_model_prefab(Resources::testMesh, Resources::basicWhiteMaterial);
+	make_static_model_prefab(Resources::cannonMesh, Resources::cannonMat);
+	make_static_model_prefab(Resources::matMesh, Resources::matMat);
+}
 
 struct Level {
 	U32 nextObjId;

@@ -538,6 +538,7 @@ U32 run_star_chicken() {
 	ResourceLoading::init_textures();
 	ResourceLoading::init_materials();
 	Resources::load_resources();
+	Level::make_default_prefabs();
 	VK::finish_startup();
 
 	UI::init_ui();

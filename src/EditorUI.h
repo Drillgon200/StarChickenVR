@@ -126,6 +126,7 @@ enum PanelType : U32 {
 	PANEL_TYPE_TEXTURE_PROCESSING,
 	PANEL_TYPE_MATERIAL_EDITOR,
 	PANEL_TYPE_MATERIAL_VIEWER,
+	PANEL_TYPE_PREFAB_LIST,
 	PANEL_TYPE_UI_TEST
 };
 
@@ -990,6 +991,36 @@ struct PanelMaterialViewer {
 	}
 };
 
+struct PanelPrefabList {
+	void init() {
+	}
+	void destroy() {
+	}
+	void build_ui() {
+		using namespace UI;
+		UI_BACKGROUND() {
+			UI_SCROLL_WINDOW() {
+				workingBox->padding = 4.0F;
+				spacer(24.0F);
+				UI_RBOX() {
+					workingBox->padding = 8.0F;
+					workingBox->flags |= BOX_FLAG_WRAP_CHILDREN;
+					workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
+					workingBox->borderWidth = 2.0F;
+					UI_BACKGROUND_COLOR(themeColor.foreground)
+						UI_SIZE((V2F{ 128.0F, 128.0F })) {
+						for (Level::Prefab* prefab : Level::allPrefabs) {
+							Box* box = generic_box().unsafeBox;
+							box->backgroundColor = RGBA8{ 255, 255, 255, 255 };
+							box->backgroundTexture = prefab->icon;
+						}
+					}
+				}
+			}
+		}
+	}
+};
+
 struct Panel;
 Panel* alloc_panel();
 void free_panel(Panel* panel);
@@ -1009,6 +1040,7 @@ struct Panel {
 		PanelTextureProcessing textureProcessing;
 		PanelMaterialEditor materialEditor;
 		PanelMaterialViewer materialViewer;
+		PanelPrefabList prefabList;
 		PanelUITest uiTest;
 	};
 
@@ -1045,6 +1077,7 @@ struct Panel {
 						text_button("Texture Processing"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_TEXTURE_PROCESSING); });
 						text_button("Material Editor"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_MATERIAL_EDITOR); });
 						text_button("Material Viewer"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_MATERIAL_VIEWER); });
+						text_button("Prefab List"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_PREFAB_LIST); });
 						text_button("UI Test"a, [panel](Box* box) { panel->set_type(PANEL_TYPE_UI_TEST); });
 					}
 				}).unsafeBox;
@@ -1058,6 +1091,7 @@ struct Panel {
 				case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.build_ui(); break;
 				case PANEL_TYPE_MATERIAL_EDITOR: materialEditor.build_ui(); break;
 				case PANEL_TYPE_MATERIAL_VIEWER: materialViewer.build_ui(); break;
+				case PANEL_TYPE_PREFAB_LIST: prefabList.build_ui(); break;
 				case PANEL_TYPE_UI_TEST: uiTest.build_ui(); break;
 				}
 			}
@@ -1071,6 +1105,7 @@ struct Panel {
 		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing.destroy(); break;
 		case PANEL_TYPE_MATERIAL_EDITOR: materialEditor.destroy(); break;
 		case PANEL_TYPE_MATERIAL_VIEWER: materialViewer.destroy(); break;
+		case PANEL_TYPE_PREFAB_LIST: prefabList.destroy(); break;
 		case PANEL_TYPE_UI_TEST: uiTest.destroy(); break;
 		}
 		switch (type) {
@@ -1079,6 +1114,7 @@ struct Panel {
 		case PANEL_TYPE_TEXTURE_PROCESSING: textureProcessing = PanelTextureProcessing{}; textureProcessing.init(); break;
 		case PANEL_TYPE_MATERIAL_EDITOR: materialEditor = PanelMaterialEditor{}; materialEditor.init(); break;
 		case PANEL_TYPE_MATERIAL_VIEWER: materialViewer = PanelMaterialViewer{}; materialViewer.init(); break;
+		case PANEL_TYPE_PREFAB_LIST: prefabList = PanelPrefabList{}; prefabList.init(); break;
 		case PANEL_TYPE_UI_TEST: uiTest = PanelUITest{}; uiTest.init(); break;
 
 		}
@@ -1343,21 +1379,25 @@ void debug_render() {
 	tes.end_draw();
 }
 
-void render_prefab_icons(VkCommandBuffer cmdBuf, Level::Prefab* prefabs, U32 prefabCount) {
+void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
+	VK::TmpCmdBuf cmdBuf = VK::begin_tmp_cmd_buf();
+	VK::update_draw_data_buffer(cmdBuf.buf);
 	VK::DedicatedImage iconDepthBuffer = VK::create_dedicated_image(VK_FORMAT_D32_SFLOAT, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
-	ResourceLoading::Texture tex;
-	ResourceLoading::create_texture(&tex, nullptr, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, ResourceLoading::TEXTURE_FORMAT_RGBA_U8, true, false);
-	
-	VK::img_barrier(cmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	VK::img_barrier(cmdBuf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+	VK::img_barrier(cmdBuf.buf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+	VK::uniformMatricesHandler.set_camera(0, M4x3F{}.set_identity(), PerspectiveProjection{}.project_perspective(PROJECTION_NEAR_PLANE, 0.25F, 1.0F), V3F{});
 
 	for (U32 i = 0; i < prefabCount; i++) {
+		ResourceLoading::Texture* tex = globalArena.alloc<ResourceLoading::Texture>(1);
+		ResourceLoading::create_texture(tex, nullptr, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, ResourceLoading::TEXTURE_FORMAT_RGBA_U8_RENDER_TARGET, true, false);
+		VK::img_barrier(cmdBuf.buf, tex->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
 		VkRenderingInfo iconRenderInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
 		iconRenderInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ PREFAB_ICON_SIZE, PREFAB_ICON_SIZE } };
 		iconRenderInfo.layerCount = 1;
 		iconRenderInfo.colorAttachmentCount = 1;
 		VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-		colorAttachment.imageView = tex.imageView;
+		colorAttachment.imageView = tex->imageView;
 		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1370,13 +1410,53 @@ void render_prefab_icons(VkCommandBuffer cmdBuf, Level::Prefab* prefabs, U32 pre
 		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		depthAttachment.clearValue.depthStencil.depth = 0.0F;
 		iconRenderInfo.pDepthAttachment = &depthAttachment;
-		VK::vkCmdBeginRenderingKHR(cmdBuf, &iconRenderInfo);
+		VK::vkCmdBeginRenderingKHR(cmdBuf.buf, &iconRenderInfo);
 
-		VK::vkCmdEndRenderingKHR(cmdBuf);
+		VkViewport viewport{};
+		viewport.x = 0.0F;
+		viewport.y = 0.0F;
+		viewport.width = F32(iconRenderInfo.renderArea.extent.width);
+		viewport.height = F32(iconRenderInfo.renderArea.extent.height);
+		viewport.minDepth = 0.0F;
+		viewport.maxDepth = 1.0F;
+		VK::vkCmdSetViewport(cmdBuf.buf, 0, 1, &viewport);
+		VK::vkCmdSetScissor(cmdBuf.buf, 0, 1, &iconRenderInfo.renderArea);
+
+		VK::vkCmdBindPipeline(cmdBuf.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::prefabIconPipeline);
+		VK::vkCmdBindDescriptorSets(cmdBuf.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+		VK::vkCmdBindIndexBuffer(cmdBuf.buf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
+
+		Level::Prefab* prefab = prefabs[i];
+		V3F target = prefab->boundingBox.midpoint();
+		F32 scale = prefab->boundingBox.diag_length() * 0.6F;
+		V3F camPos = target - V3F{ 0.0F, 0.0F, -scale };
+		for (U32 objIdx = 0; objIdx < prefab->objectCount; objIdx++) {
+			Level::LevelObject* obj = prefab->objects[objIdx];
+			switch (obj->type) {
+			case Level::LEVEL_OBJECT_STATIC_MODEL: {
+				Level::StaticModel* model = (Level::StaticModel*)obj;
+				M4x3F transform = model->obj.transform;
+				transform.add_offset(-camPos);
+				U32 matrixIdx = VK::uniformMatricesHandler.alloc_and_set(1, &transform);
+				VK::WorldDrawPushConstants pushConstants{};
+				pushConstants.transformIdx = matrixIdx;
+				pushConstants.verticesOffset = model->mesh->verticesOffset;
+				pushConstants.materialId = model->material->gpuIdx;
+				VK_PUSH_STRUCT(cmdBuf.buf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pushConstants, 0);
+				VK::vkCmdDrawIndexed(cmdBuf.buf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 1);
+			} break;
+			}
+		}
+
+		VK::vkCmdEndRenderingKHR(cmdBuf.buf);
+	
+		VK::img_barrier(cmdBuf.buf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+		VK::img_barrier(cmdBuf.buf, tex->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		prefab->icon = tex;
 	}
 
-	VK::img_barrier(cmdBuf, tex.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-	VK::img_barrier(cmdBuf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+	VK::uniformMatricesHandler.flush_memory();
+	VK::end_tmp_cmd_buf(cmdBuf);
 
 	VK::destroy_dedicated_image(iconDepthBuffer);
 }
@@ -1415,7 +1495,8 @@ void init() {
 	DLL_INSERT_TAIL(panel->uiBox.unsafeBox, UI::root->childFirst, UI::root->childLast, prev, next);
 	
 	undoStack.init();
-	//render_prefab_icons();
+	
+	render_prefab_icons(Level::allPrefabs.data, Level::allPrefabs.size);
 	init_physics();
 }
 

@@ -109,3 +109,12 @@
 	V3F diffuseSingleScattering{ baseColor * energyDielectricSingleScattering };
 	return fresnelEnergySingleScattering * specularSample + (diffuseSingleScattering * (1.0 - metalness) + fresnelEnergyMultiScattering) * diffuseSample;
 };
+
+// Something I made in desmos, uses 1 - (distance / cutoffDistance)^4 as a windowing function to ease the distance squared light falloff to 0 at the culling radius edge
+// cutoffConstant can be calculated as 1 / sqrt(brightness / desiredZeroBrightness - 1), where desiredZeroBrightness is the brightness at which you'd like the light to be cut off entirely
+@[F32 falloff][F32 distance, F32 cutoffConstant] light_falloff{
+	F32 window{ distance * cutoffConstant };
+	window = 1.0 - (window * window) * (window * window);
+	F32 falloff{ distance * distance + 1.0 };
+	return max(window / falloff, 0.0);
+}; 

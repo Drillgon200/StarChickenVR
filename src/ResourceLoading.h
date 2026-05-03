@@ -47,6 +47,19 @@ void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, 
 		VK::geometryHandler.alloc_static(&mesh->indicesOffset, &mesh->verticesOffset, numIndices, numVertices);
 	}
 	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.positionsOffset + mesh->verticesOffset * sizeof(V3F32), modelFile.bytes + modelFile.offset, numVertices * sizeof(V3F32));
+	Byte* positionBytes = modelFile.bytes + modelFile.offset;
+	Rng3F32 boundingBox{ F32_LARGE, F32_LARGE, F32_LARGE, -F32_LARGE, -F32_LARGE, -F32_LARGE };
+	for (U32 i = 0; i < numVertices; i++) {
+		V3F pos;
+		memcpy(&pos, positionBytes + i * sizeof(V3F), sizeof(V3F));
+		boundingBox.minX = min(boundingBox.minX, pos.x);
+		boundingBox.maxX = max(boundingBox.maxX, pos.x);
+		boundingBox.minY = min(boundingBox.minY, pos.y);
+		boundingBox.maxY = max(boundingBox.maxY, pos.y);
+		boundingBox.minZ = min(boundingBox.minZ, pos.z);
+		boundingBox.maxZ = max(boundingBox.maxZ, pos.z);
+	}
+	mesh->boundingBox = boundingBox;
 	modelFile.offset += numVertices * sizeof(V3F32);
 	VK::graphicsStager.upload_to_buffer(VK::geometryHandler.buffer, VK::geometryHandler.texcoordsOffset + mesh->verticesOffset * sizeof(V2F32), modelFile.bytes + modelFile.offset, numVertices * sizeof(V2F32));
 	modelFile.offset += numVertices * sizeof(V2F32);
@@ -216,9 +229,10 @@ enum TextureFormat : U8 {
 	TEXTURE_FORMAT_RG_U8,
 	TEXTURE_FORMAT_RGBA_BC7,
 	TEXTURE_FORMAT_R9G9B9E5,
+	TEXTURE_FORMAT_RGBA_U8_RENDER_TARGET,
 	TEXTURE_FORMAT_Count
 };
-const U32 TEXTURE_FORMAT_TEXEL_SIZE[TEXTURE_FORMAT_Count]{ 0, 4, 2, 16, 4 };
+const U32 TEXTURE_FORMAT_TEXEL_SIZE[TEXTURE_FORMAT_Count]{ 0, 4, 2, 16, 4, 4 };
 enum TextureFlags : Flags16 {
 	TEXTURE_FLAG_CUBE = 1 << 0,
 	TEXTURE_FLAG_SRGB = 1 << 1,
@@ -289,6 +303,7 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	case TEXTURE_FORMAT_RG_U8: createFormat = isSRGB ? VK_FORMAT_R8G8_SRGB : VK_FORMAT_R8G8_UNORM; break;
 	case TEXTURE_FORMAT_RGBA_BC7: createFormat = isSRGB ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK; break;
 	case TEXTURE_FORMAT_R9G9B9E5: createFormat = VK_FORMAT_E5B9G9R9_UFLOAT_PACK32; break;
+	case TEXTURE_FORMAT_RGBA_U8_RENDER_TARGET: createFormat = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM; break;
 	default: abort("Unknown texture format"); break;
 	}
 	imageCreateInfo.format = createFormat;
@@ -298,6 +313,9 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 	imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 	imageCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if (format == TEXTURE_FORMAT_RGBA_U8_RENDER_TARGET) {
+		imageCreateInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	}
 	imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	imageCreateInfo.queueFamilyIndexCount = 0;
 	imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;

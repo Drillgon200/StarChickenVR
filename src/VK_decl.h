@@ -296,7 +296,8 @@ struct DedicatedBuffer {
 enum RenderPass {
 	RENDER_PASS_WORLD,
 	RENDER_PASS_WORLD_NO_ID,
-	RENDER_PASS_UI
+	RENDER_PASS_UI,
+	RENDER_PASS_SRGB_TEXTURE
 };
 
 enum RenderDebugDisplay : U32 {

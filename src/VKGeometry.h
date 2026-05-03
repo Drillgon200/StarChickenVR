@@ -25,6 +25,7 @@ struct StaticMesh {
 	U32 verticesOffset;
 	U32 indicesCount;
 	U32 verticesCount;
+	Rng3F32 boundingBox;
 };
 
 struct SkeletalMesh {

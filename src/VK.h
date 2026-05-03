@@ -16,7 +16,7 @@ const StrA SHADER_SPV_DIR = "./resources/shaders/spv/"a;
 const StrA SHADER_SRC_DIR = "./resources/shaders/"a;
 
 #define VK_ENABLE_VIL 0
-#define VK_ENABLE_VALIDATION_LAYERS 0
+#define VK_ENABLE_VALIDATION_LAYERS 1
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED 0
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED_SAFE_MODE 0
 
@@ -120,6 +120,7 @@ DescriptorSet finalCompositeDescriptorSet;
 
 VkPipelineLayout drawPipelineLayout;
 VkPipeline drawPipeline;
+VkPipeline prefabIconPipeline;
 const U32 UI_RENDER_FLAG_MSDF = 1 << 0;
 const U32 UI_RENDER_FLAG_OKLrCH = 1 << 1;
 const U32 UI_RENDER_FLAG_OKLrCH_USE_UV_CL = 1 << 2;
@@ -1523,7 +1524,7 @@ struct GraphicsPipelineBuilder {
 			idAttachmentState.blendEnable = VK_FALSE;
 			idAttachmentState.colorWriteMask = renderPass == RENDER_PASS_WORLD_NO_ID ? 0u : VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 			colorBlendStateInfo.attachmentCount = 2;
-		} else if (renderPass == RENDER_PASS_UI) {
+		} else if (renderPass == RENDER_PASS_UI || renderPass == RENDER_PASS_SRGB_TEXTURE) {
 			VkPipelineColorBlendAttachmentState& mainAttachmentState = attachmentBlendStates[0];
 			mainAttachmentState.blendEnable = blendEnabled;
 			mainAttachmentState.srcColorBlendFactor = srcBlendFactor;
@@ -1578,6 +1579,10 @@ struct GraphicsPipelineBuilder {
 			renderingInfo.colorAttachmentCount = 1;
 			colorAttachmentFormats[0] = VK_FORMAT_R8G8B8A8_UNORM;
 			renderingInfo.depthAttachmentFormat = VK_FORMAT_D16_UNORM;
+		} else if (renderPass == RENDER_PASS_SRGB_TEXTURE) {
+			renderingInfo.colorAttachmentCount = 1;
+			colorAttachmentFormats[0] = VK_FORMAT_R8G8B8A8_SRGB;
+			renderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
 		}
 		renderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 		pipelineInfo.pNext = &renderingInfo;
@@ -1880,6 +1885,7 @@ void load_pipelines_and_descriptors() {
 		.set_layout(drawDataDescriptorSet.setLayout)
 		.build(&drawPipelineLayout);
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "pbr_surface"a).build(&drawPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_SRGB_TEXTURE, "prefab_icon"a).build(&prefabIconPipeline);
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_UI, "ui"a)
 		.blending(VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
 		.build(&uiPipeline);
@@ -1963,11 +1969,71 @@ void img_blit2d(VkCommandBuffer cmdBuf, VkImage srcImg, Rng2I32 srcArea, VkImage
 	vkCmdBlitImage(cmdBuf, srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region, filter);
 }
 
+struct TmpCmdBuf {
+	VkCommandBuffer buf;
+	VkCommandPool pool;
+};
+TmpCmdBuf begin_tmp_cmd_buf() {
+	VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+	poolInfo.queueFamilyIndex = graphicsFamily;
+	VkCommandPool pool;
+	CHK_VK(vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &pool));
+	VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	allocInfo.commandPool = pool;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandBufferCount = 1;
+	VkCommandBuffer buf;
+	CHK_VK(vkAllocateCommandBuffers(logicalDevice, &allocInfo, &buf));
+	VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	CHK_VK(vkBeginCommandBuffer(buf, &beginInfo));
+	return TmpCmdBuf{ buf, pool };
+}
+void end_tmp_cmd_buf(TmpCmdBuf buf) {
+	CHK_VK(vkEndCommandBuffer(buf.buf));
+	VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	submit.commandBufferCount = 1;
+	submit.pCommandBuffers = &buf.buf;
+	CHK_VK(vkQueueSubmit(graphicsQueue, 1, &submit, VK_NULL_HANDLE));
+	// Yeah, no fancy sync avoidance here. This should only be used in non perf critical places (like load time).
+	CHK_VK(vkQueueWaitIdle(graphicsQueue));
+	vkDestroyCommandPool(logicalDevice, buf.pool, nullptr);
+}
+
 enum FrameBeginResult {
 	FRAME_BEGIN_RESULT_CONTINUE,
 	FRAME_BEGIN_RESULT_TRY_AGAIN,
 	FRAME_BEGIN_RESULT_DONT_RENDER
 };
+
+void update_draw_data_buffer(VkCommandBuffer cmdBuf) {
+	DrawDataUniforms drawData{};
+	drawData.screenDimensions = V2F{ F32(attachments.mainWidth), F32(attachments.mainHeight) };
+	drawData.uiClipBoxes = UI::clipBoxBuffers[currentFrameInFlight].gpuAddress;
+	drawData.uiVertices = DynamicVertexBuffer::get_gpu_address(DynamicVertexBuffer::get_tessellator());
+	drawData.matrices = uniformMatricesHandler.gpuAddress;
+	drawData.positions = geometryHandler.gpuAddress + geometryHandler.positionsOffset;
+	drawData.texcoords = geometryHandler.gpuAddress + geometryHandler.texcoordsOffset;
+	drawData.normals = geometryHandler.gpuAddress + geometryHandler.normalsOffset;
+	drawData.tangents = geometryHandler.gpuAddress + geometryHandler.tangentsOffset;
+	drawData.boneIndicesAndWeights = geometryHandler.gpuAddress + geometryHandler.skinDataOffset;
+	drawData.skinnedPositions = geometryHandler.gpuAddress + geometryHandler.skinnedPositionsOffset;
+	drawData.skinnedNormals = geometryHandler.gpuAddress + geometryHandler.skinnedNormalsOffset;
+	drawData.skinnedTangents = geometryHandler.gpuAddress + geometryHandler.skinnedTangentsOffset;
+	drawData.materials = ResourceLoading::get_materials_gpu_address();
+	drawData.cameras = uniformMatricesHandler.camerasGPUAddress;
+
+	vkCmdUpdateBuffer(cmdBuf, drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms), &drawData);
+
+	VkBufferMemoryBarrier drawDataBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+	drawDataBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	drawDataBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	drawDataBarrier.buffer = drawDataUniformBuffer.buffer;
+	drawDataBarrier.offset = 0;
+	drawDataBarrier.size = sizeof(DrawDataUniforms);
+	vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1, &drawDataBarrier, 0, nullptr);
+}
 
 FrameBeginResult begin_frame() {
 	if (Win32::shouldRecreateSwapchain) {
@@ -2018,34 +2084,8 @@ FrameBeginResult begin_frame() {
 	cmdBufInfo.pInheritanceInfo = nullptr;
 	CHK_VK(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
 	
-	{ // Update frame uniforms
-		DrawDataUniforms drawData{};
-		drawData.screenDimensions = V2F{ F32(attachments.mainWidth), F32(attachments.mainHeight) };
-		drawData.uiClipBoxes = UI::clipBoxBuffers[currentFrameInFlight].gpuAddress;
-		drawData.uiVertices = DynamicVertexBuffer::get_gpu_address(DynamicVertexBuffer::get_tessellator());
-		drawData.matrices = uniformMatricesHandler.gpuAddress;
-		drawData.positions = geometryHandler.gpuAddress + geometryHandler.positionsOffset;
-		drawData.texcoords = geometryHandler.gpuAddress + geometryHandler.texcoordsOffset;
-		drawData.normals = geometryHandler.gpuAddress + geometryHandler.normalsOffset;
-		drawData.tangents = geometryHandler.gpuAddress + geometryHandler.tangentsOffset;
-		drawData.boneIndicesAndWeights = geometryHandler.gpuAddress + geometryHandler.skinDataOffset;
-		drawData.skinnedPositions = geometryHandler.gpuAddress + geometryHandler.skinnedPositionsOffset;
-		drawData.skinnedNormals = geometryHandler.gpuAddress + geometryHandler.skinnedNormalsOffset;
-		drawData.skinnedTangents = geometryHandler.gpuAddress + geometryHandler.skinnedTangentsOffset;
-		drawData.materials = ResourceLoading::get_materials_gpu_address();
-		drawData.cameras = uniformMatricesHandler.camerasGPUAddress;
-
-		// Barrier before is not necessary because a CPU fence is waited on to ensure drawing is done before draw data updates
-		vkCmdUpdateBuffer(graphicsCommandBuffer, drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms), &drawData);
-
-		VkBufferMemoryBarrier drawDataBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-		drawDataBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		drawDataBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		drawDataBarrier.buffer = drawDataUniformBuffer.buffer;
-		drawDataBarrier.offset = 0;
-		drawDataBarrier.size = sizeof(DrawDataUniforms);
-		vkCmdPipelineBarrier(graphicsCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 1, &drawDataBarrier, 0, nullptr);
-	}
+	// Barrier before is not necessary because a CPU fence is waited on to ensure drawing is done before draw data updates
+	update_draw_data_buffer(graphicsCommandBuffer);
 
 	geometryHandler.reset_skinned_results();
 	uniformMatricesHandler.reset();
