@@ -328,10 +328,11 @@ enum TransformOrientationMode {
 	TRANSFORM_ORIENTATION_MODE_LOCAL
 };
 
-enum EditorCmd {
+enum EditorCmdType {
 	EDITOR_CMD_TRANSFORM,
 	EDITOR_CMD_SELECT_OBJECTS,
-	EDITOR_CMD_DELETE_OBJECTS
+	EDITOR_CMD_DELETE_OBJECTS,
+	EDITOR_CMD_DUPLICATE_OBJECTS
 };
 
 struct EditorCmdTransform {
@@ -365,26 +366,32 @@ struct EditorCmdTransform {
 struct EditorCmdSelectObjects {
 	U32* previousSet;
 	U32 previousCount;
+	U32 previousActive;
 	U32* nextSet;
 	U32 nextCount;
+	U32 nextActive;
 
 	void apply() {
 		Level::level.deselect_all();
 		Level::level.select_objects(nextSet, nextCount);
+		Level::level.activeObject = nextActive == Level::INVALID_LEVEL_OBJECT_ID ? nullptr : Level::level.idToLevelObject.find_or_default(nextActive, nullptr);
 	}
 	void revert() {
 		Level::level.deselect_all();
 		Level::level.select_objects(previousSet, previousCount);
+		Level::level.activeObject = previousActive == Level::INVALID_LEVEL_OBJECT_ID ? nullptr : Level::level.idToLevelObject.find_or_default(previousActive, nullptr);
 	}
 };
 struct EditorCmdDeleteObjects {
 	U32* affectedObjIds;
 	I32 affectedObjIdCount;
 	Level::LevelObject** deletedObjects;
+	Level::LevelObject* deletedActiveObject;
 	I32 deletedObjectCount;
 
 	void apply() {
 		deletedObjectCount = 0;
+		deletedActiveObject = Level::level.activeObject;
 		for (I32 i = 0; i < affectedObjIdCount; i++) {
 			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(affectedObjIds[i], nullptr)) {
 				deletedObjects[deletedObjectCount++] = obj;
@@ -393,15 +400,59 @@ struct EditorCmdDeleteObjects {
 		}
 	}
 	void revert() {
+		Level::level.deselect_all();
 		for (I32 i = 0; i < deletedObjectCount; i++) {
 			Level::level.add_object(deletedObjects[i]);
+			Level::level.add_obj_to_selected(deletedObjects[i]);
 		}
+		Level::level.activeObject = deletedActiveObject;
 		deletedObjectCount = 0;
+		deletedActiveObject = nullptr;
 	}
 	void free() {
 		for (I32 i = 0; i < deletedObjectCount; i++) {
 			Level::free_level_object(deletedObjects[i]);
 		}
+	}
+};
+struct EditorCmdDuplicateObjects {
+	U32* toCloneObjIds;
+	I32 toCloneObjIdCount;
+	U32* clonedObjIds;
+	I32 clonedObjIdCount;
+	U32 prevActiveObjId;
+	M4x3F* duplicateObjectNewTransforms;
+
+	void apply() {
+		clonedObjIdCount = 0;
+		Level::LevelObject* prevActive = Level::level.activeObject;
+		prevActiveObjId = prevActive ? prevActive->id : Level::INVALID_LEVEL_OBJECT_ID;
+		Level::level.deselect_all();
+		for (I32 i = 0; i < toCloneObjIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(toCloneObjIds[i], nullptr)) {
+				Level::LevelObject* cloned = Level::clone_object(obj);
+				cloned->transform = duplicateObjectNewTransforms[i];
+				Level::level.add_object(cloned);
+				Level::level.add_obj_to_selected(cloned);
+				if (obj == prevActive) {
+					Level::level.activeObject = cloned;
+				}
+				clonedObjIds[clonedObjIdCount++] = cloned->id;
+			}
+		}
+	}
+	void revert() {
+		for (I32 i = 0; i < clonedObjIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(clonedObjIds[i], nullptr)) {
+				Level::level.free_object(obj);
+			}
+		}
+		for (I32 i = 0; i < toCloneObjIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(toCloneObjIds[i], nullptr)) {
+				Level::level.add_obj_to_selected(obj);
+			}
+		}
+		Level::level.activeObject = prevActiveObjId == Level::INVALID_LEVEL_OBJECT_ID ? nullptr : Level::level.idToLevelObject.find_or_default(prevActiveObjId, nullptr);
 	}
 };
 
@@ -410,8 +461,9 @@ struct UndoEntry {
 		EditorCmdTransform cmdTransform;
 		EditorCmdSelectObjects cmdSelectObjects;
 		EditorCmdDeleteObjects cmdDeleteObjects;
+		EditorCmdDuplicateObjects cmdDuplicateObjects;
 	};
-	EditorCmd cmdType;
+	EditorCmdType cmdType;
 	UndoEntry* prev;
 	UndoEntry* next;
 	U32 allocAmount;
@@ -421,6 +473,7 @@ struct UndoEntry {
 		case EDITOR_CMD_TRANSFORM: cmdTransform.apply(); break;
 		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.apply(); break;
 		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.apply(); break;
+		case EDITOR_CMD_DUPLICATE_OBJECTS: cmdDuplicateObjects.apply(); break;
 		}
 	}
 	void revert() {
@@ -428,6 +481,7 @@ struct UndoEntry {
 		case EDITOR_CMD_TRANSFORM: cmdTransform.revert(); break;
 		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.revert(); break;
 		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.revert(); break;
+		case EDITOR_CMD_DUPLICATE_OBJECTS: cmdDuplicateObjects.revert(); break;
 		}
 	}
 	void free() {
@@ -470,12 +524,14 @@ struct UndoStack {
 		firstUsedPos = (firstUsedPos + head->allocAmount) & UNDO_STACK_MASK;
 		freeSpace += head->allocAmount;
 		UndoEntry* toRemove = head;
+		toRemove->free();
 		DLL_REMOVE(toRemove, head, tail, prev, next);
 	}
 	void delete_tail() {
 		allocPos = (allocPos - tail->allocAmount) & UNDO_STACK_MASK;
 		freeSpace += tail->allocAmount;
 		UndoEntry* toRemove = tail;
+		toRemove->free();
 		DLL_REMOVE(toRemove, head, tail, prev, next);
 	}
 
@@ -509,6 +565,7 @@ struct UndoStack {
 		if (requiredSize > freeSpace) {
 			allocPos = lastAllocPos;
 			freeSpace = lastFreeSpace;
+			*usedSpaceOut = 0;
 			return nullptr;
 		}
 		T* result = (T*)(stack + allocPos);
@@ -518,7 +575,7 @@ struct UndoStack {
 		*usedSpaceOut = usedSpace;
 		return result;
 	}
-	UndoEntry* new_entry() {
+	UndoEntry* new_entry(EditorCmdType cmdType) {
 		while (tail != currentEntry) {
 			delete_tail();
 		}
@@ -526,6 +583,7 @@ struct UndoStack {
 		UndoEntry* result = alloc<UndoEntry>(&usedSpace, 1);
 		*result = UndoEntry{};
 		result->allocAmount = usedSpace;
+		result->cmdType = cmdType;
 		return result;
 	}
 	// Call if allocations fail (hopefully won't happen, but I'd like to be robust to that)
@@ -535,7 +593,7 @@ struct UndoStack {
 	}
 	template<typename T>
 	T* alloc_for_entry(UndoEntry* entry, U32 count) {
-		U32 usedSpace;
+		U32 usedSpace = 0;
 		T* result = alloc<T>(&usedSpace, count);
 		entry->allocAmount += usedSpace;
 		return result;
@@ -545,6 +603,89 @@ struct UndoStack {
 		DLL_INSERT_TAIL(entry, head, tail, prev, next);
 	}
 } undoStack;
+
+UndoEntry* editor_cmd_start_select() {
+	UndoEntry* result = undoStack.new_entry(EDITOR_CMD_SELECT_OBJECTS);
+	result->cmdSelectObjects = EditorCmdSelectObjects{};
+	result->cmdSelectObjects.previousCount = Level::level.selectedObjects.size;
+	result->cmdSelectObjects.previousSet = undoStack.alloc_for_entry<U32>(result, result->cmdSelectObjects.previousCount);
+	if (!result->cmdSelectObjects.previousSet) {
+		undoStack.abort_entry(result);
+		return nullptr;
+	}
+	for (U32 i = 0; i < result->cmdSelectObjects.previousCount; i++) {
+		result->cmdSelectObjects.previousSet[i] = Level::level.selectedObjects.data[i]->id;
+	}
+	result->cmdSelectObjects.previousActive = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
+	return result;
+}
+UndoEntry* editor_cmd_end_select(UndoEntry* entry) {
+	if (!entry) {
+		return nullptr;
+	}
+	entry->cmdSelectObjects.nextCount = Level::level.selectedObjects.size;
+	entry->cmdSelectObjects.nextSet = undoStack.alloc_for_entry<U32>(entry, entry->cmdSelectObjects.nextCount);
+	if (!entry->cmdSelectObjects.nextSet) {
+		undoStack.abort_entry(entry);
+		return nullptr;
+	}
+	bool different = entry->cmdSelectObjects.nextCount != entry->cmdSelectObjects.previousCount;
+	for (U32 i = 0; i < entry->cmdSelectObjects.nextCount; i++) {
+		entry->cmdSelectObjects.nextSet[i] = Level::level.selectedObjects.data[i]->id;
+		if (!different && entry->cmdSelectObjects.nextSet[i] != entry->cmdSelectObjects.previousSet[i]) {
+			different = true;
+		}
+	}
+	entry->cmdSelectObjects.nextActive = Level::level.activeObject ? Level::level.activeObject->id : Level::INVALID_LEVEL_OBJECT_ID;
+	if (different) {
+		undoStack.insert_entry(entry);
+	} else {
+		undoStack.abort_entry(entry);
+	}
+	return entry;
+}
+
+UndoEntry* editor_cmd_delete_selected() {
+	UndoEntry* result = undoStack.new_entry(EDITOR_CMD_DELETE_OBJECTS);
+	result->cmdDeleteObjects = EditorCmdDeleteObjects{};
+	result->cmdDeleteObjects.affectedObjIdCount = Level::level.selectedObjects.size;
+	result->cmdDeleteObjects.affectedObjIds = undoStack.alloc_for_entry<U32>(result, result->cmdDeleteObjects.affectedObjIdCount);
+	if (!result->cmdDeleteObjects.affectedObjIds) {
+		undoStack.abort_entry(result);
+		return nullptr;
+	}
+	for (U32 i = 0; i < result->cmdDeleteObjects.affectedObjIdCount; i++) {
+		result->cmdDeleteObjects.affectedObjIds[i] = Level::level.selectedObjects.data[i]->id;
+	}
+	result->cmdDeleteObjects.deletedObjects = undoStack.alloc_for_entry<Level::LevelObject*>(result, result->cmdDeleteObjects.affectedObjIdCount);
+	if (!result->cmdDeleteObjects.deletedObjects) {
+		undoStack.abort_entry(result);
+		return nullptr;
+	}
+	result->cmdDeleteObjects.apply();
+	undoStack.insert_entry(result);
+	return result;
+}
+
+UndoEntry* editor_cmd_duplicate_selected() {
+	UndoEntry* result = undoStack.new_entry(EDITOR_CMD_DUPLICATE_OBJECTS);
+	result->cmdDuplicateObjects = EditorCmdDuplicateObjects{};
+	result->cmdDuplicateObjects.toCloneObjIdCount = Level::level.selectedObjects.size;
+	result->cmdDuplicateObjects.toCloneObjIds = undoStack.alloc_for_entry<U32>(result, result->cmdDuplicateObjects.toCloneObjIdCount);
+	result->cmdDuplicateObjects.clonedObjIds = undoStack.alloc_for_entry<U32>(result, result->cmdDuplicateObjects.toCloneObjIdCount);
+	result->cmdDuplicateObjects.duplicateObjectNewTransforms = undoStack.alloc_for_entry<M4x3F>(result, result->cmdDuplicateObjects.toCloneObjIdCount);
+	if (!result->cmdDuplicateObjects.toCloneObjIds || !result->cmdDuplicateObjects.clonedObjIds || !result->cmdDuplicateObjects.duplicateObjectNewTransforms) {
+		undoStack.abort_entry(result);
+		return nullptr;
+	}
+	for (U32 i = 0; i < result->cmdDuplicateObjects.toCloneObjIdCount; i++) {
+		result->cmdDuplicateObjects.toCloneObjIds[i] = Level::level.selectedObjects.data[i]->id;
+		result->cmdDuplicateObjects.duplicateObjectNewTransforms[i] = Level::level.selectedObjects.data[i]->transform;
+	}
+	result->apply();
+	undoStack.insert_entry(result);
+	return result;
+}
 
 const F32 TRANSFORM_WIDGET_SCALE = 0.125F;
 const F32 TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE = 0.25F;
@@ -603,7 +744,7 @@ struct TranslateWidget {
 		totalTranslationAmount = {};
 		preInteractTransform = transform;
 		interactStartMousePos = Win32::get_mouse();
-		currentUndoCmd = undoStack.new_entry();
+		currentUndoCmd = undoStack.new_entry(EDITOR_CMD_TRANSFORM);
 		currentUndoCmd->cmdTransform = EditorCmdTransform{};
 		EditorCmdTransform& cmd = currentUndoCmd->cmdTransform;
 		cmd.rotation.set_identity();
@@ -856,6 +997,7 @@ struct PanelEditor3D {
 			}
 			
 			if (com.leftClicked) {
+				UndoEntry* undoEntry = editor_cmd_start_select();
 				if (!Win32::keyboardState[Win32::KEY_SHIFT]) {
 					Level::level.deselect_all();
 				}
@@ -894,6 +1036,7 @@ struct PanelEditor3D {
 						}
 					}
 				}
+				editor_cmd_end_select(undoEntry);
 				return ACTION_HANDLED;
 			}
 			if (com.keyPressed == Win32::KEY_Q) {
@@ -903,13 +1046,19 @@ struct PanelEditor3D {
 			} else if (com.keyPressed == Win32::KEY_E) {
 				editor3d->switch_widget(WIDGET_3D_ROTATE);
 			} else if (com.keyPressed == Win32::KEY_A) {
+				UndoEntry* undoEntry = editor_cmd_start_select();
 				Level::level.select_all();
+				editor_cmd_end_select(undoEntry);
 			} else if (com.keyPressed == Win32::KEY_Z) {
 				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
 					undoStack.redo();
 				} else {
 					undoStack.undo();
 				}
+			} else if (com.keyPressed == Win32::KEY_DELETE || com.keyPressed == Win32::KEY_X) {
+				editor_cmd_delete_selected();
+			} else if (com.keyPressed == Win32::KEY_D && Win32::keyboardState[Win32::KEY_SHIFT]) {
+				editor_cmd_duplicate_selected();
 			} else if (com.keyPressed == Win32::KEY_B) {
 				VK::currentDebugDisplay = VK::RenderDebugDisplay((U32(VK::currentDebugDisplay) + 1) % U32(VK::RENDER_DEBUG_DISPLAY_Count));
 				if (UI::Box* box = debugDisplayText.get()) {
@@ -1114,7 +1263,7 @@ void RotateWidget::on_made_active(PanelEditor3D* editor3D) {
 	startRotation = atan2f32(mouseRel.y, mouseRel.x);
 	currentRotation = startRotation;
 	preInteractTransform = transform;
-	currentUndoCmd = undoStack.new_entry();
+	currentUndoCmd = undoStack.new_entry(EDITOR_CMD_TRANSFORM);
 	currentUndoCmd->cmdTransform = EditorCmdTransform{};
 	EditorCmdTransform& cmd = currentUndoCmd->cmdTransform;
 	cmd.rotation.set_identity();

@@ -90,6 +90,13 @@ void calc_prefab_bounding_box(Prefab* prefab) {
 	prefab->boundingBox = boundingBox;
 }
 
+U32 nextObjId = 1;
+ArenaArrayList<U32> freeObjectIds;
+
+U32 get_next_obj_id() {
+	return freeObjectIds.empty() ? nextObjId++ : freeObjectIds.pop_back();
+}
+
 PoolAllocator<LevelObject> emptyAllocator;
 PoolAllocator<StaticModel> staticModelAllocator;
 PoolAllocator<SkeletalModel> skeletalModelAllocator;
@@ -98,9 +105,14 @@ PoolAllocator<Light> lightAllocator;
 void init_level_object(LevelObject& obj, LevelObjectType type, M4x3F transform) {
 	obj.type = type;
 	obj.transform = transform;
-	obj.id = INVALID_LEVEL_OBJECT_ID;
+	obj.id = get_next_obj_id();
 }
 void free_level_object(LevelObject* obj) {
+	if (obj->id == INVALID_LEVEL_OBJECT_ID) {
+		__debugbreak();
+	}
+	freeObjectIds.push_back(obj->id);
+	obj->id = INVALID_LEVEL_OBJECT_ID;
 	switch (obj->type) {
 	case LEVEL_OBJECT_EMPTY: break;
 	case LEVEL_OBJECT_STATIC_MODEL: staticModelAllocator.free((StaticModel*)obj); break;
@@ -132,7 +144,7 @@ LevelObject* clone_object(LevelObject* obj) {
 	case LEVEL_OBJECT_LIGHT: result = &lightAllocator.alloc()->obj, *((Light*)result) = *((Light*)obj); break;
 	}
 	if (result) {
-		result->id = INVALID_LEVEL_OBJECT_ID;
+		result->id = get_next_obj_id();
 		result->flags &= ~LevelObject::SELECTED;
 		result->typeGroupArrayIdx = 0;
 	} else {
@@ -157,8 +169,6 @@ void make_default_prefabs() {
 }
 
 struct Level {
-	U32 nextObjId;
-	ArenaArrayList<U32> freeObjectIds;
 	ArenaArrayList<StaticModel*> staticModels;
 	ArenaArrayList<SkeletalModel*> skeletalModels;
 	ArenaArrayList<Light*> lights;
@@ -167,11 +177,6 @@ struct Level {
 	LevelObject* activeObject;
 
 	void init() {
-		nextObjId = 1;
-	}
-
-	U32 get_next_id() {
-		return freeObjectIds.empty() ? nextObjId++ : freeObjectIds.pop_back();
 	}
 
 	V3F get_selection_midpoint() {
@@ -232,8 +237,6 @@ struct Level {
 	void remove_object(LevelObject* obj) {
 		remove_obj_from_selected(obj);
 		idToLevelObject.remove(obj->id);
-		freeObjectIds.push_back(obj->id);
-		obj->id = INVALID_LEVEL_OBJECT_ID;
 		switch (obj->type) {
 		case LEVEL_OBJECT_STATIC_MODEL: {
 			U32 staticModelIdx = obj->typeGroupArrayIdx;
@@ -255,8 +258,7 @@ struct Level {
 	}
 
 	void add_object(LevelObject* obj) {
-		DEBUG_ASSERT(obj->id == INVALID_LEVEL_OBJECT_ID, "Object cannot be added twice"a);
-		obj->id = get_next_id();
+		DEBUG_ASSERT(!idToLevelObject.contains(obj->id), "Object cannot be added twice"a);
 		idToLevelObject.insert(obj->id, obj);
 		switch (obj->type) {
 		case LEVEL_OBJECT_STATIC_MODEL: {
