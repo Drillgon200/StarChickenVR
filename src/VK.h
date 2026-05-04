@@ -129,6 +129,7 @@ VkPipeline uiPipeline;
 VkPipeline debugPipeline;
 VkPipeline debugNoDepthPipeline;
 VkPipeline debugLinesPipeline;
+VkPipeline debugLinesNoDepthPipeline;
 VkPipeline debugPointsPipeline;
 VkPipeline tmpBackgroundPipeline;
 VkPipelineLayout skinningPipelineLayout;
@@ -1893,6 +1894,7 @@ void load_pipelines_and_descriptors() {
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).build(&debugPipeline);
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).depth_test(false).depth_write(false).build(&debugNoDepthPipeline);
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).build(&debugLinesPipeline);
+	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST).depth_test(false).depth_write(false).build(&debugLinesNoDepthPipeline);
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD_NO_ID, "debug"a).primitive_topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST).build(&debugPointsPipeline);
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "background"a).depth_test(false).depth_write(false).build(&tmpBackgroundPipeline);
 

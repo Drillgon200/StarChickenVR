@@ -1636,6 +1636,19 @@ F32 signed_distance_to_segment(V2F32 pos, V2F32 linePointA, V2F32 linePointB) {
 	return distance(pos, linePointA + clamp01(t) * lineDirection) * F32(signumf32(cross(lineDirection, pos - linePointA)));
 }
 
+V3F make_orthonormal_basis(V3F* b2Out, V3F normal) {
+	// https://box2d.org/posts/2014/02/computing-a-basis/
+	V3F b1;
+	if (absf32(normal.x) > 0.57735F) {
+		b1 = V3F{ normal.y, -normal.x, 0.0F };
+	} else {
+		b1 = V3F{ 0.0F, normal.z, -normal.y };
+	}
+	b1 = normalize(b1);
+	*b2Out = cross(normal, b1);
+	return b1;
+}
+
 F32 ray_intersection_2d(V2F32 posA, V2F32 dirA, V2F32 posB, V2F32 dirB) {
 	return cross(dirB, posB - posA) / cross(dirB, dirA);
 }
@@ -1803,6 +1816,13 @@ struct QF32 {
 	}
 };
 
+FINLINE bool operator==(const QF32& a, const QF32& b) {
+	return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+}
+FINLINE bool operator!=(const QF32& a, const QF32& b) {
+	return a.x != b.x || a.y != b.y || a.z != b.z || a.w != b.w;
+}
+
 FINLINE QF32 operator*(QF32 a, QF32 b) {
 	// General equation for a quaternion product
 	// q.w = a.w * b.w - dot(a.v, b.v)
@@ -1961,6 +1981,19 @@ struct M4x3F32 {
 		return *this;
 	}
 
+	FINLINE M4x3F32& set_orientation_from_other(M4x3F32& m) {
+		m00 = m.m00;
+		m10 = m.m10;
+		m20 = m.m20;
+		m01 = m.m01;
+		m11 = m.m11;
+		m21 = m.m21;
+		m02 = m.m02;
+		m12 = m.m12;
+		m22 = m.m22;
+		return *this;
+	}
+
 	FINLINE M4x3F32& set_offset(V3F32 offset) {
 		x = offset.x;
 		y = offset.y;
@@ -1996,6 +2029,46 @@ struct M4x3F32 {
 		m21 = row2.y;
 		m22 = row2.z;
 		return *this;
+	}
+
+	FINLINE M4x3F32& rotate_quat_global(QF32 q) {
+		V3F column0 = q.transform(V3F{ m00, m10, m20 });
+		V3F column1 = q.transform(V3F{ m01, m11, m21 });
+		V3F column2 = q.transform(V3F{ m02, m12, m22 });
+		m00 = column0.x;
+		m10 = column0.y;
+		m20 = column0.z;
+		m01 = column1.x;
+		m11 = column1.y;
+		m21 = column1.z;
+		m02 = column2.x;
+		m12 = column2.y;
+		m22 = column2.z;
+
+		V3F pos = q.transform(V3F{ x, y, z });
+		x = pos.x;
+		y = pos.y;
+		z = pos.z;
+	}
+
+	FINLINE M4x3F32& rotate_quat_global_pivot(QF32 q, V3F pivot) {
+		V3F column0 = q.transform(V3F{ m00, m10, m20 });
+		V3F column1 = q.transform(V3F{ m01, m11, m21 });
+		V3F column2 = q.transform(V3F{ m02, m12, m22 });
+		m00 = column0.x;
+		m10 = column0.y;
+		m20 = column0.z;
+		m01 = column1.x;
+		m11 = column1.y;
+		m21 = column1.z;
+		m02 = column2.x;
+		m12 = column2.y;
+		m22 = column2.z;
+
+		V3F pos = q.transform(V3F{ x - pivot.x, y - pivot.y, z - pivot.z });
+		x = pos.x + pivot.x;
+		y = pos.y + pivot.y;
+		z = pos.z + pivot.z;
 	}
 
 	FINLINE M4x3F32& rotate_axis_angle(V3F32 axis, F32 angle) {
@@ -2125,6 +2198,16 @@ struct M4x3F32 {
 			m22 = row.z;
 		}
 		return *this;
+	}
+
+	FINLINE V3F32 get_column(U32 idx) {
+		if (idx == 0) {
+			return V3F32{ m00, m10, m20 };
+		} else if (idx == 1) {
+			return V3F32{ m01, m11, m21 };
+		} else {
+			return V3F32{ m02, m12, m22 };
+		}
 	}
 
 	FINLINE V3F translation() {

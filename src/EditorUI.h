@@ -330,7 +330,8 @@ enum TransformOrientationMode {
 
 enum EditorCmd {
 	EDITOR_CMD_TRANSFORM,
-	EDITOR_CMD_SELECT_OBJECTS
+	EDITOR_CMD_SELECT_OBJECTS,
+	EDITOR_CMD_DELETE_OBJECTS
 };
 
 struct EditorCmdTransform {
@@ -346,6 +347,9 @@ struct EditorCmdTransform {
 	void apply() {
 		for (I32 i = 0; i < affectedObjIdCount; i++) {
 			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(affectedObjIds[i], nullptr)) {
+				if (rotation != QF32{}.set_identity()) {
+					obj->transform.rotate_quat_global_pivot(rotation, origin);
+				}
 				obj->transform.add_offset(translation);
 			}
 		}
@@ -373,11 +377,39 @@ struct EditorCmdSelectObjects {
 		Level::level.select_objects(previousSet, previousCount);
 	}
 };
+struct EditorCmdDeleteObjects {
+	U32* affectedObjIds;
+	I32 affectedObjIdCount;
+	Level::LevelObject** deletedObjects;
+	I32 deletedObjectCount;
+
+	void apply() {
+		deletedObjectCount = 0;
+		for (I32 i = 0; i < affectedObjIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(affectedObjIds[i], nullptr)) {
+				deletedObjects[deletedObjectCount++] = obj;
+				Level::level.remove_object(obj);
+			}
+		}
+	}
+	void revert() {
+		for (I32 i = 0; i < deletedObjectCount; i++) {
+			Level::level.add_object(deletedObjects[i]);
+		}
+		deletedObjectCount = 0;
+	}
+	void free() {
+		for (I32 i = 0; i < deletedObjectCount; i++) {
+			Level::free_level_object(deletedObjects[i]);
+		}
+	}
+};
 
 struct UndoEntry {
 	union {
 		EditorCmdTransform cmdTransform;
 		EditorCmdSelectObjects cmdSelectObjects;
+		EditorCmdDeleteObjects cmdDeleteObjects;
 	};
 	EditorCmd cmdType;
 	UndoEntry* prev;
@@ -388,12 +420,19 @@ struct UndoEntry {
 		switch (cmdType) {
 		case EDITOR_CMD_TRANSFORM: cmdTransform.apply(); break;
 		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.apply(); break;
+		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.apply(); break;
 		}
 	}
 	void revert() {
 		switch (cmdType) {
 		case EDITOR_CMD_TRANSFORM: cmdTransform.revert(); break;
 		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.revert(); break;
+		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.revert(); break;
+		}
+	}
+	void free() {
+		switch (cmdType) {
+		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.free(); break;
 		}
 	}
 };
@@ -545,6 +584,11 @@ struct TranslateWidget {
 		} else {
 			activeComponent = TRANSLATE_WIDGET_COMPONENT_NONE;
 		}
+		if (Level::level.activeObject) {
+			transform.set_orientation_from_other(Level::level.activeObject->transform);
+		} else {
+			transform.set_identity();
+		}
 		transform.set_offset(Level::level.get_selection_midpoint());
 	}
 
@@ -589,52 +633,121 @@ struct TranslateWidget {
 	void draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessellator& tes, V3F eye);
 };
 
+enum RotateWidgetComponent {
+	ROTATE_WIDGET_COMPONENT_NONE,
+	ROTATE_WIDGET_COMPONENT_X_AXIS,
+	ROTATE_WIDGET_COMPONENT_Y_AXIS,
+	ROTATE_WIDGET_COMPONENT_Z_AXIS,
+	ROTATE_WIDGET_COMPONENT_CAMERA_AXIS
+};
+struct RotateWidget {
+	M4x3F transform;
+	M4x3F preInteractTransform;
+	V2F projectedWidgetPos;
+	F32 startRotation;
+	F32 currentRotation;
+	RotateWidgetComponent activeComponent;
+	UndoEntry* currentUndoCmd;
+
+	void do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look);
+
+	void key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state) {
+	}
+	void mouse_input(PanelEditor3D* editor3D, Win32::MouseButton button, Win32::MouseValue state, V2F mousePos) {
+		if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_UP) {
+			currentInputWidget = nullptr;
+			return;
+		}
+	}
+
+	void update_inactive(PanelEditor3D* editor3D, bool mouseInRange, V3F eye, V3F pickRay) {
+		if (mouseInRange) {
+			do_mouse_over(editor3D, eye, pickRay);
+		} else {
+			activeComponent = ROTATE_WIDGET_COMPONENT_NONE;
+		}
+		if (Level::level.activeObject) {
+			transform.set_orientation_from_other(Level::level.activeObject->transform);
+		} else {
+			transform.set_identity();
+		}
+		transform.set_offset(Level::level.get_selection_midpoint());
+	}
+
+	void update_active(PanelEditor3D* editor3D);
+
+	bool check_clicked_on(PanelEditor3D* editor3D, V3F eye, V3F pickRay) {
+		do_mouse_over(editor3D, eye, pickRay);
+		return activeComponent != ROTATE_WIDGET_COMPONENT_NONE;
+	}
+
+	void on_made_active(PanelEditor3D* editor3D);
+
+	void draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessellator& tes, V3F eye);
+};
+
 enum Widget3DType : U32 {
 	WIDGET_3D_NONE,
-	WIDGET_3D_TRANSLATE
+	WIDGET_3D_TRANSLATE,
+	WIDGET_3D_ROTATE
 };
 struct Widget3D {
 	Widget3DType type;
 	PanelEditor3D* parentPanel;
 	union {
 		TranslateWidget translate;
+		RotateWidget rotate;
 	};
 
 	void key_input(Win32::Key key, Win32::ButtonState state) {
 		switch (type) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: translate.key_input(parentPanel, key, state); break;
+		case WIDGET_3D_ROTATE: rotate.key_input(parentPanel, key, state); break;
 		}
 	}
 	void mouse_input(Win32::MouseButton button, Win32::MouseValue state, V2F mousePos) {
 		switch (type) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: translate.mouse_input(parentPanel, button, state, mousePos); break;
+		case WIDGET_3D_ROTATE: rotate.mouse_input(parentPanel, button, state, mousePos); break;
 		}
 	}
 	void update_inactive(bool mouseInRange, V3F eye, V3F pickRay) {
 		switch (type) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: translate.update_inactive(parentPanel, mouseInRange, eye, pickRay); break;
+		case WIDGET_3D_ROTATE: rotate.update_inactive(parentPanel, mouseInRange, eye, pickRay); break;
 		}
 	}
 	void update_active() {
 		switch (type) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: translate.update_active(parentPanel); break;
+		case WIDGET_3D_ROTATE: rotate.update_active(parentPanel); break;
 		}
 	}
 	void draw(DynamicVertexBuffer::Tessellator& tes, V3F eyePos) {
 		switch (type) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: translate.draw(parentPanel, tes, eyePos); break;
+		case WIDGET_3D_ROTATE: rotate.draw(parentPanel, tes, eyePos); break;
 		}
 	}
 	void on_made_active() {
 		switch (type) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: translate.on_made_active(parentPanel); break;
+		case WIDGET_3D_ROTATE: rotate.on_made_active(parentPanel); break;
 		}
+	}
+	bool check_clicked_should_make_active(V3F eye, V3F pickRay) {
+		switch (type) {
+		case WIDGET_3D_NONE: break;
+		case WIDGET_3D_TRANSLATE: return translate.check_clicked_on(parentPanel, eye, pickRay); break;
+		case WIDGET_3D_ROTATE: return rotate.check_clicked_on(parentPanel, eye, pickRay); break;
+		}
+		return false;
 	}
 };
 
@@ -660,6 +773,7 @@ struct PanelEditor3D {
 		switch (newWidget) {
 		case WIDGET_3D_NONE: break;
 		case WIDGET_3D_TRANSLATE: widget3D.translate = TranslateWidget{}; break;
+		case WIDGET_3D_ROTATE: widget3D.rotate = RotateWidget{}; break;
 		}
 		widget3D.type = newWidget;
 	}
@@ -732,15 +846,10 @@ struct PanelEditor3D {
 				Win32::set_mouse_captured(true);
 				return ACTION_HANDLED;
 			} else if (com.leftClickStart) {
-				switch (editor3d->widget3D.type) {
-				case WIDGET_3D_TRANSLATE: {
-					if (editor3d->widget3D.translate.check_clicked_on(editor3d, editor3d->editor.get_render_eye_pos(), editor3d->mousePickRay)) {
-						currentInputWidget = &editor3d->widget3D;
-						currentInputWidget->on_made_active();
-						return ACTION_HANDLED;
-					}
-				} break;
-				default: break;
+				if (editor3d->widget3D.check_clicked_should_make_active(editor3d->editor.get_render_eye_pos(), editor3d->mousePickRay)) {
+					currentInputWidget = &editor3d->widget3D;
+					currentInputWidget->on_made_active();
+					return ACTION_HANDLED;
 				}
 				selectDragStart = com.mousePos;
 				editor3d->isDragSelecting = true;
@@ -787,17 +896,21 @@ struct PanelEditor3D {
 				}
 				return ACTION_HANDLED;
 			}
-			if (com.keyPressed == Win32::KEY_A) {
+			if (com.keyPressed == Win32::KEY_Q) {
+				editor3d->switch_widget(WIDGET_3D_NONE);
+			} else if (com.keyPressed == Win32::KEY_W) {
+				editor3d->switch_widget(WIDGET_3D_TRANSLATE);
+			} else if (com.keyPressed == Win32::KEY_E) {
+				editor3d->switch_widget(WIDGET_3D_ROTATE);
+			} else if (com.keyPressed == Win32::KEY_A) {
 				Level::level.select_all();
-			}
-			if (com.keyPressed == Win32::KEY_Z) {
+			} else if (com.keyPressed == Win32::KEY_Z) {
 				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
 					undoStack.redo();
 				} else {
 					undoStack.undo();
 				}
-			}
-			if (com.keyPressed == Win32::KEY_B) {
+			} else if (com.keyPressed == Win32::KEY_B) {
 				VK::currentDebugDisplay = VK::RenderDebugDisplay((U32(VK::currentDebugDisplay) + 1) % U32(VK::RENDER_DEBUG_DISPLAY_Count));
 				if (UI::Box* box = debugDisplayText.get()) {
 					StrA text{};
@@ -839,11 +952,11 @@ void TranslateWidget::update_active(PanelEditor3D* editor3D) {
 	V3F prevWidgetPos = preInteractTransform.translation();
 	F32 scale = TRANSFORM_WIDGET_SCALE * distance(editor3D->editor.get_render_eye_pos(), prevWidgetPos);
 	if (activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS || activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS || activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS) {
-		U32 rowIdx =
+		U32 columnIdx =
 			activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? 0 :
 			activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS ? 1 :
 			2;
-		V3F translateAxis = normalize(preInteractTransform.get_row(rowIdx));
+		V3F translateAxis = normalize(preInteractTransform.get_column(columnIdx));
 		V3F planeNormal = eye - prevWidgetPos;
 		planeNormal = planeNormal - translateAxis * dot(planeNormal, translateAxis);
 		V3F planeTranslation = ray_plane_intersect_point(eye, mouseRay, prevWidgetPos, planeNormal) - ray_plane_intersect_point(eye, prevMouseRay, prevWidgetPos, planeNormal);
@@ -852,9 +965,9 @@ void TranslateWidget::update_active(PanelEditor3D* editor3D) {
 		// Translate along plane, not constrained to one axis
 		V3F planeNormal{};
 		switch (activeComponent) {
-		case TRANSLATE_WIDGET_COMPONENT_XY_PLANE: planeNormal = preInteractTransform.get_row(2); break;
-		case TRANSLATE_WIDGET_COMPONENT_XZ_PLANE: planeNormal = preInteractTransform.get_row(1); break;
-		case TRANSLATE_WIDGET_COMPONENT_YZ_PLANE: planeNormal = preInteractTransform.get_row(0); break;
+		case TRANSLATE_WIDGET_COMPONENT_XY_PLANE: planeNormal = preInteractTransform.get_column(2); break;
+		case TRANSLATE_WIDGET_COMPONENT_XZ_PLANE: planeNormal = preInteractTransform.get_column(1); break;
+		case TRANSLATE_WIDGET_COMPONENT_YZ_PLANE: planeNormal = preInteractTransform.get_column(0); break;
 		case TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE: planeNormal = editor3D->editor.forward; break;
 		}
 		totalTranslationAmount = ray_plane_intersect_point(eye, mouseRay, prevWidgetPos, planeNormal) - ray_plane_intersect_point(eye, prevMouseRay, prevWidgetPos, planeNormal);
@@ -874,9 +987,9 @@ void TranslateWidget::do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look) 
 	F32 planeScale = scale * TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE;
 	F32 arrowRadius = 0.05F * scale;
 	V3F center{ transform.x, transform.y, transform.z };
-	V3F xAxis = transform.get_row(0);
-	V3F yAxis = transform.get_row(1);
-	V3F zAxis = transform.get_row(2);
+	V3F xAxis = transform.get_column(0);
+	V3F yAxis = transform.get_column(1);
+	V3F zAxis = transform.get_column(2);
 	F32 bestTime = F32_INF;
 	F32 xAxisTime{};
 	if (ray_cylinder_intersect(&xAxisTime, eye, look, center + xAxis * scale * 0.5F, center, arrowRadius * 2.0F) && xAxisTime < bestTime) {
@@ -920,9 +1033,9 @@ void TranslateWidget::draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessell
 	F32 planeScale = scale * TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE;
 	F32 arrowRadius = 0.05F * scale;
 	V3F center{ transform.x, transform.y, transform.z };
-	V3F xAxis = transform.get_row(0);
-	V3F yAxis = transform.get_row(1);
-	V3F zAxis = transform.get_row(2);
+	V3F xAxis = transform.get_column(0);
+	V3F yAxis = transform.get_column(1);
+	V3F zAxis = transform.get_column(2);
 	V3F camX = editor3D->editor.right * planeScale;
 	V3F camY = editor3D->editor.up * planeScale;
 	tes.begin_draw(VK::debugNoDepthPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
@@ -933,6 +1046,114 @@ void TranslateWidget::draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessell
 	tes.debug_quad(center + xAxis * planeScale + zAxis * planeScale, xAxis * planeScale, zAxis * planeScale, activeComponent == TRANSLATE_WIDGET_COMPONENT_XZ_PLANE ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
 	tes.debug_quad(center + yAxis * planeScale + zAxis * planeScale, yAxis * planeScale, zAxis * planeScale, activeComponent == TRANSLATE_WIDGET_COMPONENT_YZ_PLANE ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
 	tes.debug_quad(center - camX * 0.5F - camY * 0.5F, camX, camY, activeComponent == TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE ? V4F{ 0.75F, 0.75F, 0.75F, 1.0F } : V4F{ 0.5F, 0.5F, 0.5F, 1.0F });
+	tes.end_draw();
+}
+
+void RotateWidget::update_active(PanelEditor3D* editor3D) {
+	if (activeComponent == ROTATE_WIDGET_COMPONENT_NONE || StarChicken::frameUIMouseDelta == V2F{}) {
+		return;
+	}
+	V2F mouseRel = Win32::get_mouse() - projectedWidgetPos;
+	currentRotation = atan2f32(mouseRel.y, mouseRel.x);
+	QF32 rotation{};
+	V3F xAxis = preInteractTransform.get_column(0);
+	V3F yAxis = preInteractTransform.get_column(1);
+	V3F zAxis = preInteractTransform.get_column(2);
+	V3F toCam = editor3D->editor.get_render_eye_pos() - preInteractTransform.translation();
+	xAxis = dot(toCam, xAxis) > 0.0F ? -xAxis : xAxis;
+	yAxis = dot(toCam, yAxis) > 0.0F ? -yAxis : yAxis;
+	zAxis = dot(toCam, zAxis) > 0.0F ? -zAxis : zAxis;
+	switch (activeComponent) {
+	case ROTATE_WIDGET_COMPONENT_X_AXIS: rotation.from_axis_angle(AxisAngleF{ xAxis, currentRotation - startRotation }); break;
+	case ROTATE_WIDGET_COMPONENT_Y_AXIS: rotation.from_axis_angle(AxisAngleF{ yAxis, currentRotation - startRotation }); break;
+	case ROTATE_WIDGET_COMPONENT_Z_AXIS: rotation.from_axis_angle(AxisAngleF{ zAxis, currentRotation - startRotation }); break;
+	case ROTATE_WIDGET_COMPONENT_CAMERA_AXIS: rotation.from_axis_angle(AxisAngleF{ editor3D->editor.forward, currentRotation - startRotation }); break;
+	}
+	transform = preInteractTransform;
+	transform.rotate_quat_global_pivot(rotation, transform.translation());
+	if (currentUndoCmd) {
+		currentUndoCmd->revert();
+		currentUndoCmd->cmdTransform.rotation = rotation;
+		currentUndoCmd->apply();
+	}
+}
+
+void RotateWidget::do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look) {
+	activeComponent = ROTATE_WIDGET_COMPONENT_NONE;
+	F32 scale = TRANSFORM_WIDGET_SCALE * distance(eye, V3F{ transform.x, transform.y, transform.z });
+	F32 planeScale = scale * TRANSFORM_PLANE_HANDLE_ADDITIONAL_SCALE;
+	F32 thickness = 0.05F * scale;
+	V3F center{ transform.x, transform.y, transform.z };
+	V3F xAxis = transform.get_column(0);
+	V3F yAxis = transform.get_column(1);
+	V3F zAxis = transform.get_column(2);
+	F32 bestTime = F32_INF;
+	F32 xAxisTime{};
+	if (ray_cylinder_intersect(&xAxisTime, eye, look, center, center + thickness * 0.5F * xAxis, scale) && xAxisTime < bestTime) {
+		bestTime = xAxisTime;
+		activeComponent = ROTATE_WIDGET_COMPONENT_X_AXIS;
+	}
+	F32 yAxisTime{};
+	if (ray_cylinder_intersect(&yAxisTime, eye, look, center, center + thickness * 0.5F * yAxis, scale) && yAxisTime < bestTime) {
+		bestTime = yAxisTime;
+		activeComponent = ROTATE_WIDGET_COMPONENT_Y_AXIS;
+	}
+	F32 zAxisTime{};
+	if (ray_cylinder_intersect(&zAxisTime, eye, look, center, center + thickness * 0.5F * zAxis, scale) && zAxisTime < bestTime) {
+		bestTime = zAxisTime;
+		activeComponent = ROTATE_WIDGET_COMPONENT_Z_AXIS;
+	}
+	if (ray_cylinder_intersect(nullptr, eye, look, center, center + thickness + 0.5F * editor3D->editor.forward, scale * 1.2F) && bestTime == F32_INF) {
+		activeComponent = ROTATE_WIDGET_COMPONENT_CAMERA_AXIS;
+	}
+}
+
+void RotateWidget::on_made_active(PanelEditor3D* editor3D) {
+	projectedWidgetPos = editor3D->project_pos(transform.translation());
+	V2F mouseRel = Win32::get_mouse() - projectedWidgetPos;
+	startRotation = atan2f32(mouseRel.y, mouseRel.x);
+	currentRotation = startRotation;
+	preInteractTransform = transform;
+	currentUndoCmd = undoStack.new_entry();
+	currentUndoCmd->cmdTransform = EditorCmdTransform{};
+	EditorCmdTransform& cmd = currentUndoCmd->cmdTransform;
+	cmd.rotation.set_identity();
+	transform.set_offset(Level::level.get_selection_midpoint());
+	cmd.origin = transform.translation();
+	cmd.affectedObjIdCount = Level::level.selectedObjects.size;
+	cmd.affectedObjIds = undoStack.alloc_for_entry<U32>(currentUndoCmd, cmd.affectedObjIdCount);
+	if (!cmd.affectedObjIds) {
+		goto failed;
+	}
+	cmd.previousTransforms = undoStack.alloc_for_entry<M4x3F>(currentUndoCmd, cmd.affectedObjIdCount);
+	if (!cmd.previousTransforms) {
+		goto failed;
+	}
+	for (U32 i = 0; i < Level::level.selectedObjects.size; i++) {
+		cmd.affectedObjIds[i] = Level::level.selectedObjects[i]->id;
+		cmd.previousTransforms[i] = Level::level.selectedObjects[i]->transform;
+	}
+	undoStack.insert_entry(currentUndoCmd);
+	goto success;
+failed:;
+	undoStack.abort_entry(currentUndoCmd);
+	currentUndoCmd = nullptr;
+success:;
+}
+
+void RotateWidget::draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessellator& tes, V3F eye) {
+	F32 scale = TRANSFORM_WIDGET_SCALE * distance(eye, V3F{ transform.x, transform.y, transform.z });
+	V3F center = transform.translation();
+	V3F xAxis = transform.get_column(0) * scale;
+	V3F yAxis = transform.get_column(1) * scale;
+	V3F zAxis = transform.get_column(2) * scale;
+	V3F camX = editor3D->editor.right * scale * 1.2F;
+	V3F camY = editor3D->editor.up * scale * 1.2F;
+	tes.begin_draw(VK::debugLinesNoDepthPipeline, VK::drawPipelineLayout, DynamicVertexBuffer::DRAW_MODE_PRIMITIVES);
+	tes.debug_line_circle(center, zAxis, yAxis, activeComponent == ROTATE_WIDGET_COMPONENT_X_AXIS ? V4F{ 1.0F, 0.5F, 0.5F, 1.0F } : V4F{ 1.0F, 0.25F, 0.25F, 1.0F });
+	tes.debug_line_circle(center, xAxis, zAxis, activeComponent == ROTATE_WIDGET_COMPONENT_Y_AXIS ? V4F{ 0.5F, 1.0F, 0.5F, 1.0F } : V4F{ 0.25F, 1.0F, 0.25F, 1.0F });
+	tes.debug_line_circle(center, xAxis, yAxis, activeComponent == ROTATE_WIDGET_COMPONENT_Z_AXIS ? V4F{ 0.5F, 0.5F, 1.0F, 1.0F } : V4F{ 0.25F, 0.25F, 1.0F, 1.0F });
+	tes.debug_line_circle(center, camX, camY, activeComponent == ROTATE_WIDGET_COMPONENT_CAMERA_AXIS ? V4F{ 0.75F, 0.75F, 0.75F, 1.0F } : V4F{ 0.5F, 0.5F, 0.5F, 1.0F });
 	tes.end_draw();
 }
 

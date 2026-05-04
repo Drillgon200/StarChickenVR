@@ -386,15 +386,10 @@ struct Tessellator {
 		M4x3F t;
 		t.x = start.x; t.y = start.y; t.z = start.z;
 		// We will construct the line along the y axis, so align the y axis with the correct direction, and the other two basis vectors don't matter as long as they're orthonormal
-		// https://box2d.org/posts/2014/02/computing-a-basis/
-		V3F b1;
-		if (absf32(v.x) > 0.57735F) {
-			b1 = V3F{ v.y, -v.x, 0.0F };
-		} else {
-			b1 = V3F{ 0.0F, v.z, -v.y };
-		}
-		b1 = normalize(b1) * arrowRadius;
-		V3F b2 = cross(v, b1);
+		
+		V3F b2;
+		V3F b1 = make_orthonormal_basis(&b2, v);
+		b1 *= arrowRadius, b2 *= arrowRadius;
 		t.m00 = b1.x; t.m10 = b1.y; t.m20 = b1.z;
 		t.m01 = v.x;  t.m11 = v.y;  t.m21 = v.z;
 		t.m02 = b2.x; t.m12 = b2.y; t.m22 = b2.z;
@@ -458,6 +453,26 @@ struct Tessellator {
 			16, 17, 24, 17, 18, 24, 18, 19, 24, 19, 20, 24, 20, 21, 24, 21, 22, 24, 22, 23, 24, 23, 16, 24
 		};
 		return add_geometry(vertices, ARRAY_COUNT(vertices), indices, ARRAY_COUNT(indices));
+	}
+	Tessellator& debug_line_circle(V3F pos, V3F xAxis, V3F yAxis, V4F color = V4F{ 1.0F, 0.0F, 0.0F, 1.0F }) {
+		const U32 resolution = 32;
+		U32 packedColor = pack_unorm4x8(color);
+		VK::DebugVertex vertices[resolution];
+		U32 indices[resolution * 2];
+		for (U32 i = 0; i < resolution; i++) {
+			F32 s;
+			F32 c = sincosf32(&s, F32(i) / F32(resolution));
+			vertices[i] = VK::DebugVertex{ pos + c * xAxis + s * yAxis, packedColor };
+			indices[i * 2 + 0] = i;
+			indices[i * 2 + 1] = i + 1;
+		}
+		indices[resolution * 2 - 1] = 0;
+		return add_geometry(vertices, ARRAY_COUNT(vertices), indices, ARRAY_COUNT(indices));
+	}
+	Tessellator& debug_line_circle(V3F pos, V3F normal, F32 radius, V4F color = V4F{ 1.0F, 0.0F, 0.0F, 1.0F }) {
+		V3F b2;
+		V3F b1 = make_orthonormal_basis(&b2, normal);
+		return debug_line_circle(pos, b1 * radius, b2 * radius, color);
 	}
 } tessellators[VK::FRAMES_IN_FLIGHT];
 

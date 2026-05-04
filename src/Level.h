@@ -90,6 +90,7 @@ void calc_prefab_bounding_box(Prefab* prefab) {
 	prefab->boundingBox = boundingBox;
 }
 
+PoolAllocator<LevelObject> emptyAllocator;
 PoolAllocator<StaticModel> staticModelAllocator;
 PoolAllocator<SkeletalModel> skeletalModelAllocator;
 PoolAllocator<Light> lightAllocator;
@@ -122,6 +123,23 @@ SkeletalModel* get_skeletal_model(VKGeometry::SkeletalMesh& mesh, ResourceLoadin
 	model->poseMatrices = poseMatrices;
 	return model;
 }
+LevelObject* clone_object(LevelObject* obj) {
+	LevelObject* result = nullptr;
+	switch (obj->type) {
+	case LEVEL_OBJECT_EMPTY: result = emptyAllocator.alloc(), *result = *obj; break;
+	case LEVEL_OBJECT_STATIC_MODEL: result = &staticModelAllocator.alloc()->obj, *((StaticModel*)result) = *((StaticModel*)obj); break;
+	case LEVEL_OBJECT_SKELETAL_MODEL: result = &skeletalModelAllocator.alloc()->obj, *((SkeletalModel*)result) = *((SkeletalModel*)obj); break;
+	case LEVEL_OBJECT_LIGHT: result = &lightAllocator.alloc()->obj, *((Light*)result) = *((Light*)obj); break;
+	}
+	if (result) {
+		result->id = INVALID_LEVEL_OBJECT_ID;
+		result->flags &= ~LevelObject::SELECTED;
+		result->typeGroupArrayIdx = 0;
+	} else {
+		abort("Clone should be implemented"a);
+	}
+	return result;
+}
 
 void make_static_model_prefab(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& mat) {
 	LevelObject* meshObject = &get_static_model(mesh, mat, M4x3F{}.set_identity())->obj;
@@ -143,6 +161,7 @@ struct Level {
 	ArenaArrayList<U32> freeObjectIds;
 	ArenaArrayList<StaticModel*> staticModels;
 	ArenaArrayList<SkeletalModel*> skeletalModels;
+	ArenaArrayList<Light*> lights;
 	ArenaHashMap<U32, LevelObject*> idToLevelObject;
 	ArenaArrayList<LevelObject*> selectedObjects;
 	LevelObject* activeObject;
@@ -153,27 +172,6 @@ struct Level {
 
 	U32 get_next_id() {
 		return freeObjectIds.empty() ? nextObjId++ : freeObjectIds.pop_back();
-	}
-
-	void free_object(LevelObject* object) {
-		idToLevelObject.remove(object->id);
-		freeObjectIds.push_back(object->id);
-		object->id = INVALID_LEVEL_OBJECT_ID;
-		switch (object->type) {
-		case LEVEL_OBJECT_EMPTY: break;
-		case LEVEL_OBJECT_STATIC_MODEL: {
-			U32 staticModelIdx = object->typeGroupArrayIdx;
-			staticModels.data[staticModelIdx] = staticModels.pop_back();
-			staticModels.data[staticModelIdx]->obj.typeGroupArrayIdx = staticModelIdx;
-			staticModelAllocator.free((StaticModel*)object);
-		} break;
-		case LEVEL_OBJECT_SKELETAL_MODEL: {
-			U32 skeletalModelIdx = object->typeGroupArrayIdx;
-			skeletalModels.data[skeletalModelIdx] = skeletalModels.pop_back();
-			skeletalModels.data[skeletalModelIdx]->obj.typeGroupArrayIdx = skeletalModelIdx;
-			skeletalModelAllocator.free((SkeletalModel*)object);
-		} break;
-		}
 	}
 
 	V3F get_selection_midpoint() {
@@ -229,6 +227,57 @@ struct Level {
 				add_obj_to_selected(idToLevelObject.values[i]);
 			}
 		}
+	}
+
+	void remove_object(LevelObject* obj) {
+		remove_obj_from_selected(obj);
+		idToLevelObject.remove(obj->id);
+		freeObjectIds.push_back(obj->id);
+		obj->id = INVALID_LEVEL_OBJECT_ID;
+		switch (obj->type) {
+		case LEVEL_OBJECT_STATIC_MODEL: {
+			U32 staticModelIdx = obj->typeGroupArrayIdx;
+			staticModels.data[staticModelIdx] = staticModels.pop_back();
+			staticModels.data[staticModelIdx]->obj.typeGroupArrayIdx = staticModelIdx;
+		} break;
+		case LEVEL_OBJECT_SKELETAL_MODEL: {
+			U32 skeletalModelIdx = obj->typeGroupArrayIdx;
+			skeletalModels.data[skeletalModelIdx] = skeletalModels.pop_back();
+			skeletalModels.data[skeletalModelIdx]->obj.typeGroupArrayIdx = skeletalModelIdx;
+		} break;
+		case LEVEL_OBJECT_LIGHT: {
+			U32 lightIdx = obj->typeGroupArrayIdx;
+			lights.data[lightIdx] = lights.pop_back();
+			lights.data[lightIdx]->obj.typeGroupArrayIdx = lightIdx;
+		} break;
+		default: break;
+		}
+	}
+
+	void add_object(LevelObject* obj) {
+		DEBUG_ASSERT(obj->id == INVALID_LEVEL_OBJECT_ID, "Object cannot be added twice"a);
+		obj->id = get_next_id();
+		idToLevelObject.insert(obj->id, obj);
+		switch (obj->type) {
+		case LEVEL_OBJECT_STATIC_MODEL: {
+			obj->typeGroupArrayIdx = staticModels.size;
+			staticModels.push_back((StaticModel*)obj);
+		} break;
+		case LEVEL_OBJECT_SKELETAL_MODEL: {
+			obj->typeGroupArrayIdx = skeletalModels.size;
+			skeletalModels.push_back((StaticModel*)obj);
+		} break;
+		case LEVEL_OBJECT_LIGHT: {
+			obj->typeGroupArrayIdx = lights.size;
+			lights.push_back((StaticModel*)obj);
+		} break;
+		default: abort("Unknown object type"a); break;
+		}
+	}
+
+	void free_object(LevelObject* obj) {
+		remove_object(obj);
+		free_level_object(obj);
 	}
 
 	void prepare_render_transforms() {
@@ -301,31 +350,6 @@ struct Level {
 		}
 	}
 
-	void init_level_object(LevelObject& obj, LevelObjectType type, M4x3F transform, U32 typeArrayIdx) {
-		obj.type = type;
-		obj.transform = transform;
-		obj.id = get_next_id();
-		idToLevelObject.insert(obj.id, &obj);
-		obj.typeGroupArrayIdx = typeArrayIdx;
-	}
-
-	void add_static_model(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& material, M4x3F transform) {
-		StaticModel* model = staticModelAllocator.alloc();
-		init_level_object(model->obj, LEVEL_OBJECT_STATIC_MODEL, transform, staticModels.size);
-		model->mesh = &mesh;
-		model->material = &material;
-		staticModels.push_back(model);
-	}
-
-	void add_skeletal_model(VKGeometry::SkeletalMesh& mesh, ResourceLoading::Material& material, M4x3F transform, M4x3F* poseMatrices) {
-		SkeletalModel* model = skeletalModelAllocator.alloc();
-		init_level_object(model->obj, LEVEL_OBJECT_SKELETAL_MODEL, transform, skeletalModels.size);
-		model->mesh = &mesh;
-		model->material = &material;
-		model->poseMatrices = poseMatrices;
-		skeletalModels.push_back(model);
-	}
-
 	void update(F32 dt) {
 		// I'll need to think up a decent animation system at some point
 		VKGeometry::set_skeletal_default_pose(testAnimPose, Resources::testAnimMesh);
@@ -337,11 +361,10 @@ Level level;
 
 void build_test_level() {
 	level.init();
-	level.add_static_model(Resources::testMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity());
-	level.add_skeletal_model(Resources::testAnimMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh));
-	level.add_static_model(Resources::cannonMesh, Resources::cannonMat, M4x3F{}.set_identity().translate(V3F{ 10.0F, 3.0F, 0.0F }));
-	level.add_static_model(Resources::matMesh, Resources::matMat, M4x3F{}.set_identity().translate(V3F{ -20.0F, 3.0F, 0.0F }));
-
+	level.add_object(&get_static_model(Resources::testMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity())->obj);
+	level.add_object(&get_skeletal_model(Resources::testAnimMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh))->obj);
+	level.add_object(&get_static_model(Resources::cannonMesh, Resources::cannonMat, M4x3F{}.set_identity().translate(V3F{ 10.0F, 3.0F, 0.0F }))->obj);
+	level.add_object(&get_static_model(Resources::matMesh, Resources::matMat, M4x3F{}.set_identity().translate(V3F{ -20.0F, 3.0F, 0.0F }))->obj);
 }
 
 }
