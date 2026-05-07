@@ -22,6 +22,23 @@ struct Material {
 	U32 packedARMI;
 };
 
+struct Light {
+	V3F pos;
+	V3F direction;
+	V3F color;
+	U32 packedCullRadiusAndType; // Normalized cull radius (*1024) in upper 30 bits and light type in bottom two bits
+};
+
+// See DOOM 2016's rendering presentations
+// Perhaps I'll try implementing DOOM Eternal's tile + cluster hybrid approach at some point, but this is easier for now
+struct ClusterBin {
+	U32 lightCount; // Would also have packed decal and reflection probe counts
+};
+
+struct ClusterItem {
+	U32 lightIdx; // Would also contain decal and reflection probe index
+};
+
 [block] struct DrawData {
 	V2F screenDimensions;
 	&V4F uiClipBoxes;
@@ -37,6 +54,11 @@ struct Material {
 	&V3F skinnedTangents;
 	&Material materials;
 	&Camera cams;
+	&Light lights;
+	&ClusterBin clusterBins;
+	&ClusterItem clusterItems;
+	V2F clusterScaleBias;
+	U32 lightCount;
 };
 
 [block] struct WorldDrawPushConstants {

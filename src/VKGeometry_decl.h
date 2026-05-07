@@ -5,6 +5,6 @@ struct StaticMesh;
 struct SkeletalMesh;
 struct GPUSkinnedModel;
 struct GeometryHandler;
-struct UniformMatricesHandler;
+struct UniformDataHandler;
 
 }

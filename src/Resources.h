@@ -47,6 +47,7 @@ VKGeometry::SkeletalAnimation rightHandCloseAnim;
 VKGeometry::SkeletalMesh leftHandMesh;
 VKGeometry::StaticMesh cannonMesh;
 VKGeometry::StaticMesh matMesh;
+VKGeometry::StaticMesh testSphere;
 
 Texture trowbridgeReitzBRDFLut;
 Texture specularCubemap;
@@ -77,6 +78,7 @@ void load_resources() {
 	leftHandMesh = load_dmf_skeletal_mesh("./resources/models/left_hand.dmf"a);
 	cannonMesh = load_dmf_static_mesh("resources/models/cannon.dmf"a);
 	matMesh = load_dmf_static_mesh("resources/models/mat.dmf"a);
+	testSphere = load_dmf_static_mesh("resources/models/test_sphere.dmf"a);
 	
 	load_dtf(&trowbridgeReitzBRDFLut, "./resources/textures/trowbridge_reitz_lut.dtf"a);
 	load_dtf(&specularCubemap, "./resources/textures/city_specular.dtf"a);

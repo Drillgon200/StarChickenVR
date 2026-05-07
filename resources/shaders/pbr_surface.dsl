@@ -47,12 +47,17 @@
 		dot(tangent, modelMat.row2.xyz)
 	};
 	Camera cam{ drawData.cams[camIdx + viewIdx] };
+	^passCamIdx = U32(camIdx + viewIdx);
 
 	F32 viewX{ dot(worldPos, cam.worldToView.row0) };
 	F32 viewY{ dot(worldPos, cam.worldToView.row1) };
 	F32 viewZ{ dot(worldPos, cam.worldToView.row2) };
+	^passDepth = -viewZ;
 	F32 nearPlane{ 0.05F };
-	^outPosition = V4F(viewX * cam.projXScale + viewZ * cam.projXZBias, -(viewY * cam.projYScale + viewZ * cam.projYZBias), nearPlane, -viewZ);
+	F32 clipX{ viewX * cam.projXScale + viewZ * cam.projXZBias };
+	F32 clipY{ -(viewY * cam.projYScale + viewZ * cam.projYZBias) };
+	^passNDC = V2F(clipX, clipY) / -viewZ;
+	^outPosition = V4F(clipX, clipY, nearPlane, -viewZ);
 	^passPosition = worldPos.xyz;
 	^passNormal = transformedNorm;
 	^passTangent = transformedTangent;
@@ -70,6 +75,9 @@
 &V3F passTangent;
 &V2F passTexCoord;
 &V3F passCamPos;
+[flat] &U32 passCamIdx;
+&F32 passDepth;
+&V2F passNDC;
 [flat] &U32 passObjId;
 
 #shader fragment
@@ -88,6 +96,16 @@
 [uniform, set 0, binding 6] &Image2DSampled[] textures;
 
 #include "pbr.dsi"
+
+@[U32 idx][U32 camIdx, V2F normalizedFragCoord, F32 depth, V2F clusterDepthScaleBias] get_cluster_idx{
+	U32 CLUSTER_RES_X{ 16u };
+	U32 CLUSTER_RES_Y{ 16u };
+	U32 CLUSTER_RES_Z{ 24u };
+	U32 x{ U32(F32(CLUSTER_RES_X) * normalizedFragCoord.x) };
+	U32 y{ U32(F32(CLUSTER_RES_Y) * normalizedFragCoord.y) };
+	U32 z{ min(U32(log2(depth) * clusterDepthScaleBias.x + clusterDepthScaleBias.y), CLUSTER_RES_Z - 1u) };
+	return ((camIdx * CLUSTER_RES_Z + z) * CLUSTER_RES_Y + y) * CLUSTER_RES_X + x;
+};
 
 [entrypoint] @[][] frag_main{
 	V3F camPos{ ^passCamPos };
@@ -134,6 +152,27 @@
 	V3F directLighting{ calculate_light_pbr(baseColor, V3F(1.0), fresnelReflectionFactor, lightDirection, fragToCam, normal, roughness, metalness) };
 
 	V3F finalColor{ directLighting + iblLighting };
+
+	/*
+	U32 clusterIdx{ get_cluster_idx(^passCamIdx, ^passNDC * 0.5 + 0.5, ^passDepth, drawData.clusterScaleBias) };
+	ClusterBin cluster{ drawData.clusterBins[clusterIdx] };
+	for U32 i{ 0u }; i < cluster.lightCount; i = i + 1u {
+		U32 MAX_ITEMS_PER_CLUSTER{ 256u };
+		U32 lightIdx{ drawData.clusterItems[clusterIdx * MAX_ITEMS_PER_CLUSTER + i].lightIdx };
+		Light light{ drawData.lights[lightIdx] };
+		F32 cullRadius{ F32(light.packedCullRadiusAndType >> 2u) / 1024.0 };
+		F32 falloff{ light_falloff(distance(worldPos, light.pos), cullRadius) };
+		V3F fragToLight{ normalize(light.pos - worldPos) };
+		finalColor = finalColor + falloff * light.color * calculate_light_pbr(baseColor, V3F(1.0), fresnelReflectionFactor, fragToLight, fragToCam, normal, roughness, metalness);
+	};
+	*/
+	for U32 lightIdx{ 0u }; lightIdx < drawData.lightCount; lightIdx = lightIdx + 1u {
+		Light light{ drawData.lights[lightIdx] };
+		F32 cullRadius{ F32(light.packedCullRadiusAndType >> 2u) / 1024.0 };
+		F32 falloff{ light_falloff(distance(worldPos, light.pos), cullRadius) };
+		V3F fragToLight{ normalize(light.pos - worldPos) };
+		finalColor = finalColor + falloff * light.color * calculate_light_pbr(baseColor, V3F(1.0), fresnelReflectionFactor, fragToLight, fragToCam, normal, roughness, metalness);
+	};
 
 	U32 RENDER_DEBUG_DISPLAY_PBR{ 0u };
 	U32 RENDER_DEBUG_DISPLAY_PBR_NO_TONEMAP{ 1u };

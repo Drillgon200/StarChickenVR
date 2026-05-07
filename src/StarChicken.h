@@ -128,7 +128,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 	}
 	UI::layout_boxes(VK::desktopSwapchainData.width, VK::desktopSwapchainData.height);
 	if (openxrFrameBeginInfo.shouldRender || isInEditorMode) {
-		Level::level.prepare_render_transforms();
+		Level::level.prepare_render();
 
 		DynamicVertexBuffer::Tessellator& tes = DynamicVertexBuffer::get_tessellator();
 		EditorUI::debug_render();
@@ -137,8 +137,26 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			editor3d->debug_render();
 			editor3d->ui3DDrawSet = tes.end_draw_set();
 		};
+		if (isInEditorMode) {
+			U32 camIdx = 0;
+			for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
+				if (editor3d->viewport.area() == 0.0F) {
+					editor3d->gpuCameraIndex = U32_MAX;
+				} else {
+					if (camIdx < VK::uniformDataHandler.maxCameras) {
+						editor3d->gpuCameraIndex = camIdx;
+						camIdx++;
+					} else {
+						editor3d->gpuCameraIndex = U32_MAX;
+					}
+				}
+			}
+		}
 
 		VkCommandBuffer cmdBuf = VK::graphicsCommandBuffer;
+
+		// Barrier before is not necessary because a CPU fence is waited on to ensure drawing is done before draw data updates
+		VK::update_draw_data_buffer(cmdBuf);
 
 		{ // Compute skinning
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::skinningPipeline);
@@ -153,16 +171,56 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 				VK::vkCmdPushConstants(cmdBuf, VK::skinningPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel), &gpuSkinnedModelData);
 				VK::vkCmdDispatch(cmdBuf, (model->mesh->geometry.verticesCount + 255) / 256, 1, 1);
 			}
+		}
 
-			VkBufferMemoryBarrier bufferBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-			bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			bufferBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-			bufferBarrier.srcQueueFamilyIndex = VK::graphicsFamily;
-			bufferBarrier.dstQueueFamilyIndex = VK::graphicsFamily;
-			bufferBarrier.buffer = VK::geometryHandler.buffer;
-			bufferBarrier.offset = VK::geometryHandler.skinnedPositionsOffset;
-			bufferBarrier.size = VK_WHOLE_SIZE;
-			VK::vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+		{ // Cull lights
+			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::clusterCullPipeline);
+			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::clusterCullPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
+			VK::ClusterCullPushConstants cullConstants{};
+			cullConstants.lightCount = VK::uniformDataHandler.lightOffset;
+			cullConstants.zNear = VK::CLUSTER_Z_NEAR;
+			cullConstants.zFar = VK::CLUSTER_Z_FAR;
+			if (isInEditorMode) {
+				for (EditorUI::PanelEditor3D* editor : EditorUI::renderPanels) {
+					if (editor->gpuCameraIndex == U32_MAX) {
+						continue;
+					}
+					cullConstants.camIdx = editor->gpuCameraIndex;
+					cullConstants.right = editor->projection.right;
+					cullConstants.left = editor->projection.left;
+					cullConstants.up = editor->projection.up;
+					cullConstants.down = editor->projection.down;
+					U32 subgroupSize = VK::physicalDeviceSubgroupProperties.subgroupSize;
+					U32 totalClusters = VK::CLUSTER_RES_X * VK::CLUSTER_RES_Y * VK::CLUSTER_RES_Z;
+					VK::vkCmdPushConstants(cmdBuf, VK::clusterCullPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VK::ClusterCullPushConstants), &cullConstants);
+					// Dispatch one subgroup per cluster
+					VK::vkCmdDispatch(cmdBuf, (totalClusters * subgroupSize + 127) / 128, 1, 1);
+				}
+			} else {
+				abort("Not implemented"a);
+			}
+		}
+
+		{ // Compute barriers
+			VkBufferMemoryBarrier skinBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+			skinBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			skinBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+			skinBarrier.srcQueueFamilyIndex = VK::graphicsFamily;
+			skinBarrier.dstQueueFamilyIndex = VK::graphicsFamily;
+			skinBarrier.buffer = VK::geometryHandler.buffer;
+			skinBarrier.offset = VK::geometryHandler.skinnedPositionsOffset;
+			skinBarrier.size = VK_WHOLE_SIZE;
+			VK::vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 0, nullptr, 1, &skinBarrier, 0, nullptr);
+
+			VkBufferMemoryBarrier clusterCullBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+			clusterCullBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			clusterCullBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			clusterCullBarrier.srcQueueFamilyIndex = VK::graphicsFamily;
+			clusterCullBarrier.dstQueueFamilyIndex = VK::graphicsFamily;
+			clusterCullBarrier.buffer = VK::clusterCullDataBuffer.buffer;
+			clusterCullBarrier.offset = 0;
+			clusterCullBarrier.size = VK_WHOLE_SIZE;
+			VK::vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 1, &clusterCullBarrier, 0, nullptr);
 		}
 
 		VK::img_barrier(cmdBuf, VK::attachments.color.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_NONE, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -220,37 +278,31 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 
 		{ // Draw world geometry
 			if (isInEditorMode) {
-				U32 camIdx = 0;
 				for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
-					if (editor3d->viewport.area()  == 0.0F) {
-						editor3d->gpuCameraIndex = U32_MAX;
+					if (editor3d->gpuCameraIndex == U32_MAX) {
 						continue;
 					}
-					if (camIdx < VK::uniformMatricesHandler.maxCameras) {
-						editor3d->gpuCameraIndex = camIdx;
-						viewport.x = editor3d->viewport.minX;
-						viewport.y = editor3d->viewport.minY;
-						viewport.width = editor3d->viewport.width();
-						viewport.height = editor3d->viewport.height();
-						VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
-						if (VK::hasCubemap) {
-							// Fill in background
-							VK::WorldDrawPushConstants backgroundPushConstants{};
-							backgroundPushConstants.camIdx = camIdx;
-							backgroundPushConstants.debugMode = VK::currentDebugDisplay;
-							VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
-							VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
-							VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
-						}
-						VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
-						VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
-						Level::level.draw_models(cmdBuf, camIdx);
-						tes.draw(tesWorldDebugDrawSet, camIdx);
-						tes.draw(editor3d->ui3DDrawSet, camIdx);
-					} else {
-						editor3d->gpuCameraIndex = U32_MAX;
+					viewport.x = editor3d->viewport.minX;
+					viewport.y = editor3d->viewport.minY;
+					viewport.width = editor3d->viewport.width();
+					viewport.height = editor3d->viewport.height();
+					VK::vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+					if (VK::hasCubemap) {
+						// Fill in background
+						VK::WorldDrawPushConstants backgroundPushConstants{};
+						backgroundPushConstants.camIdx = editor3d->gpuCameraIndex;
+						backgroundPushConstants.debugMode = VK::currentDebugDisplay;
+						VK_PUSH_STRUCT(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, backgroundPushConstants, 0);
+						VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::tmpBackgroundPipeline);
+						VK::vkCmdDraw(cmdBuf, 3, 1, 0, 0);
 					}
-					camIdx++;
+					VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
+					VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
+					EditorUI::PanelEditor3D* testCull = EditorUI::renderPanels[0];
+					M4x3F viewMat = testCull->editor.get_view_transform();
+					Level::level.draw_models(cmdBuf, editor3d->gpuCameraIndex, viewMat, testCull->projection);
+					tes.draw(tesWorldDebugDrawSet, editor3d->gpuCameraIndex);
+					tes.draw(editor3d->ui3DDrawSet, editor3d->gpuCameraIndex);
 				}
 			} else {
 				if (VK::hasCubemap) {
@@ -264,7 +316,9 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 				}
 				VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 				VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
-				Level::level.draw_models(cmdBuf, 0);
+				M4x3F viewMat{};
+				PerspectiveProjection projection{};
+				Level::level.draw_models(cmdBuf, 0, viewMat, projection);
 				tes.draw(tesWorldDebugDrawSet, 0);
 			}
 		}
@@ -414,20 +468,20 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			V3F rightCamPos = player.position + XR::xr_vec3_to_drillmath_vec3(openxrFrameBeginInfo.rightEyePose.position);
 			rightTransform.translate(-rightCamPos);
 
-			VK::uniformMatricesHandler.set_camera(0, leftTransform, leftProjection, leftCamPos);
-			VK::uniformMatricesHandler.set_camera(1, rightTransform, rightProjection, rightCamPos);
+			VK::uniformDataHandler.set_camera(0, leftTransform, leftProjection, leftCamPos);
+			VK::uniformDataHandler.set_camera(1, rightTransform, rightProjection, rightCamPos);
 		}
 	} else {
 		for (EditorUI::PanelEditor3D* editor3d : EditorUI::renderPanels) {
 			if (editor3d->gpuCameraIndex != U32_MAX) {
 				V3F camPos = editor3d->editor.get_render_eye_pos();
 				M4x3F32 view = editor3d->editor.get_view_transform();
-				VK::uniformMatricesHandler.set_camera(editor3d->gpuCameraIndex, view, editor3d->projection, camPos);
+				VK::uniformDataHandler.set_camera(editor3d->gpuCameraIndex, view, editor3d->projection, camPos);
 			}
 		}
 		
 	}
-	VK::uniformMatricesHandler.flush_memory();
+	VK::uniformDataHandler.flush_memory();
 
 	VK::end_frame(openxrFrameBeginInfo.shouldRender | isInEditorMode);
 	stackArena.stackPtr = stackArenaFrame0;

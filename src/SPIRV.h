@@ -716,6 +716,26 @@ enum ImageOperand {
 };
 typedef U32 ImageOperands;
 
+enum GroupOperation : U32 {
+	GROUP_OPERATION_REDUCE = 0,
+	GROUP_OPERATION_INCLUSIVE_SCAN = 1,
+	GROUP_OPERATION_EXCLUSIVE_SCAN = 2,
+	GROUP_OPERATION_CLUSTERED_REDUCE = 3,
+	GROUP_OPERATION_PARTITIONED_REDUCE_EXT = 4,
+	GROUP_OPERATION_PARTITIONED_INCLUSIVE_SCAN_EXT = 5,
+	GROUP_OPERATION_PARTITIONED_EXCLUSIVE_SCAN_EXT = 6
+};
+
+enum ExecutionScope : U32 {
+	EXECUTION_SCOPE_CROSS_DEVICE = 0,
+	EXECUTION_SCOPE_DEVICE = 1,
+	EXECUTION_SCOPE_WORKGROUP = 2,
+	EXECUTION_SCOPE_SUBGROUP = 3,
+	EXECUTION_SCOPE_INVOCATION = 4,
+	EXECUTION_SCOPE_QUEUE_FAMILY = 5,
+	EXECUTION_SCOPE_SHADER_CALL = 6
+};
+
 // Again ignoring the INTEL ones
 const U32 NUM_MEMORY_OPERANDS = 6;
 const U32 NUM_MEMORY_OPERANDS_WITH_ARGUMENT = 3;
@@ -1196,6 +1216,22 @@ void op_demote_to_helper_invocation(ArenaArrayList<SpvDword>& output) {
 	output.push_back(wordCount << 16 | opcode);
 }
 
+SpvId op_group_nonuniform_elect(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId subgroupScopeId) {
+	const U32 opcode = 333, wordCount = 4;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, subgroupScopeId);
+	return resultId;
+}
+SpvId op_group_nonuniform_ballot(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId subgroupScopeId, SpvId predicate) {
+	const U32 opcode = 339, wordCount = 5;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, subgroupScopeId, predicate);
+	return resultId;
+}
+SpvId op_group_nonuniform_ballot_bitcount(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultId, SpvId subgroupScopeId, GroupOperation groupOperation, SpvId value) {
+	const U32 opcode = 342, wordCount = 6;
+	output.push_back(wordCount << 16 | opcode, resultType, resultId, subgroupScopeId, groupOperation, value);
+	return resultId;
+}
+
 void op_decorate(ArenaArrayList<SpvDword>& output, SpvId target, Decoration decoration, U32* literals, U32 literalCount) {
 	const U32 opcode = 71, wordCount = 3 + literalCount;
 	output.push_back(wordCount << 16 | opcode, target, decoration);
@@ -1365,7 +1401,6 @@ SpvId op_ldexp(ArenaArrayList<SpvDword>& output, SpvId resultType, SpvId resultI
 	SpvId args[2]{ x, exp };
 	return op_ext_inst(output, resultType, resultId, glsl450InstructionSet, 53, args, 2);
 }
-
 
 
 }

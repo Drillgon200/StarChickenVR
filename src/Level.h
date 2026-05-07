@@ -59,7 +59,7 @@ struct Light {
 	V3F direction;
 	F32 brightness;
 	V3F color;
-	F32 range;
+	U32 gpuMatrixIdx;
 };
 
 struct Prefab {
@@ -134,6 +134,15 @@ SkeletalModel* get_skeletal_model(VKGeometry::SkeletalMesh& mesh, ResourceLoadin
 	model->material = &material;
 	model->poseMatrices = poseMatrices;
 	return model;
+}
+Light* get_light(LightType lightType, V3F pos, V3F color, F32 brightness, V3F direction = V3F{}) {
+	Light* light = lightAllocator.alloc();
+	init_level_object(light->obj, LEVEL_OBJECT_LIGHT, M4x3F{}.set_identity().add_offset(pos));
+	light->type = lightType;
+	light->brightness = brightness;
+	light->color = color;
+	light->direction = direction;
+	return light;
 }
 LevelObject* clone_object(LevelObject* obj) {
 	LevelObject* result = nullptr;
@@ -282,25 +291,25 @@ struct Level {
 		free_level_object(obj);
 	}
 
-	void prepare_render_transforms() {
+	void prepare_render() {
 		for (StaticModel* model : staticModels) {
 			if (model->obj.flags & LevelObject::INVISIBLE) {
 				continue;
 			}
-			model->gpuMatrixIdx = VK::uniformMatricesHandler.alloc(1);
+			model->gpuMatrixIdx = VK::uniformDataHandler.alloc_matrices(1);
 			if (model->gpuMatrixIdx != 0) {
-				VK::uniformMatricesHandler.matrixMemoryMapping[model->gpuMatrixIdx] = model->obj.transform;
+				VK::uniformDataHandler.matrixMemoryMapping[model->gpuMatrixIdx] = model->obj.transform;
 			}
 		}
 		for (SkeletalModel* model : skeletalModels) {
 			if (model->obj.flags & LevelObject::INVISIBLE) {
 				continue;
 			}
-			model->gpuMatrixIdx = VK::uniformMatricesHandler.alloc(1);
-			model->skeletonMatrixOffset = VK::uniformMatricesHandler.alloc(model->mesh->skeletonData->boneCount);
+			model->gpuMatrixIdx = VK::uniformDataHandler.alloc_matrices(1);
+			model->skeletonMatrixOffset = VK::uniformDataHandler.alloc_matrices(model->mesh->skeletonData->boneCount);
 			model->skinnedVerticesOffset = VK::geometryHandler.alloc_skinned_result(model->mesh->geometry.verticesCount);
 			if (model->gpuMatrixIdx != 0) {
-				VK::uniformMatricesHandler.matrixMemoryMapping[model->gpuMatrixIdx] = model->obj.transform;
+				VK::uniformDataHandler.matrixMemoryMapping[model->gpuMatrixIdx] = model->obj.transform;
 			}
 			if (model->skeletonMatrixOffset != 0) {
 				U32 boneCount = model->mesh->skeletonData->boneCount;
@@ -323,21 +332,40 @@ struct Level {
 					}
 				}
 				for (U32 i = 0; i < boneCount; i++) {
-					VK::uniformMatricesHandler.matrixMemoryMapping[model->skeletonMatrixOffset + i] = matrices[i];
+					VK::uniformDataHandler.matrixMemoryMapping[model->skeletonMatrixOffset + i] = matrices[i];
 				}
+			}
+		}
+		for (Light* light : lights) {
+			if (light->obj.flags & LevelObject::INVISIBLE) {
+				continue;
+			}
+			VK::GPULight gpuLight{};
+			gpuLight.pos = light->obj.transform.translation();
+			gpuLight.direction = light->direction;
+			gpuLight.color = light->color * light->brightness;
+			F32 desiredZeroBrightness = 0.01F;
+			F32 lightRadius = sqrtf32(max(max(light->color.x, light->color.y, light->color.z) * light->brightness / desiredZeroBrightness - 1.0F, 0.0F));
+			gpuLight.packedCullRadiusAndType = U32(clamp(lightRadius * 1024.0F, 0.0F, F32((1 << 30) - 1))) << 2 | U32(light->type);
+			VK::uniformDataHandler.alloc_light_and_set(gpuLight);
+			light->gpuMatrixIdx = VK::uniformDataHandler.alloc_matrices(1);
+			if (light->gpuMatrixIdx != 0) {
+				VK::uniformDataHandler.matrixMemoryMapping[light->gpuMatrixIdx] = light->obj.transform;
 			}
 		}
 	}
 
-	void draw_models(VkCommandBuffer cmdBuf, U32 camIdx) {
+	void draw_models(VkCommandBuffer cmdBuf, U32 camIdx, M4x3F& viewMat, PerspectiveProjection& projection) {
 		for (StaticModel* model : staticModels) {
 			if (model->obj.flags & LevelObject::INVISIBLE) {
 				continue;
 			}
-			U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
-			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx, VK::currentDebugDisplay };
-			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
-			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 0);
+			if (projection.intersects_sphere(viewMat * model->obj.transform.translation(), model->mesh->boundingBox.diag_length() * 0.5F)) {
+				U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
+				VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx, VK::currentDebugDisplay };
+				VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
+				VK::vkCmdDrawIndexed(cmdBuf, model->mesh->indicesCount, 1, model->mesh->indicesOffset, 0, 0);
+			}
 		}
 
 		for (SkeletalModel* model : skeletalModels) {
@@ -349,6 +377,13 @@ struct Level {
 			VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, -I32(model->skinnedVerticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx, VK::currentDebugDisplay };
 			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
 			VK::vkCmdDrawIndexed(cmdBuf, model->mesh->geometry.indicesCount, 1, model->mesh->geometry.indicesOffset, 0, 0);
+		}
+
+		for (Light* light : lights) {
+			U32 selectionObjId = light->obj.flags & LevelObject::SELECTED ? light->obj.id | 0x80000000u : light->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
+			VK::WorldDrawPushConstants modelInfo{ light->gpuMatrixIdx, I32(Resources::testSphere.verticesOffset + 1), camIdx, selectionObjId, Resources::simpleWhite.index, VK::currentDebugDisplay };
+			VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
+			VK::vkCmdDrawIndexed(cmdBuf, Resources::testSphere.indicesCount, 1, Resources::testSphere.indicesOffset, 0, 0);
 		}
 	}
 
@@ -367,6 +402,7 @@ void build_test_level() {
 	level.add_object(&get_skeletal_model(Resources::testAnimMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh))->obj);
 	level.add_object(&get_static_model(Resources::cannonMesh, Resources::cannonMat, M4x3F{}.set_identity().translate(V3F{ 10.0F, 3.0F, 0.0F }))->obj);
 	level.add_object(&get_static_model(Resources::matMesh, Resources::matMat, M4x3F{}.set_identity().translate(V3F{ -20.0F, 3.0F, 0.0F }))->obj);
+	level.add_object(&get_light(LIGHT_TYPE_POINT, V3F{ 0.0F, 5.0F, 0.0F }, V3F{ 1.0F, 0.0F, 1.0F }, 10.0F)->obj);
 }
 
 }

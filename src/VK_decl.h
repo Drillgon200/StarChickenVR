@@ -209,7 +209,7 @@ extern VkQueue computeQueue;
 
 extern VKStaging::GPUUploadStager graphicsStager;
 extern VKGeometry::GeometryHandler geometryHandler;
-extern VKGeometry::UniformMatricesHandler uniformMatricesHandler;
+extern VKGeometry::UniformDataHandler uniformDataHandler;
 
 extern B32 hasCubemap;
 
@@ -323,6 +323,28 @@ struct GPUCameraMatrices {
 	V3F position;
 	V3F direction;
 };
+struct GPULight {
+	V3F pos;
+	V3F direction;
+	V3F color;
+	U32 packedCullRadiusAndType; // Normalized cull radius (*1024) in upper 30 bits and light type in bottom two bits
+};
+struct GPUClusterBin {
+	U32 lightCount; // Would also have packed decal and reflection probe counts
+};
+struct GPUClusterItem {
+	U32 lightIdx; // Would also contain decal and reflection probe index
+};
+struct ClusterCullPushConstants {
+	U32 camIdx;
+	U32 lightCount;
+	F32 zNear;
+	F32 zFar;
+	F32 right;
+	F32 left;
+	F32 up;
+	F32 down;
+};
 struct WorldDrawPushConstants {
 	U32 transformIdx;
 	I32 verticesOffset;
@@ -358,6 +380,11 @@ struct DrawDataUniforms {
 	UPtr skinnedTangents;
 	UPtr materials;
 	UPtr cameras;
+	UPtr lights;
+	UPtr clusterBins;
+	UPtr clusterItems;
+	V2F clusterScaleBias;
+	U32 lightCount;
 };
 #pragma pack(pop)
 

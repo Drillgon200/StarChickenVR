@@ -2328,6 +2328,16 @@ struct PerspectiveProjection {
 	F32 yZBias;
 	F32 nearPlane;
 
+	F32 right;
+	F32 left;
+	F32 up;
+	F32 down;
+
+	V2F rightNormal;
+	V2F leftNormal;
+	V2F upNormal;
+	V2F downNormal;
+
 	// I decided to think about this intuitively for once instead of just copying some standard projection matrix diagram
 	// This is my thought process in case I have to debug it later
 	//
@@ -2370,7 +2380,7 @@ struct PerspectiveProjection {
 	// yScale = 1 / ((u - d) * 0.5)
 	// yZBias = (u + d) / (u - d)
 	// nearPlane = nearPlane
-	FINLINE PerspectiveProjection& project_perspective(F32 nearZ, F32 fovRight, F32 fovLeft, F32 fovUp, F32 fovDown) {
+	PerspectiveProjection& project_perspective(F32 nearZ, F32 fovRight, F32 fovLeft, F32 fovUp, F32 fovDown) {
 		F32 sinRight;
 		F32 cosRight = sincosf32(&sinRight, fovRight);
 		F32 rightX = sinRight / cosRight;
@@ -2388,10 +2398,24 @@ struct PerspectiveProjection {
 		yScale = 1.0F / ((upY - downY) * 0.5F);
 		yZBias = (upY + downY) / (upY - downY);
 		nearPlane = nearZ;
+
+		right = rightX;
+		left = leftX;
+		up = upY;
+		down = downY;
+
+		rightNormal = normalize(V2F{ rightX, 1.0F });
+		rightNormal = V2F{ rightNormal.y, -rightNormal.x };
+		leftNormal = normalize(V2F{ leftX, 1.0F });
+		leftNormal = V2F{ -leftNormal.y, leftNormal.x };
+		upNormal = normalize(V2F{ upY, 1.0F });
+		upNormal = V2F{ upNormal.y, -upNormal.x };
+		downNormal = normalize(V2F{ downY, 1.0F });
+		downNormal = V2F{ -downNormal.y, downNormal.x };
 		return *this;
 	}
 
-	FINLINE PerspectiveProjection& project_perspective(F32 nearZ, F32 fovX, F32 yToXRatio) {
+	PerspectiveProjection& project_perspective(F32 nearZ, F32 fovX, F32 yToXRatio) {
 		F32 sinRight;
 		F32 cosRight = sincosf32(&sinRight, fovX * 0.5F);
 		F32 rightX = sinRight / cosRight;
@@ -2403,6 +2427,20 @@ struct PerspectiveProjection {
 		yScale = 1.0F / ((upY - downY) * 0.5F);
 		yZBias = (upY + downY) / (upY - downY);
 		nearPlane = nearZ;
+
+		right = rightX;
+		left = leftX;
+		up = upY;
+		down = downY;
+
+		rightNormal = normalize(V2F{ rightX, 1.0F });
+		rightNormal = V2F{ rightNormal.y, -rightNormal.x };
+		leftNormal = normalize(V2F{ leftX, 1.0F });
+		leftNormal = V2F{ -leftNormal.y, leftNormal.x };
+		upNormal = normalize(V2F{ upY, 1.0F });
+		upNormal = V2F{ upNormal.y, -upNormal.x };
+		downNormal = normalize(V2F{ downY, 1.0F });
+		downNormal = V2F{ -downNormal.y, downNormal.x };
 		return *this;
 	}
 
@@ -2419,6 +2457,18 @@ struct PerspectiveProjection {
 		F32 y = vec.y / invZ;
 		F32 z = -1.0F / invZ;
 		return V3F{ (x - z * xZBias) / xScale, (y - z * yZBias) / yScale, z };
+	}
+
+	bool intersects_sphere(V3F spherePos, F32 radius) {
+		// Check all 5 planes
+		// This isn't fully accurate, but it is conservative, cheap, and easy
+		bool intersects =
+			spherePos.z + nearPlane <= radius &&
+			dot(upNormal, V2F{ spherePos.y, -spherePos.z }) <= radius &&
+			dot(downNormal, V2F{ spherePos.y, -spherePos.z }) <= radius &&
+			dot(rightNormal, V2F{ spherePos.x, -spherePos.z }) <= radius &&
+			dot(leftNormal, V2F{ spherePos.x, -spherePos.z }) <= radius;
+		return intersects;
 	}
 };
 

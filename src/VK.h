@@ -15,6 +15,15 @@ namespace VK {
 const StrA SHADER_SPV_DIR = "./resources/shaders/spv/"a;
 const StrA SHADER_SRC_DIR = "./resources/shaders/"a;
 
+
+U32 MAX_CAMERAS = 32;
+const U32 CLUSTER_RES_X = 16;
+const U32 CLUSTER_RES_Y = 16;
+const U32 CLUSTER_RES_Z = 24;
+const U32 MAX_ITEMS_PER_CLUSTER = 256;
+const F32 CLUSTER_Z_NEAR = 0.05F;
+const F32 CLUSTER_Z_FAR = 1000.0F;
+
 #define VK_ENABLE_VIL 0
 #define VK_ENABLE_VALIDATION_LAYERS 1
 #define VK_ENABLE_VALIDATION_GPU_ASSISTED 0
@@ -58,6 +67,7 @@ VkDebugUtilsMessengerEXT messenger;
 VkPhysicalDevice physicalDevice;
 VkDevice logicalDevice;
 
+VkPhysicalDeviceSubgroupProperties physicalDeviceSubgroupProperties;
 VkPhysicalDeviceProperties physicalDeviceProperties;
 
 U32 graphicsFamily;
@@ -85,8 +95,11 @@ U32 currentFrameInFlight;
 
 VKStaging::GPUUploadStager graphicsStager;
 VKGeometry::GeometryHandler geometryHandler;
-VKGeometry::UniformMatricesHandler uniformMatricesHandler;
+VKGeometry::UniformDataHandler uniformDataHandler;
 DedicatedBuffer drawDataUniformBuffer;
+DedicatedBuffer clusterCullDataBuffer;
+VkDeviceAddress clusterBinGPUAddress;
+VkDeviceAddress clusterItemGPUAddress;
 
 struct {
 	DedicatedImage color;
@@ -132,6 +145,8 @@ VkPipeline debugLinesPipeline;
 VkPipeline debugLinesNoDepthPipeline;
 VkPipeline debugPointsPipeline;
 VkPipeline tmpBackgroundPipeline;
+VkPipelineLayout clusterCullPipelineLayout;
+VkPipeline clusterCullPipeline;
 VkPipelineLayout skinningPipelineLayout;
 VkPipeline skinningPipeline;
 VkPipelineLayout cubemapComputePipelineLayout;
@@ -718,7 +733,13 @@ void init_vulkan(bool useXR) {
 	abort("Physical device did not have a graphics, transfer, and compute capable queue!");
 allNecessaryQueuesPresent:;
 
-	vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
+	physicalDeviceSubgroupProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+	physicalDeviceSubgroupProperties.pNext = VK_NULL_HANDLE;
+	VkPhysicalDeviceProperties2 deviceProperties2;
+	deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+	deviceProperties2.pNext = &physicalDeviceSubgroupProperties;
+	vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
+	physicalDeviceProperties = deviceProperties2.properties;
 
 	F32 queuePriority = 1.0F;
 	VkDeviceQueueCreateInfo queueCreateInfos[3]{};
@@ -870,9 +891,20 @@ allNecessaryQueuesPresent:;
 		abort("Did not have required vulkan memory types\n");
 	}
 	
+	if (StarChicken::isInEditorMode) {
+		MAX_CAMERAS = 16;
+	} else {
+		// Two VR eyes + potential full camera eye
+		MAX_CAMERAS = 3;
+	}
+
 	graphicsStager.init(graphicsQueue, graphicsFamily);
 	geometryHandler.init(128 * MEGABYTE);
-	uniformMatricesHandler.init(2 * MEGABYTE, 4096);
+	uniformDataHandler.init(50000, MAX_CAMERAS, 4096);
+	// Not sure if it would be better to do one culling data structure for both eyes or a different one per eye
+	clusterCullDataBuffer.create(CLUSTER_RES_X * CLUSTER_RES_Y * CLUSTER_RES_Z * (sizeof(GPUClusterBin) + sizeof(GPUClusterItem) * MAX_ITEMS_PER_CLUSTER) * MAX_CAMERAS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, deviceMemoryTypeIndex);
+	clusterBinGPUAddress = clusterCullDataBuffer.gpuAddress;
+	clusterItemGPUAddress = clusterCullDataBuffer.gpuAddress + CLUSTER_RES_X * CLUSTER_RES_Y * CLUSTER_RES_Z * sizeof(GPUClusterBin) * MAX_CAMERAS;
 
 	VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -881,7 +913,7 @@ allNecessaryQueuesPresent:;
 
 	desktopSwapchainData.create(Win32::framebufferWidth, Win32::framebufferHeight, VK_NULL_HANDLE);
 
-	drawDataUniformBuffer.create(sizeof(DrawDataUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK::deviceMemoryTypeIndex);
+	drawDataUniformBuffer.create(sizeof(DrawDataUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, deviceMemoryTypeIndex);
 	DynamicVertexBuffer::init();
 }
 
@@ -1899,6 +1931,12 @@ void load_pipelines_and_descriptors() {
 	GraphicsPipelineBuilder{}.init(drawPipelineLayout, RENDER_PASS_WORLD, "background"a).depth_test(false).depth_write(false).build(&tmpBackgroundPipeline);
 
 	PipelineLayoutBuilder{}.set_default()
+		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ClusterCullPushConstants))
+		.set_layout(drawDataDescriptorSet.setLayout)
+		.build(&clusterCullPipelineLayout);
+	build_compute_pipeline(&clusterCullPipeline, "cluster_cull"a, clusterCullPipelineLayout);
+
+	PipelineLayoutBuilder{}.set_default()
 		.push_constant(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VKGeometry::GPUSkinnedModel))
 		.set_layout(drawDataDescriptorSet.setLayout)
 		.build(&skinningPipelineLayout);
@@ -2014,7 +2052,7 @@ void update_draw_data_buffer(VkCommandBuffer cmdBuf) {
 	drawData.screenDimensions = V2F{ F32(attachments.mainWidth), F32(attachments.mainHeight) };
 	drawData.uiClipBoxes = UI::clipBoxBuffers[currentFrameInFlight].gpuAddress;
 	drawData.uiVertices = DynamicVertexBuffer::get_gpu_address(DynamicVertexBuffer::get_tessellator());
-	drawData.matrices = uniformMatricesHandler.gpuAddress;
+	drawData.matrices = uniformDataHandler.gpuAddress;
 	drawData.positions = geometryHandler.gpuAddress + geometryHandler.positionsOffset;
 	drawData.texcoords = geometryHandler.gpuAddress + geometryHandler.texcoordsOffset;
 	drawData.normals = geometryHandler.gpuAddress + geometryHandler.normalsOffset;
@@ -2024,7 +2062,17 @@ void update_draw_data_buffer(VkCommandBuffer cmdBuf) {
 	drawData.skinnedNormals = geometryHandler.gpuAddress + geometryHandler.skinnedNormalsOffset;
 	drawData.skinnedTangents = geometryHandler.gpuAddress + geometryHandler.skinnedTangentsOffset;
 	drawData.materials = ResourceLoading::get_materials_gpu_address();
-	drawData.cameras = uniformMatricesHandler.camerasGPUAddress;
+	drawData.cameras = uniformDataHandler.camerasGPUAddress;
+	drawData.lights = uniformDataHandler.lightsGPUAddress;
+	drawData.clusterBins = clusterBinGPUAddress;
+	drawData.clusterItems = clusterItemGPUAddress;
+	// This is calculated by solving the exponential depth equation, near * (far / near) ^ (slice / zSlices) = depth
+	// slice = zSlices * log2(depth / near) / log2(far / near)
+	// slice = zSlices * (log2(depth) - log2(near)) / log2(far / near)
+	// slice = (zSlices / log2(far / near)) * log2(depth) - zSlices * log2(near) / log2(far / near)
+	// slice = scale * log2(depth) + bias
+	drawData.clusterScaleBias = V2F{ F32(CLUSTER_RES_Z) / log2f32(CLUSTER_Z_FAR / CLUSTER_Z_NEAR), -F32(CLUSTER_RES_Z) * log2f32(CLUSTER_Z_NEAR) / log2f32(CLUSTER_Z_FAR / CLUSTER_Z_NEAR) };
+	drawData.lightCount = uniformDataHandler.lightOffset;
 
 	vkCmdUpdateBuffer(cmdBuf, drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms), &drawData);
 
@@ -2086,11 +2134,8 @@ FrameBeginResult begin_frame() {
 	cmdBufInfo.pInheritanceInfo = nullptr;
 	CHK_VK(vkBeginCommandBuffer(graphicsCommandBuffer, &cmdBufInfo));
 	
-	// Barrier before is not necessary because a CPU fence is waited on to ensure drawing is done before draw data updates
-	update_draw_data_buffer(graphicsCommandBuffer);
-
 	geometryHandler.reset_skinned_results();
-	uniformMatricesHandler.reset();
+	uniformDataHandler.reset();
 	return FRAME_BEGIN_RESULT_CONTINUE;
 }
 
@@ -2197,11 +2242,12 @@ void end_frame(bool shouldRender) {
 
 void end_vulkan() {
 	desktopSwapchainData.destroy();
-	uniformMatricesHandler.destroy();
+	uniformDataHandler.destroy();
 	geometryHandler.destroy();
 	ResourceLoading::destroy_materials();
 	ResourceLoading::cleanup_textures();
 	DynamicVertexBuffer::destroy();
+	clusterCullDataBuffer.destroy();
 	drawDataUniformBuffer.destroy();
 	graphicsStager.destroy();
 	vkDestroyFence(logicalDevice, geometryCullAndDrawFence, nullptr);

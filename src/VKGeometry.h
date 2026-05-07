@@ -213,30 +213,36 @@ struct GeometryHandler {
 	}
 };
 
-struct UniformMatricesHandler {
+struct UniformDataHandler {
 	VkDeviceMemory memory;
 	VkBuffer buffer;
 	M4x3F32* matrixMemoryMapping;
 	VK::GPUCameraMatrices* camerasMemoryMapping;
+	VK::GPULight* lightsMemoryMapping;
 	VkDeviceAddress gpuAddress;
 	// Cameras also store some other stuff
 	VkDeviceAddress camerasGPUAddress;
+	VkDeviceAddress lightsGPUAddress;
 	U32 maxMatrices;
 	U32 maxCameras;
+	U32 maxLights;
 	// Matrix is always at least 3. The first matrix is the identity matrix and the next two are eye matrices
 	U32 matrixOffset;
-	
+	U32 lightOffset;
 
-	void init(U32 matrixBytes, U32 cameraBytes) {
-		ASSERT(matrixBytes >= 4096, "Needs at least 4k of matrix data"a);
-		ASSERT(cameraBytes >= sizeof(VK::GPUCameraMatrices), "Needs at least one camera"a);
-		maxMatrices = matrixBytes / sizeof(M4x3F32);
-		maxCameras = cameraBytes / sizeof(VK::GPUCameraMatrices);
+	void init(U32 matrixCount, U32 cameraCount, U32 lightCount) {
+		DEBUG_ASSERT(matrixCount > 3, "Needs more than 3 matrices"a);
+		maxMatrices = matrixCount;
+		maxCameras = cameraCount;
+		maxLights = lightCount;
 		matrixOffset = 3;
+
+		U32 cameraOffset = ALIGN_HIGH(matrixCount * sizeof(M4x3F32), 16);
+		U32 lightOffset = cameraOffset + ALIGN_HIGH(cameraCount * sizeof(VK::GPUCameraMatrices), 16);
 
 		VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 		bufferInfo.flags = 0;
-		bufferInfo.size = matrixBytes + cameraBytes;
+		bufferInfo.size = lightOffset + lightCount * sizeof(VK::GPULight);
 		bufferInfo.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		bufferInfo.queueFamilyIndexCount = 0;
@@ -256,12 +262,14 @@ struct UniformMatricesHandler {
 		CHK_VK(VK::vkAllocateMemory(VK::logicalDevice, &allocInfo, nullptr, &memory));
 		CHK_VK(VK::vkBindBufferMemory(VK::logicalDevice, buffer, memory, 0));
 		CHK_VK(VK::vkMapMemory(VK::logicalDevice, memory, 0, VK_WHOLE_SIZE, 0, (void**)&matrixMemoryMapping));
-		camerasMemoryMapping = (VK::GPUCameraMatrices*)((char*)matrixMemoryMapping + matrixBytes);
+		camerasMemoryMapping = (VK::GPUCameraMatrices*)((char*)matrixMemoryMapping + cameraOffset);
+		lightsMemoryMapping = (VK::GPULight*)((char*)matrixMemoryMapping + lightOffset);
 
 		VkBufferDeviceAddressInfo addressInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
 		addressInfo.buffer = buffer;
 		gpuAddress = VK::vkGetBufferDeviceAddress(VK::logicalDevice, &addressInfo);
-		camerasGPUAddress = gpuAddress + matrixBytes;
+		camerasGPUAddress = gpuAddress + cameraOffset;
+		lightsGPUAddress = gpuAddress + lightOffset;
 
 		matrixMemoryMapping[0] = M4x3F32{}.set_identity();
 	}
@@ -271,7 +279,7 @@ struct UniformMatricesHandler {
 		VK::vkFreeMemory(VK::logicalDevice, memory, nullptr);
 	}
 
-	U32 alloc_and_set(U32 numMatrices, M4x3F32* matrices) {
+	U32 alloc_matrices_and_set(U32 numMatrices, M4x3F32* matrices) {
 		U32 offset = matrixOffset;
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
@@ -286,7 +294,7 @@ struct UniformMatricesHandler {
 		return offset;
 	}
 
-	U32 alloc(U32 numMatrices) {
+	U32 alloc_matrices(U32 numMatrices) {
 		U32 offset = matrixOffset;
 		matrixOffset += numMatrices;
 		if (matrixOffset > maxMatrices) {
@@ -310,6 +318,12 @@ struct UniformMatricesHandler {
 		camerasMemoryMapping[idx] = cam;
 	}
 
+	void alloc_light_and_set(const VK::GPULight& light) {
+		if (lightOffset < maxLights) {
+			lightsMemoryMapping[lightOffset++] = light;
+		}	
+	}
+
 	void flush_memory() {
 		if (!(VK::deviceHostMappedMemoryFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
 			VkMappedMemoryRange memoryRange{ VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };
@@ -323,6 +337,7 @@ struct UniformMatricesHandler {
 	void reset() {
 		// First matrix is always the identity matrix
 		matrixOffset = 1;
+		lightOffset = 0;
 	}
 };
 

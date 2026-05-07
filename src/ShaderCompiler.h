@@ -408,6 +408,10 @@ struct EnabledExtensions {
 	Flags32 sampledImageArrayNonUniformIndexing : 1;
 	Flags32 demoteToHelperInvocation : 1;
 	Flags32 storageImageExtendedFormats : 1;
+	Flags32 groupNonUniform : 1;
+	Flags32 subgroupVote : 1;
+	Flags32 subgroupArithmetic : 1;
+	Flags32 subgroupBallot : 1;
 };
 
 struct DSLCompileError {
@@ -1598,6 +1602,9 @@ struct DSLCompiler {
 			TCId rightHandSide = TC_INVALID_ID;
 			if (binaryOp != TOKEN_DOUBLE_BAR && binaryOp != TOKEN_DOUBLE_AMPERSAND && binaryOp != TOKEN_QUESTION_MARK) {
 				rightHandSide = parse_expression(precedence);
+				if (rightHandSide == TC_INVALID_ID) {
+					parse_error("Must have right hand expression for binary operator"a);
+				}
 			}
 
 			switch (binaryOp) {
@@ -1698,10 +1705,15 @@ struct DSLCompiler {
 						BuiltIn builtIn =
 							builtinName == "Position"a ? BUILTIN_POSITION :
 							builtinName == "VertexIndex"a ? BUILTIN_VERTEX_INDEX :
-							builtinName == "ViewIndex"a ? BUILTIN_VIEW_INDEX :
+							builtinName == "ViewIndex"a ? enabledExtensions.multiview = true, BUILTIN_VIEW_INDEX :
 							builtinName == "FragCoord"a ? BUILTIN_FRAG_COORD :
 							builtinName == "FragDepth"a ? BUILTIN_FRAG_DEPTH :
 							builtinName == "GlobalInvocationId"a ? BUILTIN_GLOBAL_INVOCATION_ID :
+							builtinName == "WorkgroupId"a ? BUILTIN_WORKGROUP_ID :
+							builtinName == "InvocationsPerSubgroup"a ? enabledExtensions.subgroupBallot = true, BUILTIN_SUBGROUP_SIZE :
+							builtinName == "InvocationIdWithinSubgroup"a ? enabledExtensions.subgroupBallot = true, BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID :
+							builtinName == "NumSubgroupsPerWorkgroup"a ? enabledExtensions.groupNonUniform = true, BUILTIN_NUM_SUBGROUPS :
+							builtinName == "SubgroupIdWithinWorkgroup"a ? enabledExtensions.groupNonUniform = true, BUILTIN_SUBGROUP_ID :
 							builtinName == "PointSize"a ? BUILTIN_POINT_SIZE :
 							(parse_error("Invalid builtin"a), BuiltIn(0));
 
@@ -1919,6 +1931,12 @@ struct DSLCompiler {
 	SpvId* unaryArgTypes = arena->alloc<SpvId>(1);\
 	unaryArgTypes[0] = argType;\
 	ProcedureType signature{ ProcedureIdentifier{ opName, unaryArgTypes, 1 }, resultTypePtr };\
+	scope.procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {\
+		code\
+	} }));\
+}
+#define ADD_MULTI_OP_NULLARY_OPERATOR(opName, resultTypePtr, code) {\
+	ProcedureType signature{ ProcedureIdentifier{ opName, nullptr, 0 }, resultTypePtr };\
 	scope.procedureIdentifierToProcedure.insert(signature.identifier, &(*arena->alloc<Procedure>(1) = Procedure{ signature, nullptr, nullptr, SPV_NULL_ID, [](ArenaArrayList<SpvDword>& codeOutput, Procedure& proc, DSLCompiler& compiler, SpvDword* params) -> SpvId {\
 		code\
 	} }));\
@@ -2350,6 +2368,19 @@ struct DSLCompiler {
 			return (op_ldexp(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.glsl450InstructionSet, params[1], params[0])); \
 		);
 
+		ADD_MULTI_OP_NULLARY_OPERATOR("subgroup_elect"a, boolType, \
+			return (op_group_nonuniform_elect(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.spv_literal_index(EXECUTION_SCOPE_SUBGROUP))); \
+		);
+		ADD_MULTI_OP_UNARY_OPERATOR("subgroup_ballot"a, &v4u32Type->type, boolId, \
+			return (op_group_nonuniform_ballot(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.spv_literal_index(EXECUTION_SCOPE_SUBGROUP), params[0])); \
+		);
+		ADD_MULTI_OP_UNARY_OPERATOR("subgroup_ballot_bitcount"a, u32Type, v4u32Id, \
+			return (op_group_nonuniform_ballot_bitcount(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.spv_literal_index(EXECUTION_SCOPE_SUBGROUP), GROUP_OPERATION_REDUCE, params[0])); \
+		);
+		ADD_MULTI_OP_UNARY_OPERATOR("subgroup_ballot_exclusive_bitcount"a, u32Type, v4u32Id, \
+			return (op_group_nonuniform_ballot_bitcount(codeOutput, proc.signature.returnType->id, compiler.nextSpvId++, compiler.spv_literal_index(EXECUTION_SCOPE_SUBGROUP), GROUP_OPERATION_EXCLUSIVE_SCAN, params[0])); \
+		);
+
 		Type* samplerType = defaultTypeSampler = arena->zalloc<Type>(1);
 		samplerType->typeClass = TYPE_CLASS_SAMPLER;
 		samplerType->typeName = "Sampler"a;
@@ -2371,6 +2402,7 @@ struct DSLCompiler {
 #undef ADD_MULTI_OP_TERNARY_OPERATOR
 #undef ADD_MULTI_OP_BINARY_OPERATOR
 #undef ADD_MULTI_OP_UNARY_OPERATOR
+#undef ADD_MULTI_OP_NULLARY_OPERATOR
 #undef ADD_SINGLE_OP_BINARY_OPERATOR
 #undef ADD_SINGLE_OP_UNARY_OPERATOR
 	}
@@ -4441,6 +4473,10 @@ struct DSLCompiler {
 
 		op_capability(finalCode, CAPABILITY_SHADER);
 		op_capability(finalCode, CAPABILITY_VULKAN_MEMORY_MODEL);
+		if (enabledExtensions.shaderNonUniform) {
+			// I'm not sure when I wouldn't want this if I'm using nonuniform
+			enabledExtensions.sampledImageArrayNonUniformIndexing = true;
+		}
 		if (enabledExtensions.multiview)                           op_capability(finalCode, CAPABILITY_MULTIVIEW);
 		if (enabledExtensions.physicalStorageBuffer)               op_capability(finalCode, CAPABILITY_PHYSICAL_STORAGE_BUFFER_ADDRESSES);
 		if (enabledExtensions.runtimeDescriptorArray)              op_capability(finalCode, CAPABILITY_RUNTIME_DESCRIPTOR_ARRAY);
@@ -4448,6 +4484,10 @@ struct DSLCompiler {
 		if (enabledExtensions.sampledImageArrayNonUniformIndexing) op_capability(finalCode, CAPABILITY_SAMPLED_IMAGE_ARRAY_NON_UNIFORM_INDEXING);
 		if (enabledExtensions.demoteToHelperInvocation)            op_capability(finalCode, CAPABILITY_DEMOTE_TO_HELPER_INVOCATION);
 		if (enabledExtensions.storageImageExtendedFormats)         op_capability(finalCode, CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS);
+		if (enabledExtensions.groupNonUniform)                     op_capability(finalCode, CAPABILITY_GROUP_NON_UNIFORM);
+		if (enabledExtensions.subgroupVote)                        op_capability(finalCode, CAPABILITY_GROUP_NON_UNIFORM_VOTE);
+		if (enabledExtensions.subgroupArithmetic)                  op_capability(finalCode, CAPABILITY_GROUP_NON_UNIFORM_ARITHMETIC);
+		if (enabledExtensions.subgroupBallot)                      op_capability(finalCode, CAPABILITY_GROUP_NON_UNIFORM_BALLOT);
 
 		if (enabledExtensions.multiview) op_extension(finalCode, "SPV_KHR_multiview"a);
 

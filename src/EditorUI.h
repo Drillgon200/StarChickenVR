@@ -1307,6 +1307,7 @@ void RotateWidget::draw(PanelEditor3D* editor3D, DynamicVertexBuffer::Tessellato
 }
 
 struct PanelMaterialEditor {
+	F64 brightness;
 	void init() {
 	}
 	void destroy() {
@@ -1318,14 +1319,21 @@ struct PanelMaterialEditor {
 				workingBox->padding = 4.0F;
 				spacer(24.0F);
 				Box* picker = color_picker().unsafeBox;
-				set_color_consumer_box_callback(picker, [](V4F color) {
+				set_color_consumer_box_callback(picker, [this](V4F color) {
 					Level::LevelObject* obj = Level::level.activeObject;
-					if (obj && (obj->type == Level::LEVEL_OBJECT_STATIC_MODEL || obj->type == Level::LEVEL_OBJECT_SKELETAL_MODEL)) {
-						ResourceLoading::Material* mat = obj->type == Level::LEVEL_OBJECT_STATIC_MODEL ? ((Level::StaticModel*)obj)->material : ((Level::SkeletalModel*)obj)->material;
-						mat->color = color;
-						mat->invalidate();
+					if (obj) {
+						if (obj->type == Level::LEVEL_OBJECT_STATIC_MODEL || obj->type == Level::LEVEL_OBJECT_SKELETAL_MODEL) {
+							ResourceLoading::Material* mat = obj->type == Level::LEVEL_OBJECT_STATIC_MODEL ? ((Level::StaticModel*)obj)->material : ((Level::SkeletalModel*)obj)->material;
+							mat->color = color;
+							mat->invalidate();
+						} else if (obj->type == Level::LEVEL_OBJECT_LIGHT) {
+							Level::Light* light = (Level::Light*)obj;
+							light->color = V3F{ color.x, color.y, color.z };
+							light->brightness = brightness;
+						}
 					}
 				});
+				slider_f64(&brightness, 10.0, 0.0, 1000.0, 1.0, false);
 			}
 		}
 	}
@@ -1755,7 +1763,7 @@ void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
 	VK::DedicatedImage iconDepthBuffer = VK::create_dedicated_image(VK_FORMAT_D32_SFLOAT, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
 	VK::img_barrier(cmdBuf.buf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-	VK::uniformMatricesHandler.set_camera(0, M4x3F{}.set_identity(), PerspectiveProjection{}.project_perspective(PROJECTION_NEAR_PLANE, 0.25F, 1.0F), V3F{});
+	VK::uniformDataHandler.set_camera(0, M4x3F{}.set_identity(), PerspectiveProjection{}.project_perspective(PROJECTION_NEAR_PLANE, 0.25F, 1.0F), V3F{});
 
 	for (U32 i = 0; i < prefabCount; i++) {
 		ResourceLoading::Texture* tex = globalArena.alloc<ResourceLoading::Texture>(1);
@@ -1807,7 +1815,7 @@ void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
 				Level::StaticModel* model = (Level::StaticModel*)obj;
 				M4x3F transform = model->obj.transform;
 				transform.add_offset(-camPos);
-				U32 matrixIdx = VK::uniformMatricesHandler.alloc_and_set(1, &transform);
+				U32 matrixIdx = VK::uniformDataHandler.alloc_matrices_and_set(1, &transform);
 				VK::WorldDrawPushConstants pushConstants{};
 				pushConstants.transformIdx = matrixIdx;
 				pushConstants.verticesOffset = model->mesh->verticesOffset;
@@ -1825,7 +1833,7 @@ void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
 		prefab->icon = tex;
 	}
 
-	VK::uniformMatricesHandler.flush_memory();
+	VK::uniformDataHandler.flush_memory();
 	VK::end_tmp_cmd_buf(cmdBuf);
 
 	VK::destroy_dedicated_image(iconDepthBuffer);
