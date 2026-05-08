@@ -162,7 +162,16 @@ LevelObject* clone_object(LevelObject* obj) {
 	return result;
 }
 
-void make_static_model_prefab(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& mat) {
+Prefab* make_prefab(LevelObject** objects, U32 objectCount) {
+	Prefab* prefab = globalArena.zalloc<Prefab>(1);
+	prefab->objectCount = objectCount;
+	prefab->objects = objects;
+	calc_prefab_bounding_box(prefab);
+	allPrefabs.push_back(prefab);
+	return prefab;
+}
+
+Prefab* make_static_model_prefab(VKGeometry::StaticMesh& mesh, ResourceLoading::Material& mat) {
 	LevelObject* meshObject = &get_static_model(mesh, mat, M4x3F{}.set_identity())->obj;
 	Prefab* prefab = globalArena.zalloc<Prefab>(1);
 	prefab->objectCount = 1;
@@ -170,7 +179,9 @@ void make_static_model_prefab(VKGeometry::StaticMesh& mesh, ResourceLoading::Mat
 	prefab->objects[0] = meshObject;
 	calc_prefab_bounding_box(prefab);
 	allPrefabs.push_back(prefab);
+	return prefab;
 }
+
 void make_default_prefabs() {
 	make_static_model_prefab(Resources::testMesh, Resources::basicWhiteMaterial);
 	make_static_model_prefab(Resources::cannonMesh, Resources::cannonMat);
@@ -266,7 +277,7 @@ struct Level {
 		}
 	}
 
-	void add_object(LevelObject* obj) {
+	LevelObject* add_object(LevelObject* obj) {
 		DEBUG_ASSERT(!idToLevelObject.contains(obj->id), "Object cannot be added twice"a);
 		idToLevelObject.insert(obj->id, obj);
 		switch (obj->type) {
@@ -284,6 +295,7 @@ struct Level {
 		} break;
 		default: abort("Unknown object type"a); break;
 		}
+		return obj;
 	}
 
 	void free_object(LevelObject* obj) {
@@ -360,7 +372,8 @@ struct Level {
 			if (model->obj.flags & LevelObject::INVISIBLE) {
 				continue;
 			}
-			if (projection.intersects_sphere(viewMat * model->obj.transform.translation(), model->mesh->boundingBox.diag_length() * 0.5F)) {
+			V3F center = model->obj.transform * model->mesh->boundingBox.midpoint();
+			if (projection.intersects_sphere(viewMat * center, model->mesh->boundingBox.diag_length() * 0.5F)) {
 				U32 selectionObjId = model->obj.flags & LevelObject::SELECTED ? model->obj.id | 0x80000000u : model->obj.id; // high bit set in the id buffer indicates this object is selected (used for selection outline)
 				VK::WorldDrawPushConstants modelInfo{ model->gpuMatrixIdx, I32(model->mesh->verticesOffset + 1), camIdx, selectionObjId, model->material->gpuIdx, VK::currentDebugDisplay };
 				VK::vkCmdPushConstants(cmdBuf, VK::drawPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VK::WorldDrawPushConstants), &modelInfo);
@@ -402,6 +415,7 @@ void build_test_level() {
 	level.add_object(&get_skeletal_model(Resources::testAnimMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh))->obj);
 	level.add_object(&get_static_model(Resources::cannonMesh, Resources::cannonMat, M4x3F{}.set_identity().translate(V3F{ 10.0F, 3.0F, 0.0F }))->obj);
 	level.add_object(&get_static_model(Resources::matMesh, Resources::matMat, M4x3F{}.set_identity().translate(V3F{ -20.0F, 3.0F, 0.0F }))->obj);
+	level.add_object(&get_static_model(Resources::seag, Resources::seagMat, M4x3F{}.set_identity().translate(V3F{ -10.0F, 5.0F, 0.0F }))->obj);
 	level.add_object(&get_light(LIGHT_TYPE_POINT, V3F{ 0.0F, 5.0F, 0.0F }, V3F{ 1.0F, 0.0F, 1.0F }, 10.0F)->obj);
 }
 

@@ -332,7 +332,8 @@ enum EditorCmdType {
 	EDITOR_CMD_TRANSFORM,
 	EDITOR_CMD_SELECT_OBJECTS,
 	EDITOR_CMD_DELETE_OBJECTS,
-	EDITOR_CMD_DUPLICATE_OBJECTS
+	EDITOR_CMD_DUPLICATE_OBJECTS,
+	EDITOR_CMD_ADD_PREFAB
 };
 
 struct EditorCmdTransform {
@@ -455,6 +456,27 @@ struct EditorCmdDuplicateObjects {
 		Level::level.activeObject = prevActiveObjId == Level::INVALID_LEVEL_OBJECT_ID ? nullptr : Level::level.idToLevelObject.find_or_default(prevActiveObjId, nullptr);
 	}
 };
+struct EditorCmdAddPrefab {
+	Level::Prefab* prefab;
+	U32* addedObjectIds;
+	U32 addedObjectIdCount;
+	U32 addedObjectIdCountMax;
+
+	void apply() {
+		I32 toAdd = min(addedObjectIdCountMax, prefab->objectCount);
+		for (U32 i = 0; i < toAdd; i++) {
+			addedObjectIds[addedObjectIdCount++] = Level::level.add_object(Level::clone_object(prefab->objects[i]))->id;
+		}
+	}
+	void revert() {
+		for (I32 i = 0; i < addedObjectIdCount; i++) {
+			if (Level::LevelObject* obj = Level::level.idToLevelObject.find_or_default(addedObjectIds[i], nullptr)) {
+				Level::level.free_object(obj);
+			}
+		}
+		addedObjectIdCount = 0;
+	}
+};
 
 struct UndoEntry {
 	union {
@@ -462,6 +484,7 @@ struct UndoEntry {
 		EditorCmdSelectObjects cmdSelectObjects;
 		EditorCmdDeleteObjects cmdDeleteObjects;
 		EditorCmdDuplicateObjects cmdDuplicateObjects;
+		EditorCmdAddPrefab cmdAddPrefab;
 	};
 	EditorCmdType cmdType;
 	UndoEntry* prev;
@@ -474,6 +497,7 @@ struct UndoEntry {
 		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.apply(); break;
 		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.apply(); break;
 		case EDITOR_CMD_DUPLICATE_OBJECTS: cmdDuplicateObjects.apply(); break;
+		case EDITOR_CMD_ADD_PREFAB: cmdAddPrefab.apply(); break;
 		}
 	}
 	void revert() {
@@ -482,6 +506,7 @@ struct UndoEntry {
 		case EDITOR_CMD_SELECT_OBJECTS: cmdSelectObjects.revert(); break;
 		case EDITOR_CMD_DELETE_OBJECTS: cmdDeleteObjects.revert(); break;
 		case EDITOR_CMD_DUPLICATE_OBJECTS: cmdDuplicateObjects.revert(); break;
+		case EDITOR_CMD_ADD_PREFAB: cmdAddPrefab.revert(); break;
 		}
 	}
 	void free() {
@@ -685,6 +710,25 @@ UndoEntry* editor_cmd_duplicate_selected() {
 	result->apply();
 	undoStack.insert_entry(result);
 	return result;
+}
+
+UndoEntry* editor_cmd_add_prefab_and_select(Level::Prefab* prefab) {
+	UndoEntry* addPrefab = undoStack.new_entry(EDITOR_CMD_ADD_PREFAB);
+	addPrefab->cmdAddPrefab = EditorCmdAddPrefab{};
+	addPrefab->cmdAddPrefab.prefab = prefab;
+	addPrefab->cmdAddPrefab.addedObjectIdCountMax = prefab->objectCount;
+	addPrefab->cmdAddPrefab.addedObjectIds = undoStack.alloc_for_entry<U32>(addPrefab, addPrefab->cmdAddPrefab.addedObjectIdCountMax);
+	if (!addPrefab->cmdAddPrefab.addedObjectIds) {
+		undoStack.abort_entry(addPrefab);
+		return nullptr;
+	}
+	addPrefab->apply();
+	undoStack.insert_entry(addPrefab);
+	UndoEntry* select = editor_cmd_start_select();
+	Level::level.deselect_all();
+	Level::level.select_objects(addPrefab->cmdAddPrefab.addedObjectIds, addPrefab->cmdAddPrefab.addedObjectIdCount);
+	editor_cmd_end_select(select);
+	return addPrefab;
 }
 
 const F32 TRANSFORM_WIDGET_SCALE = 0.125F;
@@ -1369,10 +1413,29 @@ struct PanelMaterialViewer {
 	}
 };
 
+struct PanelPrefabList;
+ArenaArrayList<PanelPrefabList*> prefabListPanels;
+
 struct PanelPrefabList {
+	UI::BoxHandle prefabListContainer;
+
 	void init() {
+		prefabListPanels.push_back(this);
 	}
 	void destroy() {
+		prefabListPanels.remove_obj_unordered(this);
+	}
+	void add_prefab_button(Level::Prefab* prefab) {
+		using namespace UI;
+		if (Box* box = prefabListContainer.get()) {
+			UI_WORKING_BOX(box) {
+				Box* box = button(*prefab->icon, [prefab](Box* box) {
+					editor_cmd_add_prefab_and_select(prefab);
+				}).unsafeBox;
+				box->size = V2F{ 128.0F, 128.0F };
+				box->backgroundColor = RGBA8{ 240, 240, 240, 255 };
+			}
+		}
 	}
 	void build_ui() {
 		using namespace UI;
@@ -1385,19 +1448,24 @@ struct PanelPrefabList {
 					workingBox->flags |= BOX_FLAG_WRAP_CHILDREN;
 					workingBox->sizeModeX = SIZE_MODE_GROW_TO_PARENT;
 					workingBox->borderWidth = 2.0F;
-					UI_BACKGROUND_COLOR(themeColor.foreground)
-						UI_SIZE((V2F{ 128.0F, 128.0F })) {
-						for (Level::Prefab* prefab : Level::allPrefabs) {
-							Box* box = generic_box().unsafeBox;
-							box->backgroundColor = RGBA8{ 255, 255, 255, 255 };
-							box->backgroundTexture = prefab->icon;
-						}
+					prefabListContainer = BoxHandle{ workingBox, workingBox->generation };
+					for (Level::Prefab* prefab : Level::allPrefabs) {
+						add_prefab_button(prefab);
 					}
 				}
 			}
 		}
 	}
 };
+
+void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount);
+
+void on_prefab_added(Level::Prefab* prefab) {
+	render_prefab_icons(&prefab, 1);
+	for (PanelPrefabList* panel : prefabListPanels) {
+		panel->add_prefab_button(prefab);
+	}
+}
 
 struct Panel;
 Panel* alloc_panel();
@@ -1855,6 +1923,17 @@ void init() {
 						print("Convolving...");
 						CubemapGen::equirectangular2convolved_cubemap("cubemap_test/cube"a, get_user_selected_file(globalArena), true);
 						print(" complete\n");
+					});
+					text_button("Make prefab"a, [](Box* box) {
+						U32 objectCount = Level::level.selectedObjects.size;
+						Level::LevelObject** objects = globalArena.alloc<Level::LevelObject*>(objectCount);
+						V3F origin = Level::level.get_selection_midpoint();
+						for (U32 i = 0; i < objectCount; i++) {
+							objects[i] = Level::clone_object(Level::level.selectedObjects[i]);
+							objects[i]->transform.add_offset(-origin);
+						}
+						Level::Prefab* prefab = Level::make_prefab(objects, objectCount);
+						on_prefab_added(prefab);
 					});
 				}
 			});

@@ -48,6 +48,7 @@ VKGeometry::SkeletalMesh leftHandMesh;
 VKGeometry::StaticMesh cannonMesh;
 VKGeometry::StaticMesh matMesh;
 VKGeometry::StaticMesh testSphere;
+VKGeometry::StaticMesh seag;
 
 Texture trowbridgeReitzBRDFLut;
 Texture specularCubemap;
@@ -68,6 +69,7 @@ Texture uiAccordionClosed;
 
 Material cannonMat;
 Material matMat;
+Material seagMat;
 
 void load_resources() {
 	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf"a);
@@ -79,6 +81,7 @@ void load_resources() {
 	cannonMesh = load_dmf_static_mesh("resources/models/cannon.dmf"a);
 	matMesh = load_dmf_static_mesh("resources/models/mat.dmf"a);
 	testSphere = load_dmf_static_mesh("resources/models/test_sphere.dmf"a);
+	seag = load_dmf_static_mesh("resources/models/seagull.dmf"a);
 	
 	load_dtf(&trowbridgeReitzBRDFLut, "./resources/textures/trowbridge_reitz_lut.dtf"a);
 	load_dtf(&specularCubemap, "./resources/textures/city_specular.dtf"a);
@@ -100,6 +103,7 @@ void load_resources() {
 
 	create_material_from_dtfs(&cannonMat, "resources/textures/cannon"a);
 	create_material_from_dtfs(&matMat, "resources/textures/mat"a);
+	create_material_from_pngs(&seagMat, "resources/textures/seag"a);
 }
 
 
