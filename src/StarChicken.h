@@ -179,7 +179,7 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 			VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::clusterCullPipeline);
 			VK::vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, VK::clusterCullPipelineLayout, 0, 1, &VK::drawDataDescriptorSet.descriptorSet, 0, nullptr);
 			VK::ClusterCullPushConstants cullConstants{};
-			cullConstants.lightCount = VK::uniformDataHandler.lightOffset;
+			cullConstants.lightCount = VK::uniformDataHandler.frameLightCount;
 			cullConstants.zNear = VK::CLUSTER_Z_NEAR;
 			cullConstants.zFar = VK::CLUSTER_Z_FAR;
 			if (isInEditorMode) {

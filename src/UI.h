@@ -153,6 +153,8 @@ typedef ActionResult (*BoxActionCallback)(Box* box, UserCommunication& com);
 typedef void (*BoxConsumer)(Box* box);
 typedef void (*ColorConsumer)(V4F color);
 typedef void (*ColorConsumerAdapted)(Box* box, V4F color);
+typedef void (*IndexConsumer)(I32 index);
+typedef void (*IndexConsumerAdapted)(Box* box, I32 index);
 
 // Having such a large box struct might be memory inefficient, but this setup makes it very easy to combine features, and the total UI memory usage isn't even that much.
 // If there are 10000 boxes on the screen, that's only a couple megabytes total.
@@ -231,6 +233,7 @@ struct Box {
 	union {
 		BoxConsumer boxConsumerCallback;
 		ColorConsumerAdapted colorConsumerCallback;
+		IndexConsumerAdapted indexConsumerCallback;
 	};
 	alignas(16) char callbackData[32];
 };
@@ -248,6 +251,11 @@ template<typename Callback>
 void color_consumer_adapter(Box* box, V4F color) {
 	void* thisPtr = box->callbackData;
 	(*reinterpret_cast<Callback*>(thisPtr))(color);
+}
+template<typename Callback>
+void index_consumer_adapter(Box* box, I32 idx) {
+	void* thisPtr = box->callbackData;
+	(*reinterpret_cast<Callback*>(thisPtr))(idx);
 }
 // Callback of type BoxActionCallback (ActionResult callback(Box*, UserCommunication&))
 template<typename Callback>
@@ -272,6 +280,14 @@ void set_color_consumer_box_callback(Box* box, Callback&& cb) {
 	//*reinterpret_cast<Callback*>(callbackData) = std::move(cb);
 	new (&box->callbackData[0]) Callback(static_cast<Callback&&>(cb));
 	box->colorConsumerCallback = color_consumer_adapter<Callback>;
+}
+// Callback of type IndexConsumer (void callback(I32))
+template<typename Callback>
+void set_index_consumer_box_callback(Box* box, Callback&& cb) {
+	static_assert(sizeof(Callback) <= sizeof(box->callbackData));
+	//*reinterpret_cast<Callback*>(callbackData) = std::move(cb);
+	new (&box->callbackData[0]) Callback(static_cast<Callback&&>(cb));
+	box->indexConsumerCallback = index_consumer_adapter<Callback>;
 }
 
 struct BoxHandle {
@@ -2091,24 +2107,38 @@ void accordion_end() {
 
 #define UI_ACCORDION(name) DEFER_LOOP(UI::accordion_begin(name), UI::accordion_end())
 
-void dropdown_selector(StrA name, U32 count, StrA* modes, U32* indices) {
-	Box* layoutButton = button(Resources::simpleWhite, [count, modes](Box* box) {
-		UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
-			for (U32 i = 0; i < count; i++) {
-				text_button(modes[i], [](Box* box){}).unsafeBox->value.i64.val = i;
-			}
-		}
-	}).unsafeBox;
+struct DropdownItem {
+	StrA name;
+	I32 id;
+};
+
+BoxHandle dropdown_selector(DropdownItem* items, U32 count) {
+	Box* layoutButton = button(Resources::simpleWhite, [](Box*){}).unsafeBox;
 	layoutButton->layoutDirection = LAYOUT_DIRECTION_RIGHT;
 	layoutButton->align = ALIGN_MODE_CENTER_CENTER;
 	layoutButton->padding = 2.0F;
 	layoutButton->backgroundColor = themeColor.inputField;
+	BoxHandle result{};
 	UI_WORKING_BOX(layoutButton) {
 		Box* dropdownIcon = icon(Resources::uiArrowDown).unsafeBox;
 		dropdownIcon->backgroundColor = themeColor.button;
 		dropdownIcon->size *= 0.5F;
-		text(name);
+		result = text(items[0].name);
 	}
+	Box* callbackBox = result.unsafeBox;
+	set_box_consumer_box_callback(layoutButton, [count, items, callbackBox](Box* box) {
+		UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ box->renderPos.x, box->renderPos.y + box->computedSize.y })) {
+			for (U32 i = 0; i < count; i++) {
+				text_button(items[i].name, [callbackBox](Box* box) {
+					if (callbackBox->indexConsumerCallback) {
+						callbackBox->indexConsumerCallback(callbackBox, I32(box->value.i64.val));
+					}
+					callbackBox->text = box->text;
+				}).unsafeBox->value.i64.val = items[i].id;
+			}
+		}
+	});
+	return result;
 }
 
 void color_picker_set_lrch(Box* clPicker, Box* colorBox, Box* callbackBox, V3F LrCH) {

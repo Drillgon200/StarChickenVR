@@ -2072,7 +2072,7 @@ void update_draw_data_buffer(VkCommandBuffer cmdBuf) {
 	// slice = (zSlices / log2(far / near)) * log2(depth) - zSlices * log2(near) / log2(far / near)
 	// slice = scale * log2(depth) + bias
 	drawData.clusterScaleBias = V2F{ F32(CLUSTER_RES_Z) / log2f32(CLUSTER_Z_FAR / CLUSTER_Z_NEAR), -F32(CLUSTER_RES_Z) * log2f32(CLUSTER_Z_NEAR) / log2f32(CLUSTER_Z_FAR / CLUSTER_Z_NEAR) };
-	drawData.lightCount = uniformDataHandler.lightOffset;
+	drawData.lightCount = uniformDataHandler.frameLightCount;
 
 	vkCmdUpdateBuffer(cmdBuf, drawDataUniformBuffer.buffer, 0, sizeof(DrawDataUniforms), &drawData);
 

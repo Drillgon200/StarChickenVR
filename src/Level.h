@@ -73,21 +73,27 @@ struct Prefab {
 
 ArenaArrayList<Prefab*> allPrefabs;
 
+Rng3F32 expand_bounding_box_for_object(Rng3F32 boundingBox, LevelObject* obj) {
+	switch (obj->type) {
+	case LEVEL_OBJECT_EMPTY: break;
+	case LEVEL_OBJECT_STATIC_MODEL:
+	case LEVEL_OBJECT_SKELETAL_MODEL: {
+		Rng3F32 objBox = obj->type == LEVEL_OBJECT_STATIC_MODEL ? ((StaticModel*)obj)->mesh->boundingBox : ((SkeletalModel*)obj)->mesh->geometry.boundingBox;
+		boundingBox = boundingBox.unioned(objBox.transformed_bounds(obj->transform));
+	} break;
+	case LEVEL_OBJECT_LIGHT: {
+		V3F pos = obj->transform.translation();
+		boundingBox = boundingBox.unioned(Rng3F32{ pos.x, pos.y, pos.z, pos.x, pos.y, pos.z });
+	} break;
+	}
+	return boundingBox;
+}
+
 void calc_prefab_bounding_box(Prefab* prefab) {
 	Rng3F32 boundingBox{ F32_LARGE, F32_LARGE, F32_LARGE, -F32_LARGE, -F32_LARGE, -F32_LARGE };
 	for (U32 i = 0; i < prefab->objectCount; i++) {
 		LevelObject* obj = prefab->objects[i];
-		switch (obj->type) {
-		case LEVEL_OBJECT_STATIC_MODEL:
-		case LEVEL_OBJECT_SKELETAL_MODEL: {
-			Rng3F32 objBox = obj->type == LEVEL_OBJECT_STATIC_MODEL ? ((StaticModel*)obj)->mesh->boundingBox : ((SkeletalModel*)obj)->mesh->geometry.boundingBox;
-			boundingBox = boundingBox.unioned(objBox.transformed_bounds(obj->transform));
-		} break;
-		case LEVEL_OBJECT_LIGHT: {
-			V3F pos = obj->transform.translation();
-			boundingBox = boundingBox.unioned(Rng3F32{ pos.x, pos.y, pos.z, pos.x, pos.y, pos.z });
-		} break;
-		}
+		boundingBox = expand_bounding_box_for_object(boundingBox, obj);
 	}
 	prefab->boundingBox = boundingBox;
 }
@@ -216,6 +222,16 @@ struct Level {
 			selectedMidpoint += obj->transform.translation();
 		}
 		return selectedMidpoint / F32(selectedObjects.size);
+	}
+	Rng3F32 get_selection_bounding_box() {
+		if (selectedObjects.empty()) {
+			return Rng3F32{};
+		}
+		Rng3F32 boundingBox{ F32_LARGE, F32_LARGE, F32_LARGE, -F32_LARGE, -F32_LARGE, -F32_LARGE };
+		for (LevelObject* obj : selectedObjects) {
+			boundingBox = expand_bounding_box_for_object(boundingBox, obj);
+		}
+		return boundingBox;
 	}
 	void add_obj_to_selected(LevelObject* obj) {
 		if (!(obj->flags & LevelObject::SELECTED)) {

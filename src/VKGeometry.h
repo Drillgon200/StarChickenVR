@@ -228,16 +228,16 @@ struct UniformDataHandler {
 	U32 maxMatrices;
 	U32 maxCameras;
 	U32 maxLights;
-	// Matrix is always at least 3. The first matrix is the identity matrix and the next two are eye matrices
-	U32 matrixOffset;
-	U32 lightOffset;
+	// Matrix 0 is always the identity matrix
+	U32 frameMatrixCount;
+	U32 frameLightCount;
 
 	void init(U32 matrixCount, U32 cameraCount, U32 lightCount) {
 		DEBUG_ASSERT(matrixCount > 3, "Needs more than 3 matrices"a);
 		maxMatrices = matrixCount;
 		maxCameras = cameraCount;
 		maxLights = lightCount;
-		matrixOffset = 3;
+		frameMatrixCount = 1;
 
 		U32 cameraOffset = ALIGN_HIGH(matrixCount * sizeof(M4x3F32), 16);
 		U32 lightOffset = cameraOffset + ALIGN_HIGH(cameraCount * sizeof(VK::GPUCameraMatrices), 16);
@@ -282,9 +282,9 @@ struct UniformDataHandler {
 	}
 
 	U32 alloc_matrices_and_set(U32 numMatrices, M4x3F32* matrices) {
-		U32 offset = matrixOffset;
-		matrixOffset += numMatrices;
-		if (matrixOffset > maxMatrices) {
+		U32 offset = frameMatrixCount;
+		frameMatrixCount += numMatrices;
+		if (frameMatrixCount > maxMatrices) {
 			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
 			__debugbreak();
 			offset = 0;
@@ -297,9 +297,9 @@ struct UniformDataHandler {
 	}
 
 	U32 alloc_matrices(U32 numMatrices) {
-		U32 offset = matrixOffset;
-		matrixOffset += numMatrices;
-		if (matrixOffset > maxMatrices) {
+		U32 offset = frameMatrixCount;
+		frameMatrixCount += numMatrices;
+		if (frameMatrixCount > maxMatrices) {
 			print("Ran out of space for transform matrices. Figure out a way to deal with this.");
 			__debugbreak();
 			offset = 0;
@@ -321,8 +321,8 @@ struct UniformDataHandler {
 	}
 
 	void alloc_light_and_set(const VK::GPULight& light) {
-		if (lightOffset < maxLights) {
-			lightsMemoryMapping[lightOffset++] = light;
+		if (frameLightCount < maxLights) {
+			lightsMemoryMapping[frameLightCount++] = light;
 		}	
 	}
 
@@ -338,8 +338,8 @@ struct UniformDataHandler {
 
 	void reset() {
 		// First matrix is always the identity matrix
-		matrixOffset = 1;
-		lightOffset = 0;
+		frameMatrixCount = 1;
+		frameLightCount = 0;
 	}
 };
 

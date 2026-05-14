@@ -1689,25 +1689,26 @@ bool ray_cylinder_intersect(F32* tOut, V3F pos, V3F dir, V3F cylinderCenter, V3F
 	}
 	F32 t0 = min(results[0], results[1]);
 	F32 t1 = max(results[0], results[1]);
-	if (t0 < 0.0F || t1 < 0.0F) {
+	if (t1 < 0.0F) {
 		return false;
 	}
-	V3F hitPos = pos + dir * t0;
+	F32 cylinderHit = t0 < 0.0F ? t1 : t0;
+	V3F hitPos = pos + dir * cylinderHit;
 	if (absf32(dot(hitPos, axis)) <= halfHeight) {
 		if (tOut) {
-			*tOut = t0;
+			*tOut = cylinderHit;
 		}
 		return true;
 	}
 	F32 tPlane0 = (dot(pos, axis) - halfHeight) / -dot(dir, axis);
-	if (tPlane0 >= t0 && tPlane0 <= t1) {
+	if (tPlane0 >= max(t0, 0.0F) && tPlane0 <= t1) {
 		if (tOut) {
 			*tOut = tPlane0;
 		}
 		return true;
 	}
 	F32 tPlane1 = (dot(pos, axis) + halfHeight) / -dot(dir, axis);
-	if (tPlane1 >= t0 && tPlane1 <= t1) {
+	if (tPlane1 >= max(t0, 0.0F) && tPlane1 <= t1) {
 		if (tOut) {
 			*tOut = tPlane1;
 		}
@@ -2706,9 +2707,9 @@ struct Rng3F32 {
 		minX2 = min(minX2, p.x);\
 		minY2 = min(minY2, p.y);\
 		minZ2 = min(minZ2, p.z);\
-		maxX2 = max(minX2, p.x);\
-		maxY2 = max(minY2, p.y);\
-		maxZ2 = max(minZ2, p.z);
+		maxX2 = max(maxX2, p.x);\
+		maxY2 = max(maxY2, p.y);\
+		maxZ2 = max(maxZ2, p.z);
 		CONTAIN_POINT(minX, minY, maxZ)
 		CONTAIN_POINT(minX, maxY, minZ)
 		CONTAIN_POINT(minX, maxY, maxZ)
