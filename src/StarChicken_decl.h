@@ -16,4 +16,6 @@ extern B32 shouldUseDesktopWindow;
 
 extern B32 isInEditorMode;
 
+extern B32 debugCameraCull;
+
 }

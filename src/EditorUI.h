@@ -1155,6 +1155,8 @@ struct PanelEditor3D {
 					}
 					box->text = text;
 				}
+			} else if (com.keyPressed == Win32::KEY_F) {
+				StarChicken::debugCameraCull = B32(!bool(StarChicken::debugCameraCull));
 			}
 			if (!Win32::mouseButtonState[Win32::MOUSE_BUTTON_LEFT]) {
 				editor3d->isDragSelecting = false;

@@ -176,6 +176,9 @@
     <ClInclude Include="src\compression\Oklab.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="tests\UITests.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />

@@ -409,6 +409,7 @@
     <ClInclude Include="tests\ShaderCompilerTests.h" />
     <ClInclude Include="tests\StarChickenTests.h" />
     <ClInclude Include="tests\Testing.h" />
+    <ClInclude Include="tests\UITests.h" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="src\DrillLibVisualizeArenaArrayList.natvis" />

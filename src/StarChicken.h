@@ -48,6 +48,8 @@ B32 shouldUseDesktopWindow;
 
 B32 isInEditorMode;
 
+B32 debugCameraCull;
+
 U64 frameNumber;
 U64 prevFrameTime;
 U64 frameTime;
@@ -298,9 +300,12 @@ void draw_frame(XR::OpenXRFrameInfo& openxrFrameBeginInfo) {
 					}
 					VK::vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, VK::drawPipeline);
 					VK::vkCmdBindIndexBuffer(cmdBuf, VK::geometryHandler.buffer, VK::geometryHandler.indicesOffset, VK_INDEX_TYPE_UINT16);
-					EditorUI::PanelEditor3D* testCull = EditorUI::renderPanels[0];
-					M4x3F viewMat = testCull->editor.get_view_transform();
-					Level::level.draw_models(cmdBuf, editor3d->gpuCameraIndex, viewMat, testCull->projection);
+					EditorUI::PanelEditor3D* cullCam = editor3d;
+					if (debugCameraCull) {
+						cullCam = EditorUI::renderPanels[0];
+					}
+					M4x3F viewMat = cullCam->editor.get_view_transform();
+					Level::level.draw_models(cmdBuf, editor3d->gpuCameraIndex, viewMat, cullCam->projection);
 					tes.draw(tesWorldDebugDrawSet, editor3d->gpuCameraIndex);
 					tes.draw(editor3d->ui3DDrawSet, editor3d->gpuCameraIndex);
 				}

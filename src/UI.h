@@ -1522,12 +1522,19 @@ void handle_keyboard_action(V2F32 mousePos, Win32::Key key, Win32::ButtonState s
 	modificationLock.lock_write();
 	if (Box* activeTextInput = activeTextBox.get()) {
 		if (state == Win32::BUTTON_STATE_DOWN) {
-			if (Box* active = activeTextBox.get()) {
-				lastKeyTypedSeconds = current_time_seconds();
-				F32 wrapWidth = active->computedSize.x - active->padding * 2.0F;
-				textInputHandler.handle_key_press(key, wrapWidth, active->textSize);
-			}
+			lastKeyTypedSeconds = current_time_seconds();
+			F32 wrapWidth = activeTextInput->computedSize.x - activeTextInput->padding * 2.0F;
+			textInputHandler.handle_key_press(key, wrapWidth, activeTextInput->textSize);
 			activeTextInput->numTypedCharacters = U32(textInputHandler.textLength);
+			if (key == Win32::KEY_RETURN && state == Win32::BUTTON_STATE_DOWN && !(activeTextInput->flags & BOX_FLAG_WRAP_TEXT)) {
+				activeTextInput->borderWidth = 0.0F;
+				if (activeTextInput->actionCallback) {
+					UserCommunication deselectComm{};
+					deselectComm.textBoxDeselected = true;
+					activeTextInput->actionCallback(activeTextInput, deselectComm);
+				}
+				activeTextBox = BoxHandle{};
+			}
 		}
 	} else {
 		for (I32 i = I32(contextMenuStack.size) - 1; i >= 0; i--) {
@@ -1753,6 +1760,79 @@ void context_menu_end_helper(BoxHandle parent, V2F32 offset) {
 #define UI_ADD_CONTEXT_MENU(parent, offset) __pragma(warning(suppress : 4456 4189))\
 	for (UI::Box* oldWorkingBox = UI::workingBox, * contextMenuBox = UI::context_menu_begin_helper(); oldWorkingBox; UI::context_menu_end_helper(parent, offset), UI::workingBox = oldWorkingBox, oldWorkingBox = nullptr)
 
+// Tiny recursive descent parser so we can type expressions in fields
+I32 precedence(char c) {
+	switch (c) {
+	case '^': return 1;
+	case '*': return 2;
+	case '/': return 2;
+	case '+': return 3;
+	case '-': return 3;
+	default: break;
+	}
+	return -1;
+}
+F64 f64_binary_eval(StrA* str, I32 prevPrecedence);
+F64 f64_unary_eval(StrA* str) {
+	SerializeTools::skip_whitespace(str);
+	if (str->length == 0) {
+		return 0;
+	}
+	char c = str->str[0];
+	// Could handle functions like sin/cos and sqrt here, too lazy right now
+	if (c == '+') {
+		(*str)++;
+		return f64_unary_eval(str);
+	} else if (c == '-') {
+		(*str)++;
+		return -f64_unary_eval(str);
+	} else if (c == '(') {
+		(*str)++;
+		F64 result = f64_binary_eval(str, I32_MAX);
+		SerializeTools::skip_whitespace(str);
+		if (str->length > 0 && str->str[0] == ')') {
+			(*str)++;
+		}
+		return result;
+	} else {
+		F64 result;
+		if (SerializeTools::parse_f64(&result, str)) {
+			return result;
+		} else {
+			*str = StrA{};
+			return 0.0;
+		}
+	}
+}
+F64 f64_binary_eval(StrA* str, I32 prevPrecedence) {
+	F64 left = f64_unary_eval(str);
+	SerializeTools::skip_whitespace(str);
+	if (str->length == 0) {
+		return left;
+	}
+	while (str->length > 0) {
+		char op = str->str[0];
+		I32 currentPrecedence = precedence(op);
+		if (currentPrecedence == -1 || currentPrecedence >= prevPrecedence) {
+			break;
+		}
+		(*str)++;
+		F64 right = f64_binary_eval(str, currentPrecedence);
+		switch (op) {
+		case '^': left = F64(powf32(F32(left), F32(right))); break;
+		case '*': left *= right; break;
+		case '/': left /= right; break;
+		case '+': left += right; break;
+		case '-': left -= right; break;
+		default: break;
+		}
+	}
+	return left;
+}
+F64 f64_expr_eval(StrA str) {
+	return f64_binary_eval(&str, I32_MAX);
+}
+
 void set_box_f64_val(Box* box, F64 newVal) {
 	if (box->flags & BOX_FLAG_SLIDER_MIN_MAX_ENFORCED) {
 		newVal = clamp(newVal, box->value.f64.minVal, box->value.f64.maxVal);
@@ -1777,15 +1857,7 @@ BoxHandle slider_f64(F64* toUpdate = nullptr, F64 defaultVal = 0.0, F64 minVal =
 			set_box_f64_val(slider, *slider->updatePtr.f64 - incrementAmount);
 		});
 		textBox = text_input(""a, "0.0"a, false, [](Box* box){
-			F64 newVal = *box->updatePtr.f64;
-			F64 parsed;
-			if (SerializeTools::parse_f64(&parsed, StrA{ box->typedTextBuffer, box->numTypedCharacters })) {
-				newVal = parsed;
-			}
-			if (box->numTypedCharacters == 0) {
-				newVal = 0.0;
-			}
-			set_box_f64_val(box, newVal);
+			set_box_f64_val(box, f64_expr_eval(StrA{ box->typedTextBuffer, box->numTypedCharacters }));
 		}).unsafeBox;
 		textBox->actionCallback = [](Box* box, UserCommunication& com) {
 			if (com.leftClicked || com.rightClicked) {

@@ -3,6 +3,7 @@
 #include "DrillLibTests.h"
 #include "ShaderCompilerTests.h"
 #include "CompressionTests.h"
+#include "UITests.h"
 
 namespace StarChickenTests {
 
@@ -46,6 +47,11 @@ void run_all() {
 			}
 			TEST_GROUP("Random Stress"a) {
 				CompressionTests::huffman_random_stress();
+			}
+		}
+		TEST_GROUP("UI"a) {
+			TEST_GROUP("Expr parse"a) {
+				UITests::f64_expr_basic();
 			}
 		}
 		TEST_GROUP("LZ Coding"a) {
