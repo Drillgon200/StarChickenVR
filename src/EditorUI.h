@@ -743,6 +743,15 @@ void editor_cmd_save_level() {
 	Level::save_level(savePath, Level::level);
 	levelIsSaved = B32_TRUE;
 }
+void editor_cmd_save_level_as() {
+	StrA path = Win32::open_filename(globalArena);
+	if (path == StrA{}) {
+		return;
+	}
+	savePath = path;
+	Level::save_level(path, Level::level);
+	levelIsSaved = B32_TRUE;
+}
 void editor_cmd_new_level() {
 	savePath = StrA{};
 	Level::level.reset();
@@ -1126,6 +1135,12 @@ struct PanelEditor3D {
 				editor_cmd_delete_selected();
 			} else if (com.keyPressed == Win32::KEY_D && Win32::keyboardState[Win32::KEY_SHIFT]) {
 				editor_cmd_duplicate_selected();
+			} else if (com.keyPressed == Win32::KEY_S && Win32::keyboardState[Win32::KEY_CTRL]) {
+				if (Win32::keyboardState[Win32::KEY_SHIFT]) {
+					editor_cmd_save_level_as();
+				} else {
+					editor_cmd_save_level();
+				}
 			} else if (com.keyPressed == Win32::KEY_B) {
 				VK::currentDebugDisplay = VK::RenderDebugDisplay((U32(VK::currentDebugDisplay) + 1) % U32(VK::RENDER_DEBUG_DISPLAY_Count));
 				if (UI::Box* box = debugDisplayText.get()) {
@@ -1955,11 +1970,7 @@ void init() {
 						editor_cmd_save_level();
 					});
 					text_button("Save Level As"a, [](Box* box) {
-						StrA path = Win32::open_filename(globalArena);
-						if (path != StrA{}) {
-							savePath = path;
-							editor_cmd_save_level();
-						}
+						editor_cmd_save_level_as();
 					});
 					text_button("Cubemap Gen"a, [](Box* box) {
 						print("Convolving...");
