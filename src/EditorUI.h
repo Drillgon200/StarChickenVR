@@ -803,22 +803,7 @@ struct TranslateWidget {
 
 	void do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look);
 
-	void key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state) {
-		if (state == Win32::BUTTON_STATE_DOWN) {
-			if (key == Win32::KEY_X) {
-				activeComponent = Win32::keyboardState[Win32::KEY_SHIFT] ? TRANSLATE_WIDGET_COMPONENT_YZ_PLANE : TRANSLATE_WIDGET_COMPONENT_X_AXIS;
-			} else if (key == Win32::KEY_Y) {
-				activeComponent = Win32::keyboardState[Win32::KEY_SHIFT] ? TRANSLATE_WIDGET_COMPONENT_XZ_PLANE : TRANSLATE_WIDGET_COMPONENT_Y_AXIS;
-			} else if (key == Win32::KEY_Z) {
-				activeComponent = Win32::keyboardState[Win32::KEY_SHIFT] ? TRANSLATE_WIDGET_COMPONENT_XY_PLANE : TRANSLATE_WIDGET_COMPONENT_Z_AXIS;
-			} else if (key == Win32::KEY_C) {
-				activeComponent = TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE;
-			}
-			if (!SerializeTools::is_alpha(Win32::key_to_typed_char(key))) {
-				widgetTypingBuffer.handle_key_press(key, 0.0F, 0.0F);
-			}
-		}
-	}
+	void key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state);
 	void mouse_input(PanelEditor3D* editor3D, Win32::MouseButton button, Win32::MouseValue state, V2F mousePos) {
 		if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_UP) {
 			currentInputWidget = nullptr;
@@ -864,22 +849,7 @@ struct RotateWidget {
 
 	void do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look);
 
-	void key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state) {
-		if (state == Win32::BUTTON_STATE_DOWN) {
-			if (key == Win32::KEY_X) {
-				activeComponent = ROTATE_WIDGET_COMPONENT_X_AXIS;
-			} else if (key == Win32::KEY_Y) {
-				activeComponent = ROTATE_WIDGET_COMPONENT_Y_AXIS;
-			} else if (key == Win32::KEY_Z) {
-				activeComponent = ROTATE_WIDGET_COMPONENT_Z_AXIS;
-			} else if (key == Win32::KEY_C) {
-				activeComponent = ROTATE_WIDGET_COMPONENT_CAMERA_AXIS;
-			}
-			if (!SerializeTools::is_alpha(Win32::key_to_typed_char(key))) {
-				widgetTypingBuffer.handle_key_press(key, 0.0F, 0.0F);
-			}
-		}
-	}
+	void key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state);
 	void mouse_input(PanelEditor3D* editor3D, Win32::MouseButton button, Win32::MouseValue state, V2F mousePos) {
 		if (button == Win32::MOUSE_BUTTON_LEFT && state.state == Win32::BUTTON_STATE_UP) {
 			currentInputWidget = nullptr;
@@ -1255,6 +1225,7 @@ void TranslateWidget::update_active(PanelEditor3D* editor3D) {
 
 	V2F drag = Win32::get_mouse() - interactStartMousePos;
 	V3F prevWidgetPos = preInteractTransform.translation();
+	bool inLocalSpace = false;
 	if (activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS || activeComponent == TRANSLATE_WIDGET_COMPONENT_Y_AXIS || activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS) {
 		U32 columnIdx =
 			activeComponent == TRANSLATE_WIDGET_COMPONENT_X_AXIS ? 0u :
@@ -1277,6 +1248,7 @@ void TranslateWidget::update_active(PanelEditor3D* editor3D) {
 			} else if (activeComponent == TRANSLATE_WIDGET_COMPONENT_Z_AXIS) {
 				totalTranslationAmount = V3F{ 0.0F, 0.0F, translateAmount };
 			}
+			inLocalSpace = true;
 		}
 	} else {
 		// Translate along plane, not constrained to one axis
@@ -1295,11 +1267,11 @@ void TranslateWidget::update_active(PanelEditor3D* editor3D) {
 		totalTranslationAmount = V3F{ roundf32(totalTranslationAmount.x / snapIncrement) * snapIncrement, roundf32(totalTranslationAmount.y / snapIncrement) * snapIncrement, roundf32(totalTranslationAmount.z / snapIncrement) * snapIncrement };
 	}
 	transform = preInteractTransform;
-	V3F globalTranslation = editor3D->activeOrientationMode == TRANSFORM_ORIENTATION_MODE_GLOBAL || activeComponent == ROTATE_WIDGET_COMPONENT_CAMERA_AXIS ? totalTranslationAmount : transform.transform_vec(totalTranslationAmount);
+	V3F globalTranslation = inLocalSpace ? transform.transform_vec(totalTranslationAmount) : totalTranslationAmount;
 	transform.add_offset(globalTranslation);
 	if (currentUndoCmd) {
 		currentUndoCmd->revert();
-		currentUndoCmd->cmdTransform.translation = TRANSFORM_ORIGIN_MODE_INDIVIDUAL_ORIGINS ? totalTranslationAmount : globalTranslation;
+		currentUndoCmd->cmdTransform.translation = totalTranslationAmount;
 		currentUndoCmd->apply();
 	}
 }
@@ -1348,6 +1320,28 @@ void TranslateWidget::do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look) 
 	V3F camY = editor3D->editor.up * planeScale;
 	if (ray_rect_intersect(nullptr, eye, look, center - camX * 0.5F - camY * 0.5F, camX, camY)) {
 		activeComponent = TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE;
+	}
+}
+
+void TranslateWidget::key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state) {
+	if (state == Win32::BUTTON_STATE_DOWN) {
+		if (key == Win32::KEY_X) {
+			activeComponent = Win32::keyboardState[Win32::KEY_SHIFT] ? TRANSLATE_WIDGET_COMPONENT_YZ_PLANE : TRANSLATE_WIDGET_COMPONENT_X_AXIS;
+		} else if (key == Win32::KEY_Y) {
+			activeComponent = Win32::keyboardState[Win32::KEY_SHIFT] ? TRANSLATE_WIDGET_COMPONENT_XZ_PLANE : TRANSLATE_WIDGET_COMPONENT_Y_AXIS;
+		} else if (key == Win32::KEY_Z) {
+			activeComponent = Win32::keyboardState[Win32::KEY_SHIFT] ? TRANSLATE_WIDGET_COMPONENT_XY_PLANE : TRANSLATE_WIDGET_COMPONENT_Z_AXIS;
+		} else if (key == Win32::KEY_C) {
+			activeComponent = TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE;
+		} else if (key == Win32::KEY_RETURN) {
+			currentInputWidget = nullptr;
+		}
+		if (currentUndoCmd) {
+			currentUndoCmd->cmdTransform.orientationMode = activeComponent == TRANSLATE_WIDGET_COMPONENT_CAMERA_PLANE ? TRANSFORM_ORIENTATION_MODE_GLOBAL : editor3D->activeOrientationMode;
+		}
+		if (!SerializeTools::is_alpha(Win32::key_to_typed_char(key))) {
+			widgetTypingBuffer.handle_key_press(key, 0.0F, 0.0F);
+		}
 	}
 }
 
@@ -1485,6 +1479,28 @@ void RotateWidget::do_mouse_over(PanelEditor3D* editor3D, V3F eye, V3F look) {
 	}
 	if (ray_cylinder_intersect(nullptr, eye, look, center, center + thickness + 0.5F * editor3D->editor.forward, scale * 1.2F) && bestTime == F32_INF) {
 		activeComponent = ROTATE_WIDGET_COMPONENT_CAMERA_AXIS;
+	}
+}
+
+void RotateWidget::key_input(PanelEditor3D* editor3D, Win32::Key key, Win32::ButtonState state) {
+	if (state == Win32::BUTTON_STATE_DOWN) {
+		if (key == Win32::KEY_X) {
+			activeComponent = ROTATE_WIDGET_COMPONENT_X_AXIS;
+		} else if (key == Win32::KEY_Y) {
+			activeComponent = ROTATE_WIDGET_COMPONENT_Y_AXIS;
+		} else if (key == Win32::KEY_Z) {
+			activeComponent = ROTATE_WIDGET_COMPONENT_Z_AXIS;
+		} else if (key == Win32::KEY_C) {
+			activeComponent = ROTATE_WIDGET_COMPONENT_CAMERA_AXIS;
+		} else if (key == Win32::KEY_RETURN) {
+			currentInputWidget = nullptr;
+		}
+		if (currentUndoCmd) {
+			currentUndoCmd->cmdTransform.orientationMode = activeComponent == ROTATE_WIDGET_COMPONENT_CAMERA_AXIS ? TRANSFORM_ORIENTATION_MODE_GLOBAL : editor3D->activeOrientationMode;
+		}
+		if (!SerializeTools::is_alpha(Win32::key_to_typed_char(key))) {
+			widgetTypingBuffer.handle_key_press(key, 0.0F, 0.0F);
+		}
 	}
 }
 

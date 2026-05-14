@@ -245,7 +245,7 @@ struct Level {
 				activeObject = nullptr;
 			}
 			selectedObjects.remove_obj_unordered(obj);
-			obj->flags ^= LevelObject::SELECTED;
+			obj->flags &= ~Flags32(LevelObject::SELECTED);
 		}
 	}
 	void deselect_all() {
@@ -307,6 +307,7 @@ struct Level {
 	LevelObject* add_object(LevelObject* obj) {
 		DEBUG_ASSERT(!idToLevelObject.contains(obj->id), "Object cannot be added twice"a);
 		idToLevelObject.insert(obj->id, obj);
+		obj->flags &= ~Flags32(LevelObject::SELECTED);
 		switch (obj->type) {
 		case LEVEL_OBJECT_STATIC_MODEL: {
 			obj->typeGroupArrayIdx = staticModels.size;
