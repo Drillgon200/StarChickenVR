@@ -24,6 +24,9 @@ U32 physicsThreadCount;
 RigidBody::OrientedBox boxA;
 RigidBody::OrientedBox boxB;
 
+StrA savePath;
+B32 levelIsSaved;
+
 struct EditorPlayer {
 	V3F pos;
 	F32 pitch, yaw;
@@ -533,6 +536,7 @@ struct UndoStack {
 
 	void undo() {
 		if (currentEntry) {
+			levelIsSaved = B32_FALSE;
 			currentEntry->revert();
 			currentEntry = currentEntry->prev;
 		}
@@ -540,6 +544,7 @@ struct UndoStack {
 	void redo() {
 		UndoEntry* redoEntry = currentEntry ? currentEntry->next : head;
 		if (redoEntry) {
+			levelIsSaved = B32_FALSE;
 			redoEntry->apply();
 			currentEntry = redoEntry;
 		}
@@ -729,6 +734,24 @@ UndoEntry* editor_cmd_add_prefab_and_select(Level::Prefab* prefab) {
 	Level::level.select_objects(addPrefab->cmdAddPrefab.addedObjectIds, addPrefab->cmdAddPrefab.addedObjectIdCount);
 	editor_cmd_end_select(select);
 	return addPrefab;
+}
+
+void editor_cmd_save_level() {
+	if (savePath == StrA{}) {
+		savePath = Win32::open_filename(globalArena);
+	}
+	Level::save_level(savePath, Level::level);
+	levelIsSaved = B32_TRUE;
+}
+void editor_cmd_new_level() {
+	savePath = StrA{};
+	Level::level.reset();
+}
+void editor_cmd_open_level() {
+	StrA path = Win32::open_filename(globalArena);
+	if (Level::load_level(Level::level, path)) {
+		savePath = path;
+	}
 }
 
 const F32 TRANSFORM_WIDGET_SCALE = 0.125F;
@@ -1826,6 +1849,7 @@ void debug_render() {
 }
 
 void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
+	static U32 totalRenderedPrefabCount = 0;
 	VK::TmpCmdBuf cmdBuf = VK::begin_tmp_cmd_buf();
 	VK::update_draw_data_buffer(cmdBuf.buf);
 	VK::DedicatedImage iconDepthBuffer = VK::create_dedicated_image(VK_FORMAT_D32_SFLOAT, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, VK_IMAGE_ASPECT_DEPTH_BIT, 0);
@@ -1835,7 +1859,7 @@ void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
 
 	for (U32 i = 0; i < prefabCount; i++) {
 		ResourceLoading::Texture* tex = globalArena.alloc<ResourceLoading::Texture>(1);
-		ResourceLoading::create_texture(tex, nullptr, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, ResourceLoading::TEXTURE_FORMAT_RGBA_U8_RENDER_TARGET, true, false);
+		ResourceLoading::create_texture(tex, strafmt(globalArena, ":prefab_%"a, totalRenderedPrefabCount), nullptr, PREFAB_ICON_SIZE, PREFAB_ICON_SIZE, 1, ResourceLoading::TEXTURE_FORMAT_RGBA_U8_RENDER_TARGET, true, false);
 		VK::img_barrier(cmdBuf.buf, tex->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 		VkRenderingInfo iconRenderInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
@@ -1899,6 +1923,8 @@ void render_prefab_icons(Level::Prefab** prefabs, U32 prefabCount) {
 		VK::img_barrier(cmdBuf.buf, iconDepthBuffer.img, VK_IMAGE_ASPECT_DEPTH_BIT, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 		VK::img_barrier(cmdBuf.buf, tex->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		prefab->icon = tex;
+
+		totalRenderedPrefabCount++;
 	}
 
 	VK::uniformDataHandler.flush_memory();
@@ -1919,6 +1945,22 @@ void init() {
 			UI_PADDING(2.0F)
 			text_button("File"a, [](Box* box) {
 				UI_ADD_CONTEXT_MENU(BoxHandle{}, (V2F{ 0.0F, 16.0F })) {
+					text_button("New Level"a, [](Box* box) {
+						editor_cmd_new_level();
+					});
+					text_button("Open Level"a, [](Box* box) {
+						editor_cmd_open_level();
+					});
+					text_button("Save Level"a, [](Box* box) {
+						editor_cmd_save_level();
+					});
+					text_button("Save Level As"a, [](Box* box) {
+						StrA path = Win32::open_filename(globalArena);
+						if (path != StrA{}) {
+							savePath = path;
+							editor_cmd_save_level();
+						}
+					});
 					text_button("Cubemap Gen"a, [](Box* box) {
 						print("Convolving...");
 						CubemapGen::equirectangular2convolved_cubemap("cubemap_test/cube"a, get_user_selected_file(globalArena), true);

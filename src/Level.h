@@ -10,6 +10,8 @@ namespace Level {
 
 M4x3F* testAnimPose;
 
+const U32 LAST_KNOWN_DLF_VERSION = DRILL_LIB_MAKE_VERSION(1, 0, 0);
+
 const U32 INVALID_LEVEL_OBJECT_ID = 0;
 
 enum LevelObjectType {
@@ -196,7 +198,16 @@ struct Level {
 	ArenaArrayList<LevelObject*> selectedObjects;
 	LevelObject* activeObject;
 
-	void init() {
+	void reset() {
+		for (StaticModel* obj : staticModels) { free_level_object(&obj->obj); }
+		staticModels.clear();
+		for (SkeletalModel* obj : skeletalModels) { free_level_object(&obj->obj); }
+		skeletalModels.clear();
+		for (Light* obj : lights) { free_level_object(&obj->obj); }
+		lights.clear();
+		idToLevelObject.clear();
+		selectedObjects.clear();
+		activeObject = nullptr;
 	}
 
 	V3F get_selection_midpoint() {
@@ -401,7 +412,7 @@ struct Level {
 	}
 
 	void update(F32 dt) {
-		// I'll need to think up a decent animation system at some point
+		//TODO put a real animation system in
 		VKGeometry::set_skeletal_default_pose(testAnimPose, Resources::testAnimMesh);
 		testAnimPose[1].rotate_quat(QF32{}.from_axis_angle(AxisAngleF32{ V3F32_EAST, (sinf32(F32(StarChicken::totalTime) * 0.75F) + 1.0F) * 0.125F }));
 	}
@@ -409,8 +420,149 @@ struct Level {
 
 Level level;
 
+void serialize_level_obj_base(ByteBuf& buf, LevelObject& obj) {
+	buf.write_m4x3f32(obj.transform);
+	buf.write_u32(obj.flags);
+	buf.write_u32(U32(obj.type));
+}
+void deserialize_level_obj_base(LevelObject* obj, ByteBuf& buf) {
+	obj->transform = buf.read_m4x3f32();
+	obj->flags = buf.read_u32();
+	obj->type = LevelObjectType(buf.read_u32());
+}
+
+void save_level(StrA outputPath, Level& lvl) {
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		ArenaHashMap<StrA, U32> pathToPathId{ &arena };
+		for (StaticModel* obj : lvl.staticModels) {
+			pathToPathId.insert(obj->mesh->assetPath, 0);
+			pathToPathId.insert(obj->material->assetPath, 0);
+		}
+		for (SkeletalModel* obj : lvl.skeletalModels) {
+			pathToPathId.insert(obj->mesh->geometry.assetPath, 0);
+			pathToPathId.insert(obj->material->assetPath, 0);
+		}
+		ByteBuf buf;
+		buf.wrap(arena.stackBase + arena.stackPtr, GIGABYTE);
+		buf.write_be32('DUCK');
+		buf.write_u32(DRILL_LIB_MAKE_VERSION(1, 0, 0));
+
+		buf.write_u32(pathToPathId.size);
+		for (U32 i = 0, nextPathId = 0; i < pathToPathId.capacity; i++) {
+			if (pathToPathId.keys[i] != pathToPathId.emptyKey) {
+				pathToPathId.values[i] = nextPathId++;
+				buf.write_stra(pathToPathId.keys[i]);
+			}
+		}
+
+		buf.write_u32(lvl.staticModels.size);
+		for (StaticModel* obj : lvl.staticModels) {
+			serialize_level_obj_base(buf, obj->obj);
+			buf.write_u32(*pathToPathId.find(obj->mesh->assetPath));
+			buf.write_u32(*pathToPathId.find(obj->material->assetPath));
+		}
+
+		buf.write_u32(lvl.skeletalModels.size);
+		for (SkeletalModel* obj : lvl.skeletalModels) {
+			serialize_level_obj_base(buf, obj->obj);
+			buf.write_u32(*pathToPathId.find(obj->mesh->geometry.assetPath));
+			buf.write_u32(*pathToPathId.find(obj->material->assetPath));
+			buf.write_u32(obj->mesh->skeletonData->boneCount);
+			for (U32 i = 0; i < obj->mesh->skeletonData->boneCount; i++) {
+				buf.write_m4x3f32(obj->poseMatrices[i]);
+			}
+		}
+
+		buf.write_u32(lvl.lights.size);
+		for (Light* obj : lvl.lights) {
+			serialize_level_obj_base(buf, obj->obj);
+			buf.write_u32(U32(obj->type));
+			buf.write_v3f32(obj->direction);
+			buf.write_f32(obj->brightness);
+			buf.write_v3f32(obj->color);
+		}
+
+		arena.stackPtr += buf.offset;
+		write_data_to_file(outputPath, buf.bytes, buf.offset);
+	}
+}
+bool load_level(Level& lvl, StrA fileName) {
+	bool success = false;
+	MemoryArena& arena = get_scratch_arena();
+	MEMORY_ARENA_FRAME(arena) {
+		{
+			U32 byteCount;
+			Byte* data = read_full_file_to_arena<Byte>(&byteCount, arena, fileName);
+			if (!data) {
+				printf("Failed to load level: %"a, fileName);
+				goto failed;
+			}
+			ByteBuf buf;
+			buf.wrap(data, byteCount);
+			if (buf.read_be32() != 'DUCK') {
+				printf("Level magic did not match: %"a, fileName);
+				goto failed;
+			}
+			if (buf.read_u32() != LAST_KNOWN_DLF_VERSION) {
+				printf("Unsupported DLF version: %"a, fileName);
+				goto failed;
+			}
+
+			lvl.reset();
+
+			U32 assetPathCount = buf.read_u32();
+			StrA* assetPaths = arena.alloc<StrA>(assetPathCount);
+			for (U32 i = 0; i < assetPathCount; i++) {
+				assetPaths[i] = buf.read_stra();
+			}
+
+			U32 staticModelCount = buf.read_u32();
+			for (U32 i = 0; i < staticModelCount; i++) {
+				StaticModel* obj = get_static_model(Resources::testMesh, Resources::missingMaterial, M4x3F{});
+				deserialize_level_obj_base(&obj->obj, buf);
+				obj->mesh = Resources::assetPathToStaticMesh.find_or_default(assetPaths[buf.read_u32()], obj->mesh);
+				obj->material = Resources::assetPathToMaterial.find_or_default(assetPaths[buf.read_u32()], obj->material);
+				lvl.add_object(&obj->obj);
+			}
+
+			U32 skeletalModelCount = buf.read_u32();
+			for (U32 i = 0; i < skeletalModelCount; i++) {
+				SkeletalModel* obj = get_skeletal_model(Resources::testAnimMesh, Resources::missingMaterial, M4x3F{}, nullptr);
+				deserialize_level_obj_base(&obj->obj, buf);
+				obj->mesh = Resources::assetPathToSkeletalMesh.find_or_default(assetPaths[buf.read_u32()], obj->mesh);
+				obj->material = Resources::assetPathToMaterial.find_or_default(assetPaths[buf.read_u32()], obj->material);
+				U32 boneCount = buf.read_u32();
+				RUNTIME_ASSERT(boneCount == obj->mesh->skeletonData->boneCount, "Bone count did not match"a);
+				M4x3F* poseMatrices = globalArena.alloc<M4x3F>(boneCount);
+				for (U32 j = 0; j < boneCount; j++) {
+					poseMatrices[j] = buf.read_m4x3f32();
+				}
+				obj->poseMatrices = poseMatrices;
+				// I need to do a real animation system
+				testAnimPose = poseMatrices;
+				lvl.add_object(&obj->obj);
+			}
+
+			U32 lightCount = buf.read_u32();
+			for (U32 i = 0; i < lightCount; i++) {
+				Light* obj = get_light(LIGHT_TYPE_POINT, V3F{}, V3F{}, 0.0F, V3F{});
+				deserialize_level_obj_base(&obj->obj, buf);
+				obj->type = LightType(buf.read_u32());
+				obj->direction = buf.read_v3f32();
+				obj->brightness = buf.read_f32();
+				obj->color = buf.read_v3f32();
+				lvl.add_object(&obj->obj);
+			}
+			success = true;
+		}
+	failed:;
+	}
+	return success;
+}
+
 void build_test_level() {
-	level.init();
+	level.reset();
 	level.add_object(&get_static_model(Resources::testMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity())->obj);
 	level.add_object(&get_skeletal_model(Resources::testAnimMesh, Resources::basicWhiteMaterial, M4x3F{}.set_identity().translate(V3F{ 3.0F, 3.0F, 0.0F }), testAnimPose = VKGeometry::alloc_skeletal_default_pose(globalArena, Resources::testAnimMesh))->obj);
 	level.add_object(&get_static_model(Resources::cannonMesh, Resources::cannonMat, M4x3F{}.set_identity().translate(V3F{ 10.0F, 3.0F, 0.0F }))->obj);

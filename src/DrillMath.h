@@ -2049,6 +2049,7 @@ struct M4x3F32 {
 		x = pos.x;
 		y = pos.y;
 		z = pos.z;
+		return *this;
 	}
 
 	FINLINE M4x3F32& rotate_quat_global_pivot(QF32 q, V3F pivot) {
@@ -2069,6 +2070,7 @@ struct M4x3F32 {
 		x = pos.x + pivot.x;
 		y = pos.y + pivot.y;
 		z = pos.z + pivot.z;
+		return *this;
 	}
 
 	FINLINE M4x3F32& rotate_axis_angle(V3F32 axis, F32 angle) {

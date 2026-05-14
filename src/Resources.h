@@ -72,16 +72,16 @@ Material matMat;
 Material seagMat;
 
 void load_resources() {
-	testMesh = load_dmf_static_mesh("./resources/models/test_level.dmf"a);
-	testAnimMesh = load_dmf_skeletal_mesh("./resources/models/test_anim.dmf"a);
-	rightHandMesh = load_dmf_skeletal_mesh("./resources/models/right_hand.dmf"a);
-	rightHandCloseAnim = load_daf("./resources/models/right_hand_close.daf"a);
+	load_dmf_static_mesh(&testMesh, "./resources/models/test_level.dmf"a);
+	load_dmf_skeletal_mesh(&testAnimMesh, "./resources/models/test_anim.dmf"a);
+	load_dmf_skeletal_mesh(&rightHandMesh, "./resources/models/right_hand.dmf"a);
+	load_daf(&rightHandCloseAnim, "./resources/models/right_hand_close.daf"a);
 	ASSERT(rightHandCloseAnim.boneCount == rightHandMesh.skeletonData->boneCount, "rightHandCloseAnim animation bone count did not match rightHandMesh bone count");
-	leftHandMesh = load_dmf_skeletal_mesh("./resources/models/left_hand.dmf"a);
-	cannonMesh = load_dmf_static_mesh("resources/models/cannon.dmf"a);
-	matMesh = load_dmf_static_mesh("resources/models/mat.dmf"a);
-	testSphere = load_dmf_static_mesh("resources/models/test_sphere.dmf"a);
-	seag = load_dmf_static_mesh("resources/models/seagull.dmf"a);
+	load_dmf_skeletal_mesh(&leftHandMesh, "./resources/models/left_hand.dmf"a);
+	load_dmf_static_mesh(&cannonMesh, "resources/models/cannon.dmf"a);
+	load_dmf_static_mesh(&matMesh, "resources/models/mat.dmf"a);
+	load_dmf_static_mesh(&testSphere, "resources/models/test_sphere.dmf"a);
+	load_dmf_static_mesh(&seag, "resources/models/seagull.dmf"a);
 	
 	load_dtf(&trowbridgeReitzBRDFLut, "./resources/textures/trowbridge_reitz_lut.dtf"a);
 	load_dtf(&specularCubemap, "./resources/textures/city_specular.dtf"a);

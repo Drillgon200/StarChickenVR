@@ -1307,13 +1307,13 @@ struct ByteBuf {
 		return result;\
 	}
 	READ_FUNC(U8, read_u8, LOAD_LE8)
-		READ_FUNC(U16, read_u16, LOAD_LE16)
-		READ_FUNC(U32, read_u32, LOAD_LE32)
-		READ_FUNC(U64, read_u64, LOAD_LE64)
-		READ_FUNC(U8, read_be8, LOAD_BE8)
-		READ_FUNC(U16, read_be16, LOAD_BE16)
-		READ_FUNC(U32, read_be32, LOAD_BE32)
-		READ_FUNC(U64, read_be64, LOAD_BE64)
+	READ_FUNC(U16, read_u16, LOAD_LE16)
+	READ_FUNC(U32, read_u32, LOAD_LE32)
+	READ_FUNC(U64, read_u64, LOAD_LE64)
+	READ_FUNC(U8, read_be8, LOAD_BE8)
+	READ_FUNC(U16, read_be16, LOAD_BE16)
+	READ_FUNC(U32, read_be32, LOAD_BE32)
+	READ_FUNC(U64, read_be64, LOAD_BE64)
 #undef READ_FUNC
 		FINLINE F32 read_f32() {
 		F32 result;
@@ -1345,15 +1345,16 @@ struct ByteBuf {
 		return *this;\
 	}
 	WRITE_FUNC(U8, write_u8, STORE_LE8)
-		WRITE_FUNC(U16, write_u16, STORE_LE16)
-		WRITE_FUNC(U32, write_u32, STORE_LE32)
-		WRITE_FUNC(U64, write_u64, STORE_LE64)
-		WRITE_FUNC(U8, write_be8, STORE_BE8)
-		WRITE_FUNC(U16, write_be16, STORE_BE16)
-		WRITE_FUNC(U32, write_be32, STORE_BE32)
-		WRITE_FUNC(U64, write_be64, STORE_BE64)
+	WRITE_FUNC(U16, write_u16, STORE_LE16)
+	WRITE_FUNC(U32, write_u32, STORE_LE32)
+	WRITE_FUNC(U64, write_u64, STORE_LE64)
+	WRITE_FUNC(U8, write_be8, STORE_BE8)
+	WRITE_FUNC(U16, write_be16, STORE_BE16)
+	WRITE_FUNC(U32, write_be32, STORE_BE32)
+	WRITE_FUNC(U64, write_be64, STORE_BE64)
 #undef WRITE_FUNC
-		FINLINE ByteBuf& write_f32(F32 val) {
+
+	FINLINE ByteBuf& write_f32(F32 val) {
 		if (capacity - offset < sizeof(F32)) {
 			failed = true;
 		} else {
@@ -1411,6 +1412,78 @@ struct ByteBuf {
 			STORE_LE32(bytes + offset + 40, bitcast<U32>(m.m22));
 			STORE_LE32(bytes + offset + 44, bitcast<U32>(m.z));
 			offset += sizeof(M4x3F32);
+		}
+		return *this;
+	}
+
+	FINLINE V2F read_v2f32() {
+		if (capacity - offset < sizeof(V2F)) {
+			failed = true;
+			return V2F{};
+		} else {
+			F32 x = bitcast<F32>(LOAD_LE32(bytes + offset + 0));
+			F32 y = bitcast<F32>(LOAD_LE32(bytes + offset + 4));
+			offset += sizeof(V2F);
+			return V2F{ x, y };
+		}
+	}
+	FINLINE ByteBuf& write_v2f32(const V2F& v) {
+		if (capacity - offset < sizeof(V2F)) {
+			failed = true;
+		} else {
+			STORE_LE32(bytes + offset + 0, bitcast<U32>(v.x));
+			STORE_LE32(bytes + offset + 4, bitcast<U32>(v.y));
+			offset += sizeof(V2F);
+		}
+		return *this;
+	}
+
+	FINLINE V3F read_v3f32() {
+		if (capacity - offset < sizeof(V3F)) {
+			failed = true;
+			return V3F{};
+		} else {
+			F32 x = bitcast<F32>(LOAD_LE32(bytes + offset + 0));
+			F32 y = bitcast<F32>(LOAD_LE32(bytes + offset + 4));
+			F32 z = bitcast<F32>(LOAD_LE32(bytes + offset + 8));
+			offset += sizeof(V3F);
+			return V3F{ x, y, z };
+		}
+	}
+	FINLINE ByteBuf& write_v3f32(const V3F& v) {
+		if (capacity - offset < sizeof(V3F)) {
+			failed = true;
+		} else {
+			STORE_LE32(bytes + offset + 0, bitcast<U32>(v.x));
+			STORE_LE32(bytes + offset + 4, bitcast<U32>(v.y));
+			STORE_LE32(bytes + offset + 8, bitcast<U32>(v.z));
+			offset += sizeof(V3F);
+		}
+		return *this;
+	}
+
+	FINLINE V4F read_v4f32() {
+		if (capacity - offset < sizeof(V4F)) {
+			failed = true;
+			return V4F{};
+		} else {
+			F32 x = bitcast<F32>(LOAD_LE32(bytes + offset + 0));
+			F32 y = bitcast<F32>(LOAD_LE32(bytes + offset + 4));
+			F32 z = bitcast<F32>(LOAD_LE32(bytes + offset + 8));
+			F32 w = bitcast<F32>(LOAD_LE32(bytes + offset + 12));
+			offset += sizeof(V4F);
+			return V4F{ x, y, z, w };
+		}
+	}
+	FINLINE ByteBuf& write_v4f32(const V4F& v) {
+		if (capacity - offset < sizeof(V4F)) {
+			failed = true;
+		} else {
+			STORE_LE32(bytes + offset + 0, bitcast<U32>(v.x));
+			STORE_LE32(bytes + offset + 4, bitcast<U32>(v.y));
+			STORE_LE32(bytes + offset + 8, bitcast<U32>(v.z));
+			STORE_LE32(bytes + offset + 12, bitcast<U32>(v.w));
+			offset += sizeof(V4F);
 		}
 		return *this;
 	}

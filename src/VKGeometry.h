@@ -21,6 +21,7 @@ struct Skeleton {
 };
 
 struct StaticMesh {
+	StrA assetPath;
 	U32 indicesOffset;
 	U32 verticesOffset;
 	U32 indicesCount;
@@ -36,6 +37,7 @@ struct SkeletalMesh {
 };
 
 struct SkeletalAnimation {
+	StrA assetPath;
 	U32 keyframeCount;
 	U32 boneCount;
 	F32 framerate;

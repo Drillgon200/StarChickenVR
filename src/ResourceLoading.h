@@ -23,7 +23,7 @@ static constexpr U32 LAST_KNOWN_DMF_VERSION = DRILL_LIB_MAKE_VERSION(3, 0, 0);
 static constexpr U32 LAST_KNOWN_DAF_VERSION = DRILL_LIB_MAKE_VERSION(2, 0, 0);
 static constexpr U32 LAST_KNOWN_DTF_VERSION = DRILL_LIB_MAKE_VERSION(2, 1, 0);
 
-void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, U32* skinningDataOffsetOut) {
+void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, StrA assetPath, ByteBuf& modelFile, U32* skinningDataOffsetOut) {
 	U32 numVertices = modelFile.read_u32();
 	U32 numIndices = modelFile.read_u32();
 	U32 vertexDataSize = numVertices * VK::VERTEX_FORMAT_POS3F_TEX2F_NORM3F_TAN3F_SIZE;
@@ -75,7 +75,9 @@ void read_and_upload_dmf_mesh(VKGeometry::StaticMesh* mesh, ByteBuf& modelFile, 
 	modelFile.offset += indexDataSize;
 }
 
-VKGeometry::StaticMesh load_dmf_static_mesh(StrA modelFileName) {
+ArenaHashMap<StrA, VKGeometry::StaticMesh*> assetPathToStaticMesh;
+
+void load_dmf_static_mesh(VKGeometry::StaticMesh* mesh, StrA modelFileName) {
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 stackArenaFrame0 = stackArena.stackPtr;
 	U32 modelFileSize;
@@ -98,22 +100,25 @@ VKGeometry::StaticMesh load_dmf_static_mesh(StrA modelFileName) {
 		abort("No objects in file");
 	}
 
-	VKGeometry::StaticMesh mesh{};
+	*mesh = {};
 	DMFObjectID objectType = static_cast<DMFObjectID>(modelFile.read_u32());
 	if (objectType != DMF_OBJECT_ID_MESH) {
 		abort("Tried to load non static mesh from file to static mesh");
 	}
 	StrA meshName = modelFile.read_stra();
-	read_and_upload_dmf_mesh(&mesh, modelFile, nullptr);
+	read_and_upload_dmf_mesh(mesh, modelFileName, modelFile, nullptr);
 
 	if (modelFile.failed) {
 		abort("Reading model file failed");
 	}
+	mesh->assetPath = modelFileName;
+	assetPathToStaticMesh.insert(modelFileName, mesh);
 	stackArena.stackPtr = stackArenaFrame0;
-	return mesh;
 }
 
-VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(StrA modelFileName) {
+ArenaHashMap<StrA, VKGeometry::SkeletalMesh*> assetPathToSkeletalMesh;
+
+void load_dmf_skeletal_mesh(VKGeometry::SkeletalMesh* mesh, StrA modelFileName) {
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 stackArenaFrame0 = stackArena.stackPtr;
 	U32 modelFileSize;
@@ -136,7 +141,7 @@ VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(StrA modelFileName) {
 		abort("No objects in file");
 	}
 
-	VKGeometry::SkeletalMesh mesh{};
+	*mesh = {};
 	DMFObjectID objectType = static_cast<DMFObjectID>(modelFile.read_u32());
 	if (objectType != DMF_OBJECT_ID_ANIMATED_MESH) {
 		abort("Tried to load non animated mesh from file to skeletal mesh");
@@ -171,17 +176,20 @@ VKGeometry::SkeletalMesh load_dmf_skeletal_mesh(StrA modelFileName) {
 	if (numSubMeshes < 1) {
 		abort("Animated skeleton had no meshes to animate");
 	}
-	read_and_upload_dmf_mesh(&mesh.geometry, modelFile, &mesh.skinningDataOffset);
-	mesh.skeletonData = skeleton;
+	read_and_upload_dmf_mesh(&mesh->geometry, modelFileName, modelFile, &mesh->skinningDataOffset);
+	mesh->skeletonData = skeleton;
 
 	if (modelFile.failed) {
 		abort("Reading model file failed");
 	}
+	mesh->geometry.assetPath = modelFileName;
+	assetPathToSkeletalMesh.insert(modelFileName, mesh);
 	stackArena.stackPtr = stackArenaFrame0;
-	return mesh;
 }
 
-VKGeometry::SkeletalAnimation load_daf(StrA animationFileName) {
+ArenaHashMap<StrA, VKGeometry::SkeletalAnimation*> assetPathToSkeletalAnimation;
+
+void load_daf(VKGeometry::SkeletalAnimation* anim, StrA animationFileName) {
 	MemoryArena& stackArena = get_scratch_arena();
 	U64 stackArenaFrame0 = stackArena.stackPtr;
 	U32 modelFileSize;
@@ -199,23 +207,24 @@ VKGeometry::SkeletalAnimation load_daf(StrA animationFileName) {
 	if (modelFile.read_u32() < LAST_KNOWN_DAF_VERSION) {
 		abort("Animation file out of date");
 	}
-	VKGeometry::SkeletalAnimation anim;
-	anim.keyframeCount = modelFile.read_u32();
-	anim.boneCount = modelFile.read_u32();
-	anim.framerate = modelFile.read_f32();
-	anim.lengthMilliseconds = modelFile.read_u32();
-	anim.matrices = globalArena.alloc<M4x3F32>(anim.boneCount * anim.keyframeCount);
-	for (U32 frame = 0; frame < anim.keyframeCount; frame++) {
-		for (U32 bone = 0; bone < anim.boneCount; bone++) {
-			anim.matrices[frame * anim.boneCount + bone] = modelFile.read_m4x3f32();
+	*anim = {};
+	anim->keyframeCount = modelFile.read_u32();
+	anim->boneCount = modelFile.read_u32();
+	anim->framerate = modelFile.read_f32();
+	anim->lengthMilliseconds = modelFile.read_u32();
+	anim->matrices = globalArena.alloc<M4x3F32>(anim->boneCount * anim->keyframeCount);
+	for (U32 frame = 0; frame < anim->keyframeCount; frame++) {
+		for (U32 bone = 0; bone < anim->boneCount; bone++) {
+			anim->matrices[frame * anim->boneCount + bone] = modelFile.read_m4x3f32();
 		}
 	}
 
 	if (modelFile.failed) {
 		abort("Reading model file failed");
 	}
+	anim->assetPath = animationFileName;
+	assetPathToSkeletalAnimation.insert(animationFileName, anim);
 	stackArena.stackPtr = stackArenaFrame0;
-	return anim;
 }
 
 
@@ -240,6 +249,7 @@ enum TextureFlags : Flags16 {
 	TEXTURE_FLAG_DRLZ_COMPRESSED = 1 << 3
 };
 struct Texture {
+	StrA assetPath;
 	VkImage image;
 	VkImageView imageView;
 	Flags16 flags;
@@ -266,6 +276,7 @@ Texture simpleNormal;
 Texture simpleARM;
 
 ArenaArrayList<Texture*> allTextures;
+ArenaHashMap<StrA, Texture*> assetPathToTexture;
 ArenaArrayList<VkDeviceMemory> memoryUsed;
 const U64 blockAllocationSize = 32 * MEGABYTE;
 U64 currentMemoryBlockOffset = 0;
@@ -290,7 +301,7 @@ void alloc_texture_memory(VkDeviceMemory* memoryOut, VkDeviceSize* allocatedOffs
 	*allocatedOffsetOut = allocatedOffset;
 }
 
-void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipLevels, TextureFormat format, bool isSRGB, bool isCube) {
+void create_texture(Texture* result, StrA assetPath, void* data, U32 width, U32 height, U32 mipLevels, TextureFormat format, bool isSRGB, bool isCube) {
 	Texture& tex = *result;
 	tex = {};
 	VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -373,79 +384,98 @@ void create_texture(Texture* result, void* data, U32 width, U32 height, U32 mipL
 	write.pImageInfo = &imageInfo;
 	VK::vkUpdateDescriptorSets(VK::logicalDevice, 1, &write, 0, nullptr);
 
+	tex.assetPath = assetPath;
+	assetPathToTexture.insert(assetPath, result);
 	tex.index = currentTextureCount;
 	currentTextureCount++;
 }
 
-void load_png(Texture* result, StrA path, bool isSRGB = true, bool genMipmaps = false) {
+void load_png(Texture* result, StrA assetPath, bool isSRGB = true, bool genMipmaps = false) {
 	MemoryArena& stackArena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(stackArena) {
 		RGBA8* image;
 		U32 width, height;
-		PNG::read_image(stackArena, &image, &width, &height, path);
+		PNG::read_image(stackArena, &image, &width, &height, assetPath);
 		U32 mipCount = 1;
 		if (genMipmaps) {
 			image = MipGen::build_lame_mipmaps(stackArena, nullptr, &mipCount, image, width, height, isSRGB);
 		}
 		if (image) {
-			create_texture(result, image, width, height, mipCount, TEXTURE_FORMAT_RGBA_U8, isSRGB, false);
+			create_texture(result, assetPath, image, width, height, mipCount, TEXTURE_FORMAT_RGBA_U8, isSRGB, false);
 		} else {
 			*result = missing;
+			result->assetPath = assetPath;
+			assetPathToTexture.insert(assetPath, result);
 		}
 	}
 }
 
-void load_dtf(Texture* result, StrA path) {
+void load_dtf(Texture* result, StrA assetPath) {
 	MemoryArena& stackArena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(stackArena) {
 		stackArena.stackPtr = ALIGN_HIGH(stackArena.stackPtr, 16);
-		U32 textureFileSize;
-		Byte* textureData = read_full_file_to_arena<Byte>(&textureFileSize, stackArena, path);
-		if (textureData == nullptr) {
-			printf("Failed to read texture file: %\n"a, path);
-			abort("Failed to read texture file");
+		{
+			U32 textureFileSize;
+			Byte* textureData = read_full_file_to_arena<Byte>(&textureFileSize, stackArena, assetPath);
+			if (textureData == nullptr) {
+				printf("Failed to read texture file: %\n"a, assetPath);
+				goto failed;
+			}
+			ByteBuf textureFile{};
+			textureFile.wrap(textureData, textureFileSize);
+			if (textureFile.read_u32() != bswap32('DUCK')) {
+				printf("Texture file header did not match DUCK: %\n"a, assetPath);
+				goto failed;
+			}
+			if (textureFile.read_u32() < LAST_KNOWN_DTF_VERSION) {
+				printf("Texture file out of date: %\n"a, assetPath);
+				goto failed;
+			}
+			Flags16 flags = textureFile.read_u16();
+			TextureFormat textureFormat = TextureFormat(textureFile.read_u8());
+			U32 mipCount = textureFile.read_u8();
+			U16 width = textureFile.read_u16();
+			U16 height = textureFile.read_u16();
+			U32 dataSize = textureFile.read_u32();
+			textureFile.skip(12);
+			if (!textureFile.has_data_left(dataSize)) {
+				printf("Texture file did not have required data: %\n"a, assetPath);
+				goto failed;
+			}
+			Byte* pixelData = textureFile.bytes + textureFile.offset;
+			if (flags & TEXTURE_FLAG_DRLZ_COMPRESSED) {
+				pixelData = LZ::decode2(stackArena, &dataSize, pixelData, dataSize);
+			}
+			if (!pixelData) {
+				goto failed;
+			}
+			create_texture(result, assetPath, pixelData, width, height, mipCount, textureFormat, flags & TEXTURE_FLAG_SRGB, flags & TEXTURE_FLAG_CUBE);
+			result->flags = flags;
+			goto success;
 		}
-		ByteBuf textureFile{};
-		textureFile.wrap(textureData, textureFileSize);
-		if (textureFile.read_u32() != bswap32('DUCK')) {
-			abort("Texture file header did not match DUCK");
-		}
-		if (textureFile.read_u32() < LAST_KNOWN_DTF_VERSION) {
-			abort("Texture file out of date");
-		}
-		Flags16 flags = textureFile.read_u16();
-		TextureFormat textureFormat = TextureFormat(textureFile.read_u8());
-		U32 mipCount = textureFile.read_u8();
-		U16 width = textureFile.read_u16();
-		U16 height = textureFile.read_u16();
-		U32 dataSize = textureFile.read_u32();
-		textureFile.skip(12);
-		if (!textureFile.has_data_left(dataSize)) {
-			abort("Texture file did not have required data"a);
-		}
-		Byte* pixelData = textureFile.bytes + textureFile.offset;
-		if (flags & TEXTURE_FLAG_DRLZ_COMPRESSED) {
-			pixelData = LZ::decode2(stackArena, &dataSize, pixelData, dataSize);
-		}
-		create_texture(result, pixelData, width, height, mipCount, textureFormat, flags & TEXTURE_FLAG_SRGB, flags & TEXTURE_FLAG_CUBE);
-		result->flags = flags;
+	failed:;
+		*result = missing;
+		result->assetPath = assetPath;
+		assetPathToTexture.insert(assetPath, result);
+	success:;
 	}
 }
 
-void load_msdf(Texture* result, StrA path) {
+void load_msdf(Texture* result, StrA assetPath) {
 	MemoryArena& stackArena = get_scratch_arena();
 	MEMORY_ARENA_FRAME(stackArena) {
 		U32 fileSize = 0;
-		Byte* file = read_full_file_to_arena<Byte>(&fileSize, stackArena, path);
+		Byte* file = read_full_file_to_arena<Byte>(&fileSize, stackArena, assetPath);
 		if (file) {
 			U32 width = LOAD_LE32(file);
 			U32 height = LOAD_LE32(file + sizeof(U32));
-			create_texture(result, file + sizeof(U32) * 2, width, height, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+			create_texture(result, assetPath, file + sizeof(U32) * 2, width, height, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 			result->flags = TEXTURE_FLAG_MSDF;
 		} else {
 			*result = missing;
+			result->assetPath = assetPath;
+			assetPathToTexture.insert(assetPath, result);
 		}
-
 	}
 }
 
@@ -460,16 +490,16 @@ void init_textures() {
 			hardcodedTextureData[y * 16 + x] = x < 8 == y < 8 ? RGBA8{ 255, 0, 255, 255 } : RGBA8{ 0, 0, 0, 255 };
 		}
 	}
-	create_texture(&missing, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	create_texture(&missing, ":missing_BaseColor"a, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 	memset(hardcodedTextureData, 0xFF, sizeof(hardcodedTextureData));
-	create_texture(&simpleWhite, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	create_texture(&simpleWhite, ":simplewhite_BaseColor"a, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 	memset(hardcodedTextureData, 0x00, sizeof(hardcodedTextureData));
-	create_texture(&simpleBlack, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	create_texture(&simpleBlack, ":simpleblack_BaseColor"a, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 	//TODO good texture packing
 	for (U32 i = 0; i < ARRAY_COUNT(hardcodedTextureData); i++) { hardcodedTextureData[i] = RGBA8{ 127, 127, 255, 255 }; };
-	create_texture(&simpleNormal, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	create_texture(&simpleNormal, ":simplenormal_Normal"a, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 	for (U32 i = 0; i < ARRAY_COUNT(hardcodedTextureData); i++) { hardcodedTextureData[i] = RGBA8{ 255, 255, 0, 255 }; };
-	create_texture(&simpleARM, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
+	create_texture(&simpleARM, ":simplearm_ARM"a, hardcodedTextureData, 16, 16, 1, TEXTURE_FORMAT_RGBA_U8, false, false);
 }
 
 void cleanup_textures() {
@@ -485,6 +515,7 @@ void cleanup_textures() {
 }
 
 struct Material {
+	StrA assetPath;
 	Texture* baseColor;
 	Texture* normalMap;
 	Texture* armMap;
@@ -512,6 +543,7 @@ VK::DedicatedBuffer materialsBuffer;
 const U32 maxMaterialCount = 1024;
 U32 materialCount;
 ArenaArrayList<Material*> allMaterials;
+ArenaHashMap<StrA, Material*> assetPathToMaterial;
 
 Material missingMaterial;
 Material basicWhiteMaterial;
@@ -537,10 +569,12 @@ void create_material(Material* mat) {
 	U32 materialIdx = materialCount++;
 	mat->gpuIdx = materialIdx;
 	allMaterials.push_back(mat);
+	assetPathToMaterial.insert(mat->assetPath, mat);
 	material_updated(*mat);
 }
-void create_material(Material* mat, V4F color, F32 roughness, F32 metallic) {
+void create_material(Material* mat, StrA assetPath, V4F color, F32 roughness, F32 metallic) {
 	*mat = {};
+	mat->assetPath = assetPath;
 	mat->color = color;
 	mat->ambientOcclusion = 1.0F;
 	mat->roughness = roughness;
@@ -548,8 +582,9 @@ void create_material(Material* mat, V4F color, F32 roughness, F32 metallic) {
 	mat->ior = 1.3F;
 	return create_material(mat);
 }
-void create_material(Material* mat, Texture* baseColor, Texture* normalMap, Texture* armMap) {
+void create_material(Material* mat, StrA assetPath, Texture* baseColor, Texture* normalMap, Texture* armMap) {
 	*mat = {};
+	mat->assetPath = assetPath;
 	mat->baseColor = baseColor;
 	mat->normalMap = normalMap;
 	mat->armMap = armMap;
@@ -562,23 +597,17 @@ void create_material(Material* mat, Texture* baseColor, Texture* normalMap, Text
 }
 void create_material_from_pngs(Material* mat, StrA pathBase) {
 	Texture* textures = globalArena.alloc<Texture>(3);
-	MemoryArena& arena = get_scratch_arena();
-	MEMORY_ARENA_FRAME(arena) {
-		load_png(&textures[0], stracat(arena, pathBase, "_BaseColor.png"a), true);
-		load_png(&textures[1], stracat(arena, pathBase, "_Normal.png"a), false);
-		load_png(&textures[2], stracat(arena, pathBase, "_ARM.png"a), false);
-	}
-	create_material(mat, &textures[0], &textures[1], &textures[2]);
+	load_png(&textures[0], stracat(globalArena, pathBase, "_BaseColor.png"a), true);
+	load_png(&textures[1], stracat(globalArena, pathBase, "_Normal.png"a), false);
+	load_png(&textures[2], stracat(globalArena, pathBase, "_ARM.png"a), false);
+	create_material(mat, pathBase, &textures[0], &textures[1], &textures[2]);
 }
 void create_material_from_dtfs(Material* mat, StrA pathBase) {
 	Texture* textures = globalArena.alloc<Texture>(3);
-	MemoryArena& arena = get_scratch_arena();
-	MEMORY_ARENA_FRAME(arena) {
-		load_dtf(&textures[0], stracat(arena, pathBase, "_BaseColor.dtf"a));
-		load_dtf(&textures[1], stracat(arena, pathBase, "_Normal.dtf"a));
-		load_dtf(&textures[2], stracat(arena, pathBase, "_ARM.dtf"a));
-	}
-	create_material(mat, &textures[0], &textures[1], &textures[2]);
+	load_dtf(&textures[0], stracat(globalArena, pathBase, "_BaseColor.dtf"a));
+	load_dtf(&textures[1], stracat(globalArena, pathBase, "_Normal.dtf"a));
+	load_dtf(&textures[2], stracat(globalArena, pathBase, "_ARM.dtf"a));
+	create_material(mat, pathBase, &textures[0], &textures[1], &textures[2]);
 }
 
 VkDeviceAddress get_materials_gpu_address() {
@@ -597,8 +626,8 @@ void flush_materials_memory() {
 
 void init_materials(){
 	materialsBuffer.create(maxMaterialCount * sizeof(GPUMaterial), VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK::deviceHostMappedMemoryTypeIndex);
-	create_material(&missingMaterial, &missing, &simpleNormal, &simpleARM);
-	create_material(&basicWhiteMaterial, V4F{ 1.0F, 1.0F, 1.0F, 1.0F }, 1.0F, 0.0F);
+	create_material(&missingMaterial, ":mat_missing"a, &missing, &simpleNormal, &simpleARM);
+	create_material(&basicWhiteMaterial, ":mat_white"a, V4F{1.0F, 1.0F, 1.0F, 1.0F}, 1.0F, 0.0F);
 }
 
 void destroy_materials() {
